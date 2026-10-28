@@ -15,5 +15,6 @@ start = "node server/index.js"
 dev = "node --watch server/index.js"
 agent = "node scripts/agent.mjs"
 test = "node --test test/*.test.js"
-cf-dev = "npx wrangler dev --port 8787 --ip 127.0.0.1"
-deploy = "npx wrangler deploy"
+deps = "[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci"
+cf-dev = { cmd = "node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1", depends-on = ["deps"] }
+deploy = { cmd = "node_modules/.bin/wrangler deploy", depends-on = ["deps"] }

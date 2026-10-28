@@ -44,23 +44,23 @@ demo: _deps
 
 # Run the Cloudflare Worker locally (Durable Object + assets) on :8787
 cf-dev: _deps
-    npx wrangler dev --port 8787 --ip 127.0.0.1
+    node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1
 
 # Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
-deploy: _deps
-    npx wrangler deploy
+deploy *args: _deps
+    node_modules/.bin/wrangler deploy {{args}}
 
 # Log wrangler in to your Cloudflare account via the browser
 cf-login: _deps
-    npx wrangler login
+    node_modules/.bin/wrangler login
 
 # Set a Worker secret, e.g. `just cf-secret SESSION_SECRET`
 cf-secret name: _deps
-    npx wrangler secret put {{name}}
+    node_modules/.bin/wrangler secret put {{name}}
 
 # Stream live logs from the deployed Worker
 cf-tail: _deps
-    npx wrangler tail
+    node_modules/.bin/wrangler tail
 
 # Build the Docker image
 docker-build tag="agentoffice":
@@ -74,5 +74,7 @@ docker-run tag="agentoffice":
 clean:
     rm -rf node_modules data
 
+# (Re)install npm deps whenever package-lock.json is newer than node_modules,
+# so tools added later (like wrangler) arrive on the next recipe run.
 _deps:
-    @[ -d node_modules ] || npm ci
+    @[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci

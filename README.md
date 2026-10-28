@@ -94,7 +94,7 @@ metadata, and generates and stores its own session secret. On a custom
 domain, pin both:
 
 ```sh
-npx wrangler deploy --var PUBLIC_URL:https://office.example.com   # or add [vars] PUBLIC_URL to wrangler.toml
+just deploy --var PUBLIC_URL:https://office.example.com         # or add [vars] PUBLIC_URL to wrangler.toml
 just cf-secret SESSION_SECRET                                      # paste `openssl rand -hex 32`
 ```
 
