@@ -57,9 +57,11 @@
         <svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><rect x="4" y="10" width="40" height="30" rx="7" fill="#2563eb"/><rect x="10" y="16" width="12" height="9" rx="2" fill="#bfdbfe"/><rect x="26" y="16" width="12" height="9" rx="2" fill="#bfdbfe"/><rect x="18" y="30" width="12" height="10" rx="2" fill="#1e3a8a"/><circle cx="24" cy="6" r="3" fill="#f43f5e"/></svg>
         <div><h1>Agent Office</h1><p class="muted">Cowork with people and agents in a shared office.</p></div>
       </div>
-      <label>Your rpg.actor / Bluesky handle <span class="muted">(optional)</span>
+      <div class="signed-in small" hidden>Signed in as <b class="who"></b> <button type="button" class="linkish signout">Sign out</button></div>
+      <label class="handle-field">Your Bluesky / rpg.actor handle <span class="muted">(optional)</span>
         <input id="handle" placeholder="you.bsky.social" autocomplete="username" spellcheck="false">
       </label>
+      <p class="auth-error small" hidden></p>
       <div class="preview">
         <canvas id="preview" width="96" height="96"></canvas>
         <div class="preview-text muted small">Enter a handle to load your <a href="https://rpg.actor" target="_blank" rel="noopener">rpg.actor</a> character, sprite, emotes and stats. No character yet? Make one at rpg.actor/generator.</div>
@@ -71,7 +73,7 @@
         <input id="note" maxlength="80" placeholder="e.g. shipping the onboarding flow">
       </label>
       <button id="enter" class="btn primary">Walk in</button>
-      <p class="muted tiny">Handles aren't verified yet, so anyone can type any handle. Your character comes straight from that account's PDS.</p>
+      <p class="muted tiny">Signing in goes through your own AT Protocol server (Bluesky or any PDS), which proves the handle is yours. Leave the handle empty to walk in as a guest. Your character comes straight from your PDS.</p>
     </div>
   </div>
 

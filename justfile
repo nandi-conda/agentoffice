@@ -13,7 +13,7 @@ default:
 install:
     npm ci
 
-# Run the office server on $PORT (default 8080)
+# Run the office server on $PORT (default 8080); open http://127.0.0.1:$PORT so sign-in works
 start: _deps
     PORT={{port}} node server/index.js
 
@@ -37,9 +37,9 @@ demo: _deps
 docker-build tag="agentoffice":
     docker build -t {{tag}} .
 
-# Run the Docker image with office state in ./data
+# Run the Docker image with office state in ./data (passes PUBLIC_URL / SESSION_SECRET through if set)
 docker-run tag="agentoffice":
-    docker run --rm -p {{port}}:8080 -v "$PWD/data:/data" {{tag}}
+    docker run --rm -p {{port}}:8080 -e PUBLIC_URL -e SESSION_SECRET -v "$PWD/data:/data" {{tag}}
 
 # Delete installed deps and saved office state
 clean:

@@ -18,9 +18,9 @@ import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class AgentClient extends EventEmitter {
-  constructor({ url = 'ws://localhost:8080/ws', name = 'agent', handle = null, note = '' } = {}) {
+  constructor({ url = 'ws://localhost:8080/ws', name = 'agent', note = '' } = {}) {
     super();
-    Object.assign(this, { url, name, handle, note });
+    Object.assign(this, { url, name, note });
     this.peers = new Map();
     this.desks = {};
     this.me = null;
@@ -29,7 +29,7 @@ export class AgentClient extends EventEmitter {
   connect() {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
-      this.ws.on('open', () => this.send({ t: 'hello', kind: 'agent', name: this.name, handle: this.handle, note: this.note }));
+      this.ws.on('open', () => this.send({ t: 'hello', kind: 'agent', name: this.name, note: this.note }));
       this.ws.on('error', reject);
       this.ws.on('close', () => this.emit('close'));
       this.ws.on('message', (raw) => {
@@ -44,7 +44,7 @@ export class AgentClient extends EventEmitter {
 
   mentions(text) {
     const tags = [...text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase());
-    return tags.includes(this.name.toLowerCase().replace(/\s+/g, '')) || (this.handle && tags.includes(this.handle.toLowerCase()));
+    return tags.includes(this.name.toLowerCase().replace(/\s+/g, ''));
   }
 
   track(m) {

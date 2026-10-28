@@ -136,13 +136,20 @@ export async function loadActor(handleOrDid) {
   const id = handleOrDid.trim().replace(/^@/, '');
   const did = isDid(id) ? id : await resolveHandle(id);
   return cached(`a:${did}`, async () => {
-    const { pds, handle } = await resolveDid(did);
+    const { pds, handle: claimed } = await resolveDid(did);
+    // A DID document can claim any handle; only trust it if the handle
+    // resolves back to the same DID.
+    let handle = null;
+    if (claimed) {
+      try { if ((await resolveHandle(claimed)) === did) handle = claimed; } catch { /* unverified */ }
+    }
+    if (!handle && !isDid(id)) handle = id; // we just resolved this handle to the DID
     const [sprite, stats, profile] = await Promise.all([
       getRecord(pds, did, 'actor.rpg.sprite', 'self'),
       listRecords(pds, did, 'actor.rpg.stats'),
       getRecord(pds, did, 'app.bsky.actor.profile', 'self'),
     ]);
-    return { ...shapeActor({ did, handle: handle || id, sprite, stats, profile }), pds };
+    return { ...shapeActor({ did, handle, sprite, stats, profile }), pds };
   });
 }
 

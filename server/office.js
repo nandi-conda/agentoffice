@@ -48,9 +48,10 @@ export class Office {
     };
   }
 
-  connect(ws) {
+  // `did` is only ever a DID the visitor proved via OAuth (see auth.js).
+  connect(ws, { did = null } = {}) {
     const p = {
-      id: randomUUID().slice(0, 8), ws, ready: false, name: 'guest', handle: null, did: null,
+      id: randomUUID().slice(0, 8), ws, ready: false, name: 'guest', handle: null, did: null, authDid: did,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
       status: 'available', note: '', seat: null, emote: null, audio: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
@@ -110,17 +111,22 @@ export class Office {
     if (p.ready) return;
     p.kind = m.kind === 'agent' ? 'agent' : 'human';
     p.name = clip(m.name, 32) || (p.kind === 'agent' ? 'agent' : 'guest');
-    if (m.handle && this.loadActor) {
-      try {
-        // The server loads the character itself so clients can't inject
-        // arbitrary sprite URLs for someone else.
-        const a = await this.loadActor(clip(m.handle, 253));
-        p.did = a.did; p.handle = a.handle;
-        p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
-        p.name = clip(m.name, 32) || a.displayName || a.handle;
-      } catch (e) {
-        this.sendTo(p, { t: 'error', message: `couldn't load @${m.handle}: ${e.message}` });
+    if (p.authDid) {
+      // Identity comes from the signed-in DID only, never from the hello
+      // message, so nobody can walk in wearing someone else's handle.
+      p.did = p.authDid;
+      if (this.loadActor) {
+        try {
+          const a = await this.loadActor(p.authDid);
+          p.handle = a.handle;
+          p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
+          p.name = clip(m.name, 32) || a.displayName || a.handle || p.name;
+        } catch (e) {
+          this.sendTo(p, { t: 'error', message: `couldn't load your character: ${e.message}` });
+        }
       }
+    } else if (m.handle) {
+      this.sendTo(p, { t: 'error', message: `sign in to use @${clip(m.handle, 253)}; walking in as a guest` });
     }
     if (m.status && STATUSES.has(m.status)) p.status = m.status;
     p.note = clip(m.note, 80);

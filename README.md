@@ -16,7 +16,7 @@ needed and the env is created on first use.
 
 ```sh
 just install                   # npm ci
-just start                     # http://localhost:8080 (PORT=3000 just start to change)
+just start                     # http://127.0.0.1:8080 (PORT=3000 just start to change)
 just dev                       # same, restarting on file changes
 just agent                     # optional: a demo agent coworker joins
 just demo                      # server + demo agent together
@@ -25,11 +25,41 @@ just                           # list every recipe (docker-build, docker-run, cl
 ```
 
 `pixi run start`, `pixi run test` and friends also work if you don't have just. Recipes install npm deps on first run if `node_modules` is missing.
-Plain `npm install && npm start` still works with your own Node 20+.
+Plain `npm install && npm start` still works with your own Node 22+.
 
-The only runtime dependency is `ws`. Office state (desks,
+Runtime dependencies are `ws` and the AT Protocol OAuth client (`@atproto/oauth-client` + friends). Office state (desks,
 notes, whiteboard, high scores) is saved to `data/state.json`; set `DATA_DIR`
 to move it. There's also a `Dockerfile`.
+
+## Signing in (AT Protocol OAuth)
+
+Type your handle and press **Sign in**: you're sent to your own PDS (Bluesky
+or any other) to approve, and come back signed in. The server only trusts
+DIDs that finished that flow; a handle sent any other way is ignored, so
+nobody can walk in as someone else. Leave the handle empty to walk in as a
+guest. We only ask for the `atproto` scope (identity, no posting) and revoke
+the tokens right after sign-in; what's kept is a signed, HttpOnly cookie
+holding your DID for 30 days.
+
+Configuration (all optional):
+
+| env var | what it does |
+| --- | --- |
+| `PUBLIC_URL` | Public origin when deployed, e.g. `https://office.example.com`. The server then serves its OAuth client metadata at `$PUBLIC_URL/oauth/client-metadata.json` and uses `$PUBLIC_URL/oauth/callback`. Must be HTTPS and reachable by PDSes. Unset means local dev. |
+| `SESSION_SECRET` | Key that signs the session cookie (any long random string, e.g. `openssl rand -hex 32`). Unset: one is generated and kept in `$DATA_DIR/session-secret`. Set it if you run more than one instance or have no persistent `DATA_DIR`. |
+
+Local dev needs nothing: without `PUBLIC_URL` the server uses an AT Protocol
+*loopback client* (`client_id` `http://localhost?...`), which PDSes accept
+without hosted metadata. The redirect must go to `127.0.0.1`, so open
+**http://127.0.0.1:8080** (visiting `localhost:8080` works too; sign-in hops
+you over).
+
+`server/auth.js` only uses `fetch`, `Request`/`Response` and Web Crypto, so it
+runs unchanged on Cloudflare Workers: call `createAuth({ publicUrl, secret,
+stateStore })` and route `/oauth/*` to `auth.handle(request)`. On Workers pass
+a KV or Durable Object backed `stateStore` (async `get`/`set`/`del` of JSON),
+since login and callback can hit different isolates. Handles are resolved
+over DNS-over-HTTPS (Cloudflare) plus `/.well-known/atproto-did`.
 
 ## What's in the office
 
@@ -64,7 +94,7 @@ when you leave.
 
 ## rpg.actor characters
 
-Enter your handle on the way in. The server resolves it (DNS / `.well-known`
+Sign in with your handle on the way in. The server resolves your DID (DNS / `.well-known`
 / public resolver → DID document → PDS) and reads, from your own PDS only:
 
 - `actor.rpg.sprite/self`: your sprite sheet (3×4 grid of 48px frames: rows
@@ -79,8 +109,9 @@ Blobs are proxied through `/api/blob` (cached) so the browser can read
 pixels for tracing. People without an rpg.actor sprite get a generated
 character in the same sheet format.
 
-Handles aren't verified yet (there's no OAuth sign-in), so anyone can type
-any handle. Adding AT Protocol OAuth is the obvious next step.
+A handle is only shown if it resolves back to the same DID (bidirectional
+check), so a DID document can't claim someone else's handle. The handle box
+still previews anyone's character before you sign in, via `/api/actor`.
 
 ## The art style
 
@@ -119,7 +150,9 @@ everyone's notes), `come here`, `coffee` and `focus`.
 
 ## Protocol
 
-JSON over a WebSocket at `/ws`. Client → server: `hello`, `move`, `chat`,
+JSON over a WebSocket at `/ws`. Identity comes from the session cookie on
+the upgrade request, not from `hello`; agents connect without one and appear
+under their chosen name. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
 `wave`, `audio`, `rtc`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
@@ -137,6 +170,7 @@ public/js/sprites.js    rpg.actor sheet loading + generated fallback characters
 public/js/rtc.js        proximity voice (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking
 server/atproto.js       handle/DID resolution and rpg.actor record reads
+server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the hub: presence, chat routing, desks, pomodoro, etc.
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
 ```

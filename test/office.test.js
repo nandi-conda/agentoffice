@@ -14,9 +14,9 @@ class FakeWs extends EventEmitter {
 
 const tick = () => new Promise((r) => setImmediate(r));
 
-async function join(office, name, extra = {}) {
+async function join(office, name, extra = {}, auth = {}) {
   const ws = new FakeWs();
-  office.connect(ws);
+  office.connect(ws, auth);
   ws.msg({ t: 'hello', name, ...extra });
   await tick();
   const w = ws.last('welcome');
@@ -112,11 +112,30 @@ test('whiteboard strokes are clamped and shared', async () => {
   assert.equal(s.size, 24);
 });
 
-test('handles load the character server-side', async () => {
-  const o = new Office({}, { loadActor: async (h) => ({ did: 'did:plc:abc', handle: h, displayName: 'Ada L', sprite: { sheet: '/api/blob?x' }, stats: [] }) });
-  const a = await join(o, '', { handle: 'ada.test' });
+test('signed-in DIDs load the character server-side', async () => {
+  const o = new Office({}, { loadActor: async (id) => ({ did: id, handle: 'ada.test', displayName: 'Ada L', sprite: { sheet: '/api/blob?x' }, stats: [] }) });
+  const a = await join(o, '', {}, { did: 'did:plc:abc' });
   const you = a.ws.last('welcome').you;
   assert.equal(you.did, 'did:plc:abc');
+  assert.equal(you.handle, 'ada.test');
   assert.equal(you.name, 'Ada L');
   assert.equal(you.actor.sprite.sheet, '/api/blob?x');
+});
+
+test('an unverified handle in hello is ignored', async () => {
+  const calls = [];
+  const o = new Office({}, { loadActor: async (id) => { calls.push(id); return { did: 'did:plc:victim', handle: id, sprite: null, stats: [] }; } });
+  const a = await join(o, 'mallory', { handle: 'victim.test', did: 'did:plc:victim' });
+  const you = a.ws.last('welcome').you;
+  assert.equal(calls.length, 0);
+  assert.equal(you.did, null);
+  assert.equal(you.handle, null);
+  assert.match(a.ws.last('error').message, /sign in/);
+});
+
+test('the signed-in DID wins over whatever hello claims', async () => {
+  const o = new Office({}, { loadActor: async (id) => ({ did: id, handle: 'ada.test', sprite: null, stats: [] }) });
+  const a = await join(o, 'ada', { handle: 'victim.test' }, { did: 'did:plc:abc' });
+  assert.equal(a.ws.last('welcome').you.did, 'did:plc:abc');
+  assert.equal(a.ws.last('welcome').you.handle, 'ada.test');
 });

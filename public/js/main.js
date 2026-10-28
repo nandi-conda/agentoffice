@@ -149,13 +149,54 @@ previewFor(handleIn.value.trim().replace(/^@/, ''));
 $('#enter').addEventListener('click', enter);
 for (const el of [handleIn, nameIn, noteIn]) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') enter(); });
 
+// Who the server says we are. Only a finished AT Protocol sign-in sets this;
+// the handle box on its own just previews a character.
+let account = null;
+const cleanHandle = () => handleIn.value.trim().replace(/^@/, '');
+function updateEnter() {
+  const h = cleanHandle();
+  $('#enter').textContent = account ? 'Walk in' : h ? `Sign in as @${h}` : 'Walk in as a guest';
+}
+handleIn.addEventListener('input', updateEnter);
+
+async function loadAccount() {
+  const params = new URLSearchParams(location.search);
+  const err = params.get('auth_error');
+  if (err) { const p = $('.auth-error'); p.textContent = err; p.hidden = false; }
+  if (params.has('auth_error') || params.has('signedin')) history.replaceState(null, '', location.pathname + location.hash);
+  try {
+    const r = await fetch('/api/me');
+    const a = await r.json();
+    account = a.did ? a : null;
+  } catch { account = null; }
+  $('.signed-in').hidden = !account;
+  $('.handle-field').hidden = !!account;
+  if (account) {
+    $('.who').textContent = account.handle ? `@${account.handle}` : account.did;
+    if (account.handle) { handleIn.value = account.handle; previewFor(account.handle); }
+    if (params.has('signedin')) enter();
+  }
+  updateEnter();
+}
+$('.signout').addEventListener('click', async () => {
+  await fetch('/oauth/logout', { method: 'POST' }).catch(() => {});
+  account = null;
+  store.set('handle', '');
+  location.reload();
+});
+loadAccount();
+
 function enter() {
-  const handle = handleIn.value.trim().replace(/^@/, '');
-  const name = nameIn.value.trim() || loginActor?.displayName || handle || `guest-${Math.random().toString(36).slice(2, 6)}`;
+  const handle = cleanHandle();
   store.set('handle', handle); store.set('name', nameIn.value.trim()); store.set('note', noteIn.value.trim());
+  if (handle && !account) {
+    location.href = `/oauth/login?handle=${encodeURIComponent(handle)}`;
+    return;
+  }
+  const name = nameIn.value.trim() || account?.displayName || loginActor?.displayName || account?.handle || `guest-${Math.random().toString(36).slice(2, 6)}`;
   $('#login').hidden = true;
   $('#hud').hidden = false;
-  start({ name, handle: handle || null, note: noteIn.value.trim() });
+  start({ name, note: noteIn.value.trim() });
 }
 
 // ---- networking -------------------------------------------------------------
