@@ -237,10 +237,10 @@ function onMessage(m) {
       if (!welcomeShown) { welcomeShown = true; sys(`Welcome in, ${me.name}. Walk with WASD or click the floor. Press ? for help.`); }
       break;
     }
-    case 'join': addPeer(m.peer).then(() => m.peer.kind !== 'freeq' && sys(`${m.peer.name} walked in`)); break;
+    case 'join': addPeer(m.peer).then(() => m.peer.kind !== 'freeq' && presence(m.peer.name, 'in')); break;
     case 'leave': {
       const p = peers.get(m.id);
-      if (p) { if (p.kind !== 'freeq') sys(`${p.name} left`); peers.delete(m.id); if (follow === m.id) follow = null; refreshPeople(); }
+      if (p) { if (p.kind !== 'freeq') presence(p.name, 'out'); peers.delete(m.id); if (follow === m.id) follow = null; refreshPeople(); }
       break;
     }
     case 'move': {
@@ -348,13 +348,73 @@ function logChat(m) {
 function sys(text) {
   const d = document.createElement('div');
   d.className = 'm sys'; d.textContent = text;
-  pushLog(d);
+  pushLog(d, true);
 }
-function pushLog(d) {
+// Comings and goings fold into one line until someone says something, so a busy
+// doorway doesn't push the conversation out of view.
+let presenceLine = null;
+function presence(name, how) {
+  if (!presenceLine || presenceLine.el !== log.lastElementChild) {
+    const el = document.createElement('div');
+    el.className = 'm sys presence';
+    presenceLine = { el, names: new Map() };
+    pushLog(el, true);
+  }
+  const { el, names } = presenceLine;
+  const was = names.get(name);
+  names.set(name, !was ? how : was === how ? how : 'passed');
+  const group = (state) => [...names].filter(([, v]) => v === state).map(([n]) => n);
+  const list = (ns) => (ns.length > 3 ? `${ns.slice(0, 3).join(', ')} +${ns.length - 3}` : ns.join(', '));
+  const ins = group('in'), outs = group('out'), passed = group('passed');
+  el.textContent = [
+    ins.length && `${list(ins)} walked in`,
+    outs.length && `${list(outs)} left`,
+    passed.length && `${passed.length === 1 ? passed[0] : `${passed.length} people`} came and went`,
+  ].filter(Boolean).join(' · ');
+  el.title = [ins.length && `In: ${ins.join(', ')}`, outs.length && `Left: ${outs.join(', ')}`, passed.length && `Came and went: ${passed.join(', ')}`].filter(Boolean).join('\n');
+  stickToBottom();
+}
+const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+const stickToBottom = () => { log.scrollTop = log.scrollHeight; };
+function pushLog(d, quiet = false) {
+  const stick = nearBottom();
   log.append(d);
   while (log.children.length > 120) log.firstChild.remove();
-  log.scrollTop = log.scrollHeight;
+  if (stick || !quiet) stickToBottom();
+  if (!quiet && chatCollapsed) setUnread(unread + 1);
 }
+
+// The chat panel collapses to its input row and resizes from its top edge.
+const chatEl = $('.chat'), chatHead = $('.chat-head'), unreadEl = $('.chat-head .unread');
+let chatCollapsed = store.get('chatCollapsed', false), unread = 0;
+function setUnread(n) { unread = n; unreadEl.textContent = n > 99 ? '99+' : n; unreadEl.hidden = !n; }
+function setChatCollapsed(c) {
+  chatCollapsed = c; store.set('chatCollapsed', c);
+  chatEl.classList.toggle('collapsed', c);
+  chatHead.setAttribute('aria-expanded', String(!c));
+  if (!c) { setUnread(0); stickToBottom(); }
+}
+setChatCollapsed(chatCollapsed);
+chatHead.addEventListener('click', () => setChatCollapsed(!chatCollapsed));
+const chatH = store.get('chatHeight', 0);
+if (chatH) chatEl.style.setProperty('--chat-h', `${chatH}px`);
+$('.chat-grip').addEventListener('pointerdown', (e) => {
+  if (chatCollapsed) return;
+  e.preventDefault();
+  const grip = e.currentTarget, startY = e.clientY, startH = log.getBoundingClientRect().height;
+  grip.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    const h = Math.max(80, Math.min(innerHeight - 220, startH + startY - ev.clientY));
+    chatEl.style.setProperty('--chat-h', `${Math.round(h)}px`);
+    stickToBottom();
+  };
+  const up = () => {
+    grip.removeEventListener('pointermove', move);
+    store.set('chatHeight', Math.round(log.getBoundingClientRect().height));
+  };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up, { once: true });
+});
 const linkify = (s) => s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 
 const chatIn = $('.chat-input');
@@ -367,6 +427,27 @@ $('.chat-form').addEventListener('submit', (e) => {
   chatIn.blur();
 });
 chatIn.addEventListener('keydown', (e) => { if (e.key === 'Escape') chatIn.blur(); });
+chatIn.addEventListener('focus', () => { if (chatCollapsed) setChatCollapsed(false); });
+
+// ---- popovers (status, emotes) -----------------------------------------------
+let openPop = null;
+function togglePop(btn) {
+  const pop = document.getElementById(btn.dataset.pop);
+  const show = pop.hidden;
+  closePop();
+  if (!show) return;
+  pop.hidden = false; btn.setAttribute('aria-expanded', 'true');
+  openPop = { pop, btn };
+  pop.querySelector('input, select, button')?.focus();
+}
+function closePop() {
+  if (!openPop) return;
+  openPop.pop.hidden = true; openPop.btn.setAttribute('aria-expanded', 'false');
+  openPop = null;
+}
+document.querySelectorAll('[data-pop]').forEach((b) => b.addEventListener('click', () => togglePop(b)));
+addEventListener('pointerdown', (e) => { if (openPop && !e.target.closest('.pop-wrap')) closePop(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && openPop) { const { btn } = openPop; closePop(); btn.focus(); btn.blur(); } }, true);
 
 // ---- toolbar ----------------------------------------------------------------
 const statusSel = $('.status-select');
@@ -376,10 +457,11 @@ const noteBox = $('.note-input');
 noteBox.addEventListener('change', () => {
   net.send({ t: 'status', note: noteBox.value });
   store.set('note', noteBox.value);
+  if (me) { me.note = noteBox.value; setStatusUI(); }
   const mine = Object.entries(desks).find(([, v]) => v.owner === ownerKey());
   if (mine) net.send({ t: 'desk', action: 'goal', desk: mine[0], goal: noteBox.value });
 });
-noteBox.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') noteBox.blur(); });
+noteBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { noteBox.blur(); closePop(); } });
 
 function setStatus(s) {
   if (!me || me.status === s) return;
@@ -392,6 +474,10 @@ function setStatusUI() {
   statusSel.value = me.status;
   statusSel.style.color = statusColor(me.status);
   if (document.activeElement !== noteBox) noteBox.value = me.note || '';
+  const btn = $('.status-btn');
+  btn.querySelector('.dot').style.background = statusColor(me.status);
+  btn.querySelector('.status-text').textContent = me.note || STATUS[me.status]?.label || me.status;
+  btn.title = `${STATUS[me.status]?.label || me.status}${me.note ? ` · ${me.note}` : ''}. Click to change.`;
 }
 
 const micBtn = $('.mic');
@@ -440,8 +526,8 @@ function buildEmotes() {
   // rpg.actor emotes first (they animate the character), then a wave.
   emoteList = own.length ? ['wave', ...own].slice(0, 9) : FALLBACK_EMOTES;
   const box = $('.emotes');
-  box.innerHTML = emoteList.map((e, i) => `<button title="${e} (${i + 1})" data-e="${e}">${EMOJI[e] || '✨'}</button>`).join('');
-  box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => emote(b.dataset.e)));
+  box.innerHTML = emoteList.map((e, i) => `<button title="${e} (${i + 1})" data-e="${e}">${EMOJI[e] || '✨'}<kbd>${i + 1}</kbd></button>`).join('');
+  box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { emote(b.dataset.e); closePop(); }));
 }
 let emoteTimer = null;
 function emote(name) {
@@ -476,6 +562,14 @@ function openHelp() {
 }
 
 // ---- people list & minimap ---------------------------------------------------
+const peopleHead = $('.people-head');
+function setPeopleCollapsed(c) {
+  $('.people').classList.toggle('collapsed', c);
+  peopleHead.setAttribute('aria-expanded', String(!c));
+  store.set('peopleCollapsed', c);
+}
+setPeopleCollapsed(store.get('peopleCollapsed', innerWidth <= 760));
+peopleHead.addEventListener('click', () => setPeopleCollapsed(!$('.people').classList.contains('collapsed')));
 let peopleTimer = null;
 function refreshPeople() {
   clearTimeout(peopleTimer);

@@ -24,7 +24,14 @@ export function wrapText(ctx, text, maxW) {
   const words = text.split(/\s+/);
   const lines = [];
   let cur = '';
-  for (const w of words) {
+  for (let w of words) {
+    // A word wider than the line (a long URL) is broken across lines.
+    while (ctx.measureText(w).width > maxW && w.length > 1) {
+      if (cur) { lines.push(cur); cur = ''; }
+      let n = w.length - 1;
+      while (n > 1 && ctx.measureText(w.slice(0, n)).width > maxW) n--;
+      lines.push(w.slice(0, n)); w = w.slice(n);
+    }
     const next = cur ? `${cur} ${w}` : w;
     if (ctx.measureText(next).width > maxW && cur) { lines.push(cur); cur = w; }
     else cur = next;
