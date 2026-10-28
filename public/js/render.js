@@ -30,7 +30,8 @@ export function createRenderer(canvas) {
   const view = { T: 32, k: 1, ox: 0, oy: 0 };
 
   function resize() {
-    dpr = window.devicePixelRatio || 1;
+    // Phones at 3x spend most of their battery on fill; 2x looks the same at arm's length.
+    dpr = Math.min(window.devicePixelRatio || 1, matchMedia('(pointer: coarse)').matches ? 2 : 4);
     vw = canvas.clientWidth; vh = canvas.clientHeight;
     canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
   }
@@ -38,7 +39,7 @@ export function createRenderer(canvas) {
   // Zoom steps keep zoom*dpr whole so sprites scale by an integer factor.
   function zoomLevels() {
     const out = [];
-    for (let k = 1; k <= 8; k++) { const z = k / dpr; if (z >= 0.7 && z <= 3.2) out.push(k); }
+    for (let k = 1; k <= 8; k++) { const z = k / dpr; if (z >= 0.5 && z <= 3.2) out.push(k); }
     return out.length ? out : [1];
   }
 
@@ -47,6 +48,10 @@ export function createRenderer(canvas) {
   function setCamera(cam, k) {
     view.k = k;
     view.T = 32 * (k / dpr);
+    // Stop the camera a little past the outer walls, and centre the office on
+    // any axis where it fits on screen whole, so small screens aren't half void.
+    const clamp = (c, half, size) => (size + 3 <= half * 2 ? size / 2 : Math.max(half - 1.5, Math.min(size + 1.5 - half, c)));
+    cam = { x: clamp(cam.x, vw / 2 / view.T, W), y: clamp(cam.y, vh / 2 / view.T, H) };
     // Snap the camera offset to device pixels to avoid shimmering.
     view.ox = Math.round((vw / 2 - cam.x * view.T) * dpr) / dpr;
     view.oy = Math.round((vh / 2 - cam.y * view.T) * dpr) / dpr;
@@ -843,8 +848,8 @@ export function createRenderer(canvas) {
     return z;
   }
 
-  function hitPeer(sx, sy, peers) {
-    let best = null, bd = 28;
+  function hitPeer(sx, sy, peers, radius = 28) {
+    let best = null, bd = radius;
     for (const p of peers) {
       const s = toScreen(p.rx, p.ry);
       const d = Math.hypot(sx - s.x, sy - (s.y - S(0.6)));

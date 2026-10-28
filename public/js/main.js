@@ -34,6 +34,10 @@ let k = null;
 const hourParam = new URLSearchParams(location.search).get('hour');
 const clockNow = () => { const d = new Date(); if (hourParam !== null) d.setHours(+hourParam, 0, 0, 0); return d; };
 
+// Phones and tablets: touch controls, a lighter frame rate when idle, smaller panels.
+const coarse = matchMedia('(pointer: coarse)').matches;
+const phone = () => Math.min(innerWidth, innerHeight) <= 500;
+
 const canvas = $('#world');
 const R = createRenderer(canvas);
 R.resize();
@@ -41,7 +45,10 @@ addEventListener('resize', () => { R.resize(); clampZoom(); });
 
 function clampZoom() {
   const levels = R.zoomLevels();
-  if (k === null || !levels.includes(k)) k = levels[Math.min(levels.length - 1, Math.max(0, Math.floor(levels.length / 2)))];
+  if (k !== null && levels.includes(k)) return;
+  // Phones start at 1:1 so a room fits on screen; bigger screens start mid-way.
+  k = phone() ? levels.reduce((a, b) => (Math.abs(Math.log(b / R.dpr)) < Math.abs(Math.log(a / R.dpr)) ? b : a))
+    : levels[Math.min(levels.length - 1, Math.max(0, Math.floor(levels.length / 2)))];
 }
 clampZoom();
 
@@ -247,7 +254,7 @@ function onMessage(m) {
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
       refreshPeople();
-      if (!welcomeShown) { welcomeShown = true; sys(`Welcome in, ${me.name}. Walk with WASD or click the floor. Press ? for help.`); }
+      if (!welcomeShown) { welcomeShown = true; sys(coarse ? `Welcome in, ${me.name}. Tap the floor to walk, or drag anywhere to steer. Pinch to zoom, tap ? for help.` : `Welcome in, ${me.name}. Walk with WASD or click the floor. Press ? for help.`); }
       break;
     }
     case 'join': addPeer(m.peer).then(() => m.peer.kind !== 'freeq' && presence(m.peer.name, 'in')); break;
@@ -401,7 +408,7 @@ function pushLog(d, quiet = false) {
 
 // The chat panel collapses to its input row and resizes from its top edge.
 const chatEl = $('.chat'), chatHead = $('.chat-head'), unreadEl = $('.chat-head .unread');
-let chatCollapsed = store.get('chatCollapsed', false), unread = 0;
+let chatCollapsed = store.get('chatCollapsed', phone()), unread = 0;
 function setUnread(n) { unread = n; unreadEl.textContent = n > 99 ? '99+' : n; unreadEl.hidden = !n; }
 function setChatCollapsed(c) {
   chatCollapsed = c; store.set('chatCollapsed', c);
@@ -443,6 +450,21 @@ $('.chat-form').addEventListener('submit', (e) => {
 });
 chatIn.addEventListener('keydown', (e) => { if (e.key === 'Escape') chatIn.blur(); });
 chatIn.addEventListener('focus', () => { if (chatCollapsed) setChatCollapsed(false); });
+
+// On-screen keyboards shrink the visual viewport but not the layout one, so
+// lift everything pinned to the bottom of the HUD by the part the keyboard covers.
+const vv = window.visualViewport;
+if (vv) {
+  const fit = () => {
+    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty('--kb', `${kb}px`);
+    document.body.classList.toggle('kb-open', kb > 80);
+    if (kb > 80) stickToBottom();
+  };
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+}
+chatIn.addEventListener('blur', () => { if (vv?.offsetTop) scrollTo(0, 0); });
 
 // ---- popovers (status, emotes) -----------------------------------------------
 let openPop = null;
@@ -532,6 +554,11 @@ function zoom(d) {
   const i = Math.max(0, Math.min(levels.length - 1, levels.indexOf(k) + d));
   k = levels[i];
 }
+// Pinch: snap to the zoom step nearest the pinched scale (steps keep sprites crisp).
+function pinchTo(k0, ratio) {
+  const want = Math.log(k0 * ratio);
+  k = R.zoomLevels().reduce((a, b) => (Math.abs(Math.log(b) - want) < Math.abs(Math.log(a) - want) ? b : a));
+}
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoom(e.deltaY < 0 ? 1 : -1); }, { passive: false });
 
 const FALLBACK_EMOTES = ['wave', 'happy', 'love', 'clap', 'idea', 'party', 'thumbs', 'coffee', 'focus'];
@@ -557,6 +584,12 @@ function openHelp() {
   modal.open(`
     <h2>How the office works</h2>
     <div class="help-grid">
+      ${coarse ? `<kbd>Tap</kbd><span>Walk there. Tap a person for their profile, or furniture to use it</span>
+      <kbd>Drag</kbd><span>Steer with a joystick that appears under your finger</span>
+      <kbd>Pinch</kbd><span>Zoom in and out</span>
+    </div>
+    <details style="margin-top:12px"><summary class="small">With a keyboard</summary>
+    <div class="help-grid" style="margin-top:8px">` : ''}
       <kbd>WASD</kbd><span>Walk (or click anywhere on the floor)</span>
       <kbd>E</kbd><span>Interact: sit, claim a desk, whiteboard, coffee, pomodoro, arcade</span>
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
@@ -566,7 +599,7 @@ function openHelp() {
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>V</kbd><span>Toggle traced-vector characters / original pixels</span>
       <kbd>+ −</kbd><span>Zoom</span>
-    </div>
+    </div>${coarse ? '</details>' : ''}
     <h3 style="margin-top:16px">Who hears you</h3>
     <p class="small">In open areas, anyone within a few steps. In the <b>Boardroom</b>, <b>Huddle Room</b> and <b>Phone Booths</b>, only people in the same room. The <b>Deep Work Den</b> is text-only and runs a shared pomodoro. Start a message with <code>/shout</code> to reach the whole office, or <code>@name</code> to tap someone anywhere.</p>
     <h3>Meeting rooms</h3>
@@ -583,7 +616,7 @@ function setPeopleCollapsed(c) {
   peopleHead.setAttribute('aria-expanded', String(!c));
   store.set('peopleCollapsed', c);
 }
-setPeopleCollapsed(store.get('peopleCollapsed', innerWidth <= 760));
+setPeopleCollapsed(store.get('peopleCollapsed', innerWidth <= 760 || phone()));
 peopleHead.addEventListener('click', () => setPeopleCollapsed(!$('.people').classList.contains('collapsed')));
 let peopleTimer = null;
 function refreshPeople() {
@@ -608,7 +641,7 @@ function setChannelsCollapsed(c) {
   channelsHead.setAttribute('aria-expanded', String(!c));
   store.set('channelsCollapsed', c);
 }
-setChannelsCollapsed(store.get('channelsCollapsed', false));
+setChannelsCollapsed(store.get('channelsCollapsed', phone()));
 channelsHead.addEventListener('click', () => setChannelsCollapsed(!$('.channels').classList.contains('collapsed')));
 const ago = (t) => {
   const s = Math.max(0, (serverNow() - t) / 1000);
@@ -1111,16 +1144,67 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
 addEventListener('blur', () => keys.clear());
 
-canvas.addEventListener('pointerdown', (e) => {
-  if (!me) return;
-  document.activeElement?.blur?.();
-  const hit = R.hitPeer(e.clientX, e.clientY, [...peers.values()]);
+function tapAt(sx, sy, touch = false) {
+  const hit = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
   if (hit) return openProfile(hit);
-  const w = R.toWorld(e.clientX, e.clientY);
+  const w = R.toWorld(sx, sy);
   // Clicking a piece of furniture walks to it and uses it on arrival.
   const f = FURNITURE.find((f2) => (f2.interact || f2.seat) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
   walkTo(w.x, w.y, f);
+}
+
+// A mouse acts on press. A finger acts on release: a tap walks, a drag turns
+// into a joystick centred where it started, and two fingers pinch to zoom.
+const STICK_R = 48;
+const touches = new Map();
+let gesture = null, stick = null;
+const stickEl = $('.stick'), knobEl = $('.stick span');
+canvas.addEventListener('pointerdown', (e) => {
+  if (!me) return;
+  document.activeElement?.blur?.();
+  if (e.pointerType === 'mouse') { if (e.button === 0) tapAt(e.clientX, e.clientY); return; }
+  canvas.setPointerCapture(e.pointerId);
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 1) gesture = { kind: 'tap', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now() };
+  else if (touches.size === 2) {
+    endStick();
+    const [a, b] = [...touches.values()];
+    gesture = { kind: 'pinch', d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), k0: k };
+  }
 });
+canvas.addEventListener('pointermove', (e) => {
+  if (!touches.has(e.pointerId) || !gesture) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (gesture.kind === 'pinch') {
+    if (touches.size < 2) return;
+    const [a, b] = [...touches.values()];
+    return pinchTo(gesture.k0, Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0);
+  }
+  if (gesture.id !== e.pointerId) return;
+  const dx = e.clientX - gesture.x0, dy = e.clientY - gesture.y0, d = Math.hypot(dx, dy);
+  if (gesture.kind === 'tap' && d > 14) {
+    gesture.kind = 'stick';
+    path = null; walkTarget = null; pendingUse = null; follow = null;
+    if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
+    stickEl.style.left = `${gesture.x0}px`; stickEl.style.top = `${gesture.y0}px`;
+    stickEl.hidden = false;
+  }
+  if (gesture.kind !== 'stick') return;
+  const r = Math.min(d, STICK_R);
+  stick = d > 8 ? { x: dx / d, y: dy / d } : null;
+  knobEl.style.transform = `translate(${d ? (dx / d) * r : 0}px, ${d ? (dy / d) * r : 0}px)`;
+});
+function endStick() { stick = null; stickEl.hidden = true; knobEl.style.transform = ''; }
+function lift(e) {
+  if (!touches.delete(e.pointerId) || !gesture) return;
+  if (gesture.kind === 'pinch') { if (!touches.size) gesture = null; return; }
+  if (gesture.id !== e.pointerId) return;
+  if (gesture.kind === 'tap' && e.type === 'pointerup' && performance.now() - gesture.t0 < 600) tapAt(e.clientX, e.clientY, true);
+  endStick(); gesture = null;
+}
+canvas.addEventListener('pointerup', lift);
+canvas.addEventListener('pointercancel', lift);
+canvas.addEventListener('contextmenu', (e) => { if (coarse) e.preventDefault(); });
 
 function walkTo(x, y, thenUse = null) {
   if (x === undefined || !me) return;
@@ -1151,6 +1235,7 @@ function stepMe(dt) {
   if (keys.has('d') || keys.has('ArrowRight')) vx += 1;
   if (keys.has('w') || keys.has('ArrowUp')) vy -= 1;
   if (keys.has('s') || keys.has('ArrowDown')) vy += 1;
+  if (stick) { vx += stick.x; vy += stick.y; }
   if (vx || vy) { path = null; walkTarget = null; pendingUse = null; follow = null; }
 
   if (follow && !path) {
@@ -1232,9 +1317,17 @@ setInterval(() => {
 const cam = { x: SPAWN.x, y: SPAWN.y };
 let last = performance.now(), miniT = 0;
 const promptEl = $('.prompt');
+// The interaction prompt doubles as a button, which is how touch screens press E.
+promptEl.querySelector('kbd').textContent = coarse ? 'Tap' : 'E';
+promptEl.addEventListener('click', () => { if (me && !modal.isOpen) interact(nearestInteractable(me.x, me.y)); });
+// Touch devices drop to ~30 fps while nothing on screen is moving, to save battery.
+let lastDraw = 0;
+const busy = () => me.moving || gesture || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
 const pomoHud = $('.pomo-hud');
 
 function loop(t) {
+  if (coarse && me && t - lastDraw < 30 && !busy()) { requestAnimationFrame(loop); return; }
+  lastDraw = t;
   const dt = Math.min(0.05, (t - last) / 1000); last = t;
   if (me) {
     stepMe(dt);

@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2b2622">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Agent Office</title>
   <meta name="description" content="A virtual coworking office where people and AI agents work side by side, with rpg.actor characters.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -23,7 +27,7 @@
     <div class="hud-tr">
       <canvas id="minimap" width="192" height="128" aria-label="Map"></canvas>
       <div class="people card">
-        <button class="people-head" type="button" aria-expanded="true"><b>In the office</b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
+        <button class="people-head" type="button" aria-expanded="true"><b><span class="long">In the office</span><span class="short">People</span></b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
         <ul class="people-list"></ul>
       </div>
       <div class="channels card" hidden>
@@ -80,7 +84,8 @@
       </div>
     </div>
 
-    <div class="prompt" hidden><kbd>E</kbd><span></span></div>
+    <button class="prompt" type="button" hidden><kbd>E</kbd><span></span></button>
+    <div class="stick" hidden aria-hidden="true"><span></span></div>
     <div class="toasts"></div>
   </div>
 
