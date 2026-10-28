@@ -19,6 +19,9 @@ import { identityResolver } from './atproto.js';
 export const COOKIE = 'ao_session';
 const MAX_AGE = 30 * 24 * 3600; // seconds
 const SCOPE = 'atproto';
+// How long a stored OAuth session (DPoP key + refresh token) is kept. It is
+// used to talk to freeq as the signed-in person (see freeq.js).
+export const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 const isLoopbackUrl = (u) => !u || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(u);
 
@@ -147,7 +150,7 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
     identityResolver,
     fetch: fetchImpl,
     stateStore: jsonKeyStore(stateStore || memoryStore(15 * 60 * 1000)),
-    sessionStore: jsonKeyStore(sessionStore || memoryStore(60 * 60 * 1000)),
+    sessionStore: jsonKeyStore(sessionStore || memoryStore(SESSION_TTL_MS)),
     runtimeImplementation: {
       createKey: (algs) => JoseKey.generate(algs),
       getRandomValues: (n) => crypto.getRandomValues(new Uint8Array(n)),
@@ -173,6 +176,34 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
     // The verified DID from a request's Cookie header, or null.
     didFromCookie(header) { return verifySession(parseCookies(header)[COOKIE], secret); },
 
+    // What freeq's SASL "pds-oauth" method needs to check a signed-in person
+    // with their PDS: the DPoP-bound access token, and a DPoP proof for
+    // GET {pds}/xrpc/com.atproto.server.getSession (freeq forwards both).
+    // `nonce` is the PDS's DPoP nonce when freeq has relayed one.
+    async freeqCredentials(did, nonce = null) {
+      let session;
+      try { session = await client.restore(did); } catch { throw new Error('sign in again to talk on freeq'); }
+      const pds = (await session.getTokenInfo()).aud.replace(/\/$/, '');
+      const url = `${pds}/xrpc/com.atproto.server.getSession`;
+      if (!nonce) {
+        // Asking the PDS ourselves checks the token and learns its DPoP nonce.
+        const r = await session.fetchHandler('/xrpc/com.atproto.server.getSession');
+        if (!r.ok) throw new Error(`your PDS refused the sign-in token (${r.status})`);
+        nonce = await Promise.resolve().then(() => session.server.dpopNonces.get(new URL(pds).origin)).catch(() => undefined);
+      }
+      // getTokenSet is the library's own accessor; it refreshes when needed.
+      const { access_token: accessToken } = await session.getTokenSet('auto');
+      const key = session.server.dpopKey;
+      const algs = session.serverMetadata.dpop_signing_alg_values_supported || ['ES256'];
+      const alg = key.algorithms.find((a) => algs.includes(a)) || key.algorithms[0];
+      const ath = b64url(await crypto.subtle.digest('SHA-256', enc.encode(accessToken)));
+      const dpopProof = await key.createJwt(
+        { alg, typ: 'dpop+jwt', jwk: key.bareJwk },
+        { iat: Math.floor(Date.now() / 1000), jti: b64url(crypto.getRandomValues(new Uint8Array(12))), htm: 'GET', htu: url, nonce: nonce || undefined, ath },
+      );
+      return { did, pds, accessToken, dpopProof };
+    },
+
     // Handles /oauth/* routes. Returns a Response, or null if not ours.
     async handle(request) {
       const url = new URL(request.url);
@@ -196,14 +227,16 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
         try {
           const { session } = await client.callback(url.searchParams);
           const did = session.did;
-          // We only needed proof of identity, so give the tokens back.
-          session.signOut().catch(() => {});
+          // The session (scope `atproto`: identity only, no repo access) is
+          // kept so freeq can check who you are when you talk there.
           return redirect('/?signedin=1', { 'set-cookie': cookie(await signSession(did, secret), MAX_AGE) });
         } catch (e) {
           return fail(`sign-in failed: ${reason(e)}`);
         }
       }
       if (url.pathname === '/oauth/logout' && request.method === 'POST') {
+        const did = await verifySession(parseCookies(request.headers.get('cookie'))[COOKIE], secret);
+        if (did) await client.revoke(did).catch(() => {});
         return new Response(null, { status: 204, headers: { 'set-cookie': cookie('', 0) } });
       }
       return null;

@@ -11,6 +11,7 @@ import { createAuth } from './auth.js';
 import { handleApi, isApiPath } from './app.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
+import { FreeqBridge, FREEQ_URL } from './freeq.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -62,6 +63,22 @@ const office = new Office(await loadState(), {
 });
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
 const mcp = new McpHub({ office, auth: agents });
+
+// freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
+if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
+  const keyFile = path.join(DATA_DIR, 'freeq-key.json');
+  new FreeqBridge({
+    office, auth,
+    url: process.env.FREEQ_URL || FREEQ_URL,
+    rooms: process.env.FREEQ_ROOMS || '',
+    minMembers: Number(process.env.FREEQ_MIN_MEMBERS) || 2,
+    openSocket: async (url) => new WebSocket(url),
+    keyStore: {
+      get: async () => { try { return JSON.parse(await readFile(keyFile, 'utf8')); } catch { return null; } },
+      set: async (jwk) => { await mkdir(DATA_DIR, { recursive: true }); await writeFile(keyFile, JSON.stringify(jwk), { mode: 0o600 }); },
+    },
+  });
+}
 
 // Booking reminders and announcements (the Worker uses a Durable Object alarm).
 setInterval(() => office.tickRooms(), 15000).unref();

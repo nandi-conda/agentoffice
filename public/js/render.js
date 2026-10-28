@@ -72,7 +72,7 @@ export function createRenderer(canvas) {
   }
 
   // ---- floors ------------------------------------------------------------
-  function drawFloors(vis) {
+  function drawFloors(vis, freeq = {}) {
     ctx.fillStyle = '#d9d4cc';
     ctx.fillRect(S(0), S(0), S(W), S(H));
     for (const z of ZONES) {
@@ -89,6 +89,16 @@ export function createRenderer(canvas) {
       ctx.fillStyle = 'rgba(41,37,36,0.28)';
       const label = z.name.toUpperCase().split('').join(' ');
       ctx.fillText(label, S(z.x0 + 0.35), S(z.y1 + 0.55));
+      // An area attached to a freeq channel wears the channel's name.
+      const fq = freeq[z.id];
+      if (fq) {
+        const tag = `${fq.channel} · freeq${fq.members ? ` · ${fq.members}` : ''}`;
+        const w = ctx.measureText(tag).width + S(0.5);
+        ctx.fillStyle = 'rgba(109,40,217,0.82)';
+        roundRect(ctx, S(z.x1 + 0.65) - w, S(z.y1 + 0.42), w, S(0.6), S(0.3)); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(tag, S(z.x1 + 0.65) - w + S(0.25), S(z.y1 + 0.55));
+      }
     }
     ctx.restore();
   }
@@ -678,11 +688,11 @@ export function createRenderer(canvas) {
     const s = toScreen(p.rx, p.ry);
     const top = p.headY ?? s.y - S(1.4);
     ctx.font = '600 11px Inter, system-ui, sans-serif';
-    const name = (p.kind === 'agent' ? '◆ ' : '') + p.name;
+    const name = (p.kind === 'agent' ? '◆ ' : p.kind === 'freeq' ? '# ' : '') + p.name;
     const tw = ctx.measureText(name).width;
     const lw = tw + 22, lh = 18;
     const lx = Math.round(s.x - lw / 2), ly = Math.round(top - lh - 2);
-    ctx.fillStyle = isMe ? 'rgba(37,99,235,0.92)' : p.kind === 'agent' ? 'rgba(8,145,178,0.9)' : 'rgba(28,25,23,0.78)';
+    ctx.fillStyle = isMe ? 'rgba(37,99,235,0.92)' : p.kind === 'agent' ? 'rgba(8,145,178,0.9)' : p.kind === 'freeq' ? 'rgba(109,40,217,0.85)' : 'rgba(28,25,23,0.78)';
     roundRect(ctx, lx, ly, lw, lh, 9); ctx.fill();
     ctx.fillStyle = statusColor(p.status);
     ctx.beginPath(); ctx.arc(lx + 9, ly + lh / 2, 3.5, 0, 7); ctx.fill();
@@ -772,7 +782,7 @@ export function createRenderer(canvas) {
     st.lights = [];
     st.light = daylight(st.clock);
 
-    drawFloors(vis);
+    drawFloors(vis, st.freeq || {});
     for (const f of FURNITURE) if (f.type === 'rug') drawRug(f);
     // den lights dim during a focus session
     const den = st.pomo.focus;

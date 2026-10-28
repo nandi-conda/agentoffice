@@ -39,9 +39,11 @@ Type your handle and press **Sign in**: you're sent to your own PDS (Bluesky
 or any other) to approve, and come back signed in. The server only trusts
 DIDs that finished that flow; a handle sent any other way is ignored, so
 nobody can walk in as someone else. Leave the handle empty to walk in as a
-guest. We only ask for the `atproto` scope (identity, no posting) and revoke
-the tokens right after sign-in; what's kept is a signed, HttpOnly cookie
-holding your DID for 30 days.
+guest. We only ask for the `atproto` scope (identity, no posting). What
+the browser keeps is a signed, HttpOnly cookie holding your DID for 30 days;
+the server keeps the OAuth session (DPoP key + refresh token, still only
+`atproto`) so it can prove who you are to freeq (see *freeq*), and revokes it
+when you sign out.
 
 Configuration (all optional):
 
@@ -163,6 +165,39 @@ if the mic is refused.
 
 ![A locked booking in the Boardroom: camera tiles, a screen share on the wall screen](docs/av-room.png)
 ![The room schedule](docs/room-schedule.png)
+
+### freeq
+
+The office is bridged to [freeq](https://freeq.at), an IRC network whose
+accounts are AT Protocol identities. Populated freeq channels (2+ people
+besides us) are attached to open areas: `#general` to the Lounge, `#dev` to
+the Open Office, `#lobby` to the Lobby, and the busiest others fill the
+Lounge, Open Office, Kitchen and Lobby in that order. An attached area wears
+the channel's name on its floor, the channel's people stand in it (wearing
+their rpg.actor character when they have one), what they say shows up as chat
+there, and the whole area hears it. An area stays attached while anyone is
+still in the channel, and the list is refreshed every five minutes.
+
+When you're signed in, what you say in an attached area goes to the channel
+**as you**: the server opens an IRC connection for you and signs in with
+SASL `ATPROTO-CHALLENGE`, method `pds-oauth`, i.e. the access token from your
+office sign-in plus a DPoP proof for your PDS's `getSession`, which freeq
+checks with your PDS. Guests and agents can listen but stay local. If you
+signed in before this existed, sign out and in again.
+
+Reading is done by one listener connection with the office's own `did:key`
+(an ed25519 key made on first run, `$DATA_DIR/freeq-key.json`, or the Durable
+Object's storage). It only runs while somebody is in the office, and hangs up
+two minutes after the last person leaves, so the Durable Object can sleep.
+
+| env var | what it does |
+| --- | --- |
+| `FREEQ` | `off` disables the bridge. |
+| `FREEQ_URL` | IRC-over-WebSocket endpoint, default `wss://irc.freeq.at/irc`. The channel list comes from the same host's `/api/v1/channels`. |
+| `FREEQ_ROOMS` | Fixed attachments instead of picking populated channels, e.g. `lounge=#general,open=#dev`. Areas: `lounge`, `open`, `kitchen`, `lobby` (any zone id works). |
+| `FREEQ_MIN_MEMBERS` | People a channel needs (not counting us) to be attached, default 2. |
+
+![The Lounge attached to #general on freeq (against a stand-in freeq server)](docs/freeq-lounge.png)
 
 ### Status
 
@@ -402,6 +437,7 @@ server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the hub: presence, chat routing, desks, pomodoro, room bookings, etc.
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
+server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channels ↔ areas
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
 scripts/roost.mjs       Roost CLI: terms, signup, office grant
 ```

@@ -101,6 +101,51 @@ export class Office {
     if (!this.peers.has(p.id)) return;
     this.peers.delete(p.id);
     if (p.ready) this.broadcast({ t: 'leave', id: p.id });
+    if (p.kind !== 'freeq') { this.freeq?.leave(p); this.freeq?.presence(); }
+  }
+
+  // ---- people from outside (the freeq bridge, see freeq.js) ----------------
+  // They have no socket: they're drawn, can be heard and mentioned, and never
+  // send anything themselves.
+  addRemote(fields) {
+    const p = this.open({ readyState: 3, send() {} }, { restored: { ...fields } });
+    p.ready = true;
+    this.broadcast({ t: 'join', peer: this.publicPeer(p) });
+    return p;
+  }
+
+  removeRemote(p) { this.leave(p); }
+
+  renameRemote(p, name) {
+    p.name = clip(name, 32);
+    this.broadcast({ t: 'leave', id: p.id });
+    this.broadcast({ t: 'join', peer: this.publicPeer(p) });
+  }
+
+  // freeq accounts are AT Protocol DIDs, so they can wear their rpg.actor character too.
+  async identifyRemote(p, did) {
+    p.did = did;
+    if (!this.loadActor) return;
+    try {
+      const a = await this.loadActor(did);
+      if (!this.peers.has(p.id)) return;
+      p.handle = a.handle;
+      p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
+      this.broadcast({ t: 'leave', id: p.id });
+      this.broadcast({ t: 'join', peer: this.publicPeer(p) });
+    } catch { /* no character: keep the default look */ }
+  }
+
+  // A line from a freeq channel, heard by everyone in the area it's attached to.
+  remoteChat({ zoneId, channel, peer, name, text }) {
+    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: this.now(), scope: channel, freeq: true };
+    const mentioned = new Set([...msg.text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase()));
+    for (const q of this.peers.values()) {
+      if (!q.ready || q.kind === 'freeq') continue;
+      const hit = zoneAt(q.x, q.y)?.id === zoneId;
+      const ment = mentioned.has(q.name.toLowerCase().replace(/\s+/g, '')) || (q.handle && mentioned.has(q.handle.toLowerCase()));
+      if (hit || ment) this.sendTo(q, { ...msg, mention: !hit && !!ment });
+    }
   }
 
   ownerKey(p) { return p.did || `${p.kind}:${p.name}`; }
@@ -161,10 +206,11 @@ export class Office {
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
-      bookings: this.bookings,
+      bookings: this.bookings, freeq: this.freeq?.state() || {},
     });
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
     this.touchDesk(p);
+    this.freeq?.presence();
   }
 
   move(p, m) {
@@ -204,12 +250,23 @@ export class Office {
     }
     const zone = zoneAt(p.x, p.y);
     msg.scope = zone && zone.kind !== 'open' ? zone.name : 'nearby';
+    // An area attached to a freeq channel is one conversation: the whole
+    // area hears it, and it goes to the channel as the speaker.
+    const bridged = zone && this.freeq?.bindings.get(zone.id);
+    if (bridged) {
+      msg.scope = bridged.channel;
+      this.freeq.relay(p, zone.id, msg.text).then((note) => {
+        if (note && note !== p.freeqNote) this.sendTo(p, { t: 'toast', text: note });
+        p.freeqNote = note;
+      });
+    }
+    const hears = (q) => (bridged ? zoneAt(q.x, q.y) === zone : canHear(p, q));
     // Mentions reach the person anywhere, which is how you tap someone on
     // the shoulder across the office (and how agents get asked things).
     const mentioned = new Set([...text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase()));
     for (const q of this.peers.values()) {
       if (!q.ready) continue;
-      const hit = q === p || canHear(p, q);
+      const hit = q === p || hears(q);
       const ment = mentioned.has(q.name.toLowerCase().replace(/\s+/g, '')) || (q.handle && mentioned.has(q.handle.toLowerCase()));
       if (hit || ment) this.sendTo(q, { ...msg, mention: !hit && ment });
     }

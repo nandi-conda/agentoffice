@@ -154,6 +154,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .st-free { background: #16a34a; } .st-soon { background: #f59e0b; } .st-busy { background: #dc2626; }
 .badge.av { background: #ede9fe; color: #6d28d9; }
 .badge.lock { background: #fee2e2; color: #b91c1c; }
+.badge.freeq { background: #ede9fe; color: #6d28d9; }
+.zone-kind.freeq, .chat-form .scope.freeq { background: #6d28d9; color: #fff; text-transform: none; }
 .sched-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding-right: 28px; }
 .sched-head h2 { margin: 0; }
 .day-nav { display: flex; gap: 6px; align-items: center; }

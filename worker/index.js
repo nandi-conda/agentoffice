@@ -9,6 +9,8 @@ import { loadActor } from '../server/atproto.js';
 import { createAuth } from '../server/auth.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
+import { FreeqBridge, FREEQ_URL } from '../server/freeq.js';
+import { SESSION_TTL_MS } from '../server/auth.js';
 
 export default {
   async fetch(request, env) {
@@ -46,6 +48,24 @@ export class OfficeRoom extends DurableObject {
     // live in memory here; if the object is evicted, agents re-initialize.
     this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
     this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '' });
+
+    // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
+    if (env.FREEQ !== 'off') {
+      this.freeq = new FreeqBridge({
+        office: this.office,
+        // Talking as yourself needs your stored OAuth session, so the auth
+        // object (built on the first request) is looked up when needed.
+        auth: { freeqCredentials: (did, nonce) => this.auth ? this.auth.freeqCredentials(did, nonce) : Promise.reject(new Error('sign in again to talk on freeq')) },
+        url: env.FREEQ_URL || FREEQ_URL,
+        rooms: env.FREEQ_ROOMS || '',
+        minMembers: Number(env.FREEQ_MIN_MEMBERS) || 2,
+        openSocket: openOutboundSocket,
+        keyStore: {
+          get: async () => { const row = this.sql.exec("SELECT v FROM meta WHERE k = 'freeq-key'").toArray()[0]; return row && JSON.parse(row.v); },
+          set: async (jwk) => { this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('freeq-key', ?)", JSON.stringify(jwk)); },
+        },
+      });
+    }
 
     // Waking from hibernation: rebuild peers from the sockets that stayed open.
     for (const ws of ctx.getWebSockets()) this.peerFor(ws);
@@ -93,7 +113,7 @@ export class OfficeRoom extends DurableObject {
       port: Number(url.port) || 8787,
       secret: this.env.SESSION_SECRET || this.sessionSecret(),
       stateStore: this.sqlStore('state', 15 * 60 * 1000),
-      sessionStore: this.sqlStore('session', 60 * 60 * 1000),
+      sessionStore: this.sqlStore('session', SESSION_TTL_MS),
     });
     return this.auth;
   }
@@ -113,7 +133,7 @@ export class OfficeRoom extends DurableObject {
     return {
       async set(k, v) { sql.exec('INSERT OR REPLACE INTO oauth (k, v, at) VALUES (?, ?, ?)', `${prefix}:${k}`, JSON.stringify(v), Date.now()); },
       async get(k) {
-        sql.exec('DELETE FROM oauth WHERE at < ?', Date.now() - 60 * 60 * 1000);
+        sql.exec('DELETE FROM oauth WHERE k LIKE ? AND at < ?', `${prefix}:%`, Date.now() - ttlMs);
         const row = sql.exec('SELECT v, at FROM oauth WHERE k = ?', `${prefix}:${k}`).toArray()[0];
         if (!row || Date.now() - row.at > ttlMs) return undefined;
         return JSON.parse(row.v);
@@ -153,6 +173,8 @@ export class OfficeRoom extends DurableObject {
     if (!p) return;
     await this.office.message(p, raw);
     this.persistPeer(p);
+    // After hibernation the freeq listener is gone; the next message brings it back.
+    this.freeq?.presence();
     this.armRooms();
   }
 
@@ -188,4 +210,14 @@ export class OfficeRoom extends DurableObject {
     if (!live.size) this.sql.exec('DELETE FROM strokes');
     else this.sql.exec('DELETE FROM strokes WHERE id < ?', first);
   }
+}
+
+// Outbound WebSocket from the Durable Object (to freeq): a fetch upgrade,
+// accepted here, which behaves like a browser WebSocket afterwards.
+async function openOutboundSocket(url) {
+  const res = await fetch(url.replace(/^ws/, 'http'), { headers: { upgrade: 'websocket' } });
+  const ws = res.webSocket;
+  if (!ws) throw new Error(`freeq didn't accept a WebSocket (HTTP ${res.status})`);
+  ws.accept();
+  return ws;
 }

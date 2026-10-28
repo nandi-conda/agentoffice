@@ -21,6 +21,7 @@ const peers = new Map();
 let me = null;
 let net = null;
 let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
+let freeqRooms = {}; // area id -> { channel, members, topic } attached from freeq
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
@@ -228,6 +229,7 @@ function onMessage(m) {
       sheetsFor(me).then((s) => { me.sheets = s; buildEmotes(); });
       for (const p of m.peers) addPeer(p);
       desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
+      freeqRooms = m.freeq || {};
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
@@ -235,10 +237,10 @@ function onMessage(m) {
       if (!welcomeShown) { welcomeShown = true; sys(`Welcome in, ${me.name}. Walk with WASD or click the floor. Press ? for help.`); }
       break;
     }
-    case 'join': addPeer(m.peer).then(() => sys(`${m.peer.name} walked in`)); break;
+    case 'join': addPeer(m.peer).then(() => m.peer.kind !== 'freeq' && sys(`${m.peer.name} walked in`)); break;
     case 'leave': {
       const p = peers.get(m.id);
-      if (p) { sys(`${p.name} left`); peers.delete(m.id); if (follow === m.id) follow = null; refreshPeople(); }
+      if (p) { if (p.kind !== 'freeq') sys(`${p.name} left`); peers.delete(m.id); if (follow === m.id) follow = null; refreshPeople(); }
       break;
     }
     case 'move': {
@@ -267,6 +269,7 @@ function onMessage(m) {
       break;
     }
     case 'desks': desks = m.desks; refreshPeople(); break;
+    case 'freeq': freeqRooms = m.rooms || {}; if (me) zoneChanged(lastZone, true); break;
     case 'notes': notes = m.notes; if (modal.notesOpen) openNotes(); break;
     case 'pomo': {
       if (m.now) serverOffset = m.now - Date.now();
@@ -481,7 +484,7 @@ function refreshPeople() {
     $('.people-list').innerHTML = list.map((p) => {
       const z = zoneAt(p.x, p.y);
       const sub = [p.note, z?.name].filter(Boolean).join(' · ');
-      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(p.name)}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : ''}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
+      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(p.name)}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
     }).join('');
     $('.people-list').querySelectorAll('li').forEach((li) => li.addEventListener('click', () => openProfile(peers.get(li.dataset.id))));
   }, 120);
@@ -1037,13 +1040,16 @@ function stepMe(dt) {
 
 // ---- auto status -------------------------------------------------------------------
 let lastZone = null;
-function zoneChanged(z) {
+function zoneChanged(z, freeqOnly = false) {
   const kind = $('.zone-kind'), scope = $('.chat-form .scope');
+  const fq = z && freeqRooms[z.id];
   $('.zone-name').textContent = z ? z.name : 'Hallway';
-  kind.textContent = z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
-  kind.className = `zone-kind ${z?.kind || 'open'}`;
-  scope.textContent = z && z.kind !== 'open' ? z.name : 'nearby';
-  scope.className = `scope ${z?.kind || 'open'}`;
+  kind.textContent = fq ? fq.channel : z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
+  kind.className = `zone-kind ${fq ? 'freeq' : z?.kind || 'open'}`;
+  scope.textContent = fq ? fq.channel : z && z.kind !== 'open' ? z.name : 'nearby';
+  scope.className = `scope ${fq ? 'freeq' : z?.kind || 'open'}`;
+  if (freeqOnly) return;
+  if (fq) toast(`💬 ${esc(z.name)} is attached to <b>${esc(fq.channel)}</b> on freeq${fq.topic ? ` (${esc(fq.topic)})` : ''}. ${me.did ? 'What you say here goes there as you.' : 'Sign in to talk there as yourself; for now you can listen.'}`, [], 6000);
   if (z?.kind === 'room' && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }
   else if (autoStatus === 'meeting' && z?.kind !== 'room') { autoStatus = null; setStatus('available'); }
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
@@ -1117,7 +1123,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z),
+      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z), freeq: freeqRooms,
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
