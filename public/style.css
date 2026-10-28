@@ -138,6 +138,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .profile canvas { width: 112px; height: 112px; background: #f5f2ec; border-radius: 12px; }
 .profile .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; margin-top: 8px; }
 .profile .stat { background: #f5f2ec; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+.profile .bio { white-space: pre-line; overflow-wrap: anywhere; }
+.profile .bio.art { white-space: pre; overflow-wrap: normal; overflow-x: auto; font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 11px; line-height: 1.15; color: var(--ink); }
+.profile > div { min-width: 0; }
 .profile .stat b { display: block; font-size: 14px; }
 
 .help-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }

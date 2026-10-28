@@ -430,6 +430,10 @@ mini.addEventListener('click', (e) => {
 });
 
 // ---- profile ------------------------------------------------------------------
+// Bios made of block / box-drawing / braille characters are text art: they
+// only line up in a monospace font with their line breaks kept.
+const isTextArt = (s) => /[\u2500-\u259F\u2800-\u28FF]/.test(s);
+
 function openProfile(p) {
   if (!p) return;
   const desk = Object.entries(desks).find(([, v]) => v.owner === (p.did || `${p.kind}:${p.name}`));
@@ -443,7 +447,7 @@ function openProfile(p) {
         ${p.handle ? `<p class="small"><a href="https://rpg.actor/${encodeURIComponent(p.handle)}" target="_blank" rel="noopener">@${esc(p.handle)}</a> on rpg.actor</p>` : '<p class="small muted">Guest, no rpg.actor character linked</p>'}
         <p><span style="color:${statusColor(p.status)}">●</span> ${esc(STATUS[p.status]?.label || p.status)}${p.note ? ` · ${esc(p.note)}` : ''}</p>
         ${desk ? `<p class="small">🪑 Desk: ${esc(desk[0])}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
-        ${p.actor?.description ? `<p class="small muted">${esc(p.actor.description)}</p>` : ''}
+        ${p.actor?.description ? `<p class="bio small muted${isTextArt(p.actor.description) ? ' art' : ''}">${esc(p.actor.description)}</p>` : ''}
         ${systems ? `<p class="small"><b>Character sheets:</b> ${systems}</p><div class="stats">${stats.join('')}</div>` : ''}
         ${p !== me ? `<div class="row">
           <button class="btn primary act-wave">👋 Wave</button>
