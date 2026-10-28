@@ -10,7 +10,7 @@ import { Office } from '../server/office.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
 
-test('the generated docs are up to date (run `just docs`)', async () => {
+test('the generated docs pages are up to date (run `just docs`)', async () => {
   for (const [file, text] of Object.entries(await build())) {
     assert.equal(await readFile(new URL(`../${file}`, import.meta.url), 'utf8'), text, `${file} is stale: run \`just docs\``);
   }

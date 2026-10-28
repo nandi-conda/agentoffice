@@ -3,3 +3,5 @@ data/
 *.log
 .pixi/
 .wrangler/
+# built by `just docs`
+public/docs/

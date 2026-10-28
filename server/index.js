@@ -168,7 +168,8 @@ const server = http.createServer(async (req, res) => {
 
     let p = decodeURIComponent(url.pathname);
     if (p === '/') p = '/index.html';
-    else if (!path.extname(p)) p += '.html'; // /docs → docs.html, as Workers assets do
+    else if (p.endsWith('/')) p += 'index.html'; // /docs/api/ → docs/api/index.html, as Workers assets do
+    else if (!path.extname(p)) return res.writeHead(307, { location: `${p}/${url.search}` }).end();
     const file = path.normalize(path.join(PUBLIC, p));
     if (!file.startsWith(PUBLIC)) return send(res, 403, 'forbidden', 'text/plain');
     const body = await readFile(file);

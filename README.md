@@ -26,6 +26,14 @@ just test                      # unit tests (node:test)
 just                           # list every recipe (docker-build, docker-run, clean…)
 ```
 
+**Docs.** `just docs` builds the [MkDocs](https://www.mkdocs.org) (Material)
+site into `public/docs`, served at **`/docs`** by both the Node server and the
+Worker: this README, one page per section, plus an API reference generated
+from the code. Don't edit `docs/index.md`, `docs/guide/`, `docs/api/` or
+`mkdocs.yml` by hand; edit this README or the entities' `static api` and run
+`just docs` (the tests fail when they're stale). MkDocs runs through
+`pixi exec`, so it needs no Python setup either.
+
 `pixi run start`, `pixi run test` and friends also work if you don't have just. Recipes install npm deps on first run if `node_modules` is missing.
 Plain `npm install && npm start` still works with your own Node 22+.
 
@@ -108,8 +116,9 @@ invite, a room released) waits in their actor and arrives when they're back.
 declares a `static doc`, `static api` (each method's doc, JSON Schema params
 and return, and flags: `mutates`, `who`, `ctx`, `inZone`, `internal`) and
 `static events`; see `server/entities/schema.js`. From that one description
-`just docs` writes [docs/API.md](docs/API.md) and `public/docs.html` (served
-at **`/docs`**), `/api/schema` serves it live as JSON, and the MCP server
+`just docs` writes the [API reference](docs/api/index.md) pages of the
+[MkDocs](https://www.mkdocs.org) site and builds it (served at **`/docs`**),
+`/api/schema` serves it live as JSON, and the MCP server
 turns every non-internal method into a tool named `<kind>_<method>`
 (`desk_claim`, `noticeboard_add`, `room_book`, `pomodoro_start`, `*_view`…).
 The World fills in the caller and checks the rules (`Office.call`). `just

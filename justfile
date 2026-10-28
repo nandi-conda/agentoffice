@@ -38,9 +38,15 @@ roost *args: _deps
 test: _deps
     node --test test/*.test.js
 
-# Regenerate the API docs (docs/API.md, public/docs.html at /docs) from the entities' `static api`
+# Build the MkDocs site into public/docs (served at /docs): guide pages from README.md, API reference from the entities' `static api`
 docs: _deps
     node scripts/docs.mjs
+    pixi exec --spec "mkdocs-material=9.6" mkdocs build --strict
+
+# Serve the docs with live reload on :8000
+docs-serve: _deps
+    node scripts/docs.mjs
+    pixi exec --spec "mkdocs-material=9.6" mkdocs serve
 
 # Run the server and the demo agent together
 demo: _deps
@@ -51,8 +57,7 @@ cf-dev: _deps
     node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1
 
 # Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
-deploy *args: _deps
-    node scripts/docs.mjs
+deploy *args: docs
     node_modules/.bin/wrangler deploy {{args}}
 
 # Log wrangler in to your Cloudflare account via the browser

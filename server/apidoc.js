@@ -2,7 +2,7 @@
 // `static api`, see entities/schema.js), the World, the wrangler bindings
 // and the plugin Workers bound to items. One description feeds:
 //
-//   - docs/API.md and public/docs.html (`just docs`, checked by the tests)
+//   - the API pages of the MkDocs site (docs/api, `just docs`; checked by the tests)
 //   - /api/schema (the same description as JSON, live)
 //   - the MCP tools generated from it (server/mcp.js): one per public method
 //
@@ -171,115 +171,50 @@ function sections(api) {
   }))];
 }
 
-const INTRO = 'Generated from the `static api` each entity declares (server/entities), the World, wrangler.toml and the plugin Workers. Do not edit by hand: run `just docs`. The same description is served live as JSON at `/api/schema`, and every method that is not internal is also an MCP tool at `/mcp` (read-only ones are open to everyone; the rest need you signed in and in the office).';
+const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office.';
 
-export function renderMarkdown(api) {
-  const out = ['# Agent Office API', '', INTRO, ''];
-  const secs = sections(api);
-  out.push('## Contents', '', ...secs.map((s) => `- [${s.title}](#${s.id})`), '');
-  if (api.bindings) {
-    out.push('## Bindings', '', '| Binding | Kind | Class / service |', '| --- | --- | --- |');
-    for (const b of api.bindings.durableObjects) out.push(`| \`${b.name}\` | Durable Object | \`${b.class_name}\` |`);
-    for (const b of api.bindings.services) out.push(`| \`${b.binding}\` | service | \`${b.service}\`${b.entrypoint ? ` → \`${b.entrypoint}\`` : ''} |`);
+const cell = (s) => String(s).replace(/\|/g, '\\|');
+
+function methodMd(m) {
+  const out = [`## \`${m.sig}\``, '', `${m.flags.map((f) => `\`${f}\``).join(' · ')}${m.tool ? ` · MCP tool **\`${m.tool}\`**` : ''}`, '', m.doc, ''];
+  if (m.rows.length) {
+    out.push('| Param | Type | |', '| --- | --- | --- |');
+    for (const r of m.rows) out.push(`| ${r.depth ? '&nbsp;&nbsp;&nbsp;' : ''}\`${r.name}\`${r.optional ? ' *(optional)*' : ''} | \`${cell(r.type)}\` | ${cell(r.doc)} |`);
     out.push('');
   }
+  if (m.returns) out.push(`Returns \`${m.returns}\``, '');
+  return out;
+}
+
+// The API as MkDocs pages: { 'api/index.md': …, 'api/desk.md': … } plus
+// the nav entries for mkdocs.yml, in order.
+export function renderPages(api) {
+  const secs = sections(api);
+  const pages = {}, nav = [{ Overview: 'api/index.md' }];
+  const index = ['# API', '', INTRO, '', '| Page | What it is |', '| --- | --- |'];
+  for (const s of secs) index.push(`| [${s.title}](${s.id}.md) | ${cell(s.doc.split(/(?<=\.)\s/)[0])} |`);
+  index.push('');
+  if (api.bindings) {
+    index.push('## Bindings', '', 'From `wrangler.toml`.', '', '| Binding | Kind | Class / service |', '| --- | --- | --- |');
+    for (const b of api.bindings.durableObjects) index.push(`| \`${b.name}\` | Durable Object | \`${b.class_name}\` |`);
+    for (const b of api.bindings.services) index.push(`| \`${b.binding}\` | service | \`${b.service}\`${b.entrypoint ? ` → \`${b.entrypoint}\`` : ''} |`);
+    index.push('');
+  }
+  const tools = generatedTools(api);
+  index.push('## MCP tools', '', `${tools.length} tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).`, '', '| Tool | Access | |', '| --- | --- | --- |');
+  for (const t of tools) index.push(`| \`${t.name}\` | ${t.readOnly ? 'open' : 'signed in, in the office'} | [${t.kind}.${t.method}](${t.kind}.md) |`);
+  pages['api/index.md'] = index;
   for (const s of secs) {
-    out.push(`<a id="${s.id}"></a>`, '', `## ${s.title}`, '', s.doc, '', ...s.where.map((w) => `- ${w}`), '');
-    for (const m of s.methods) {
-      out.push(`### \`${m.sig}\``, '', `${m.flags.join(' · ')}${m.tool ? ` · MCP tool \`${m.tool}\`` : ''}`, '', m.doc, '');
-      if (m.rows.length) {
-        out.push('| Param | Type | |', '| --- | --- | --- |');
-        for (const r of m.rows) out.push(`| ${r.depth ? '&nbsp;&nbsp;' : ''}\`${r.name}\`${r.optional ? ' (optional)' : ''} | ${r.type.replace(/\|/g, '\\|')} | ${r.doc.replace(/\|/g, '\\|')} |`);
-        out.push('');
-      }
-      if (m.returns) out.push(`Returns \`${m.returns}\``, '');
-    }
+    const out = [`# ${s.title}`, '', s.doc, '', ...s.where.map((w) => `- ${w}`), ''];
+    for (const m of s.methods) out.push(...methodMd(m));
     if (s.events.length) {
-      out.push('**Events**', '');
+      out.push('## Events', '');
       for (const ev of s.events) out.push(`- ${ev.dir} \`${ev.topic}\`: ${ev.doc}`);
       out.push('');
     }
+    pages[`api/${s.id}.md`] = out;
+    nav.push({ [s.title]: `api/${s.id}.md` });
   }
-  return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
-}
-
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const code = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
-
-export function renderHtml(api) {
-  const secs = sections(api);
-  const method = (m) => `
-      <article class="method">
-        <h3><code>${esc(m.sig)}</code></h3>
-        <p class="flags">${m.flags.map((f) => `<span class="tag${f === 'mutates' ? ' mut' : ''}">${esc(f)}</span>`).join('')}${m.tool ? `<span class="tag tool">MCP <code>${esc(m.tool)}</code></span>` : ''}</p>
-        <p>${code(m.doc)}</p>
-        ${m.rows.length ? `<table><tbody>${m.rows.map((r) => `<tr><td class="${r.depth ? 'sub' : ''}"><code>${esc(r.name)}</code>${r.optional ? ' <i>optional</i>' : ''}</td><td><code>${esc(r.type)}</code></td><td>${esc(r.doc)}</td></tr>`).join('')}</tbody></table>` : ''}
-        ${m.returns ? `<p class="ret">Returns <code>${esc(m.returns)}</code></p>` : ''}
-      </article>`;
-  const bindings = api.bindings ? `
-    <section id="bindings"><h2>Bindings</h2><table><thead><tr><th>Binding</th><th>Kind</th><th>Class / service</th></tr></thead><tbody>
-      ${api.bindings.durableObjects.map((b) => `<tr><td><code>${esc(b.name)}</code></td><td>Durable Object</td><td><code>${esc(b.class_name)}</code></td></tr>`).join('')}
-      ${api.bindings.services.map((b) => `<tr><td><code>${esc(b.binding)}</code></td><td>service</td><td><code>${esc(b.service)}${b.entrypoint ? ` → ${esc(b.entrypoint)}` : ''}</code></td></tr>`).join('')}
-    </tbody></table></section>` : '';
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Office API</title>
-<meta name="description" content="Every entity, method, event and MCP tool in Agent Office, generated from the code.">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<style>
-:root { --bg: #faf7f2; --fg: #2b2622; --muted: #6b625a; --card: #fff; --line: #e7e0d6; --accent: #b45309; --mut: #9a3412; --tool: #1d4ed8; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1c1916; --fg: #eee7df; --muted: #a89e93; --card: #26221e; --line: #3a342e; --accent: #f59e0b; --mut: #fb923c; --tool: #93c5fd; color-scheme: dark; } }
-:root[data-theme="dark"] { --bg: #1c1916; --fg: #eee7df; --muted: #a89e93; --card: #26221e; --line: #3a342e; --accent: #f59e0b; --mut: #fb923c; --tool: #93c5fd; color-scheme: dark; }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 Inter, system-ui, sans-serif; }
-.wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; max-width: 1100px; margin: 0 auto; padding: 32px 16px; }
-nav { position: sticky; top: 24px; align-self: start; font-size: 14px; }
-nav a { display: block; color: var(--muted); text-decoration: none; padding: 2px 0; }
-nav a:hover { color: var(--accent); }
-h1 { margin: 0 0 8px; font-size: 28px; }
-h2 { margin: 40px 0 6px; font-size: 21px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-h3 { margin: 0 0 4px; font-size: 15px; }
-code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-.intro, .where { color: var(--muted); }
-.where { margin: 4px 0 12px; padding-left: 18px; }
-.method { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
-.method p { margin: 6px 0; }
-.flags { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
-.tag.mut { color: var(--mut); border-color: currentColor; }
-.tag.tool { color: var(--tool); border-color: currentColor; }
-table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0; display: block; overflow-x: auto; }
-td, th { text-align: left; vertical-align: top; padding: 4px 10px 4px 0; border-top: 1px solid var(--line); }
-td.sub { padding-left: 16px; }
-.ret { color: var(--muted); }
-.events li code { color: var(--accent); }
-@media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } nav { position: static; } }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <nav aria-label="Contents">
-    ${api.bindings ? '<a href="#bindings">Bindings</a>' : ''}
-    ${secs.map((s) => `<a href="#${esc(s.id)}">${esc(s.title)}</a>`).join('\n    ')}
-  </nav>
-  <main>
-    <h1>Agent Office API</h1>
-    <p class="intro">${code(INTRO)} <a href="/api/schema">JSON</a></p>
-    ${bindings}
-    ${secs.map((s) => `
-    <section id="${esc(s.id)}">
-      <h2>${esc(s.title)}</h2>
-      <p>${code(s.doc)}</p>
-      <ul class="where">${s.where.map((w) => `<li>${code(w)}</li>`).join('')}</ul>
-      ${s.methods.map(method).join('')}
-      ${s.events.length ? `<h3>Events</h3><ul class="events">${s.events.map((ev) => `<li>${esc(ev.dir)} <code>${esc(ev.topic)}</code>: ${esc(ev.doc)}</li>`).join('')}</ul>` : ''}
-    </section>`).join('')}
-  </main>
-</div>
-</body>
-</html>
-`;
+  for (const k of Object.keys(pages)) pages[k] = `${pages[k].join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
+  return { pages, nav };
 }
