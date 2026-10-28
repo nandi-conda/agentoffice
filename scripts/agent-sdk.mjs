@@ -12,23 +12,31 @@
 //   await bot.takeDesk('watching CI');
 
 import { EventEmitter } from 'node:events';
-import WebSocket from 'ws';
 import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class AgentClient extends EventEmitter {
-  constructor({ url = 'ws://localhost:8080/ws', name = 'agent', note = '' } = {}) {
+  // `grant` is a one-time AT Protocol sign-in grant from /api/agent/verify or
+  // /api/agent/roost-signin (see server/agentauth.js); it makes the agent
+  // join as that DID. `socket` swaps the WebSocket for any ws-shaped object
+  // (the MCP server uses an in-process pair).
+  constructor({ url = 'ws://localhost:8080/ws', name = 'agent', note = '', grant = null, socket = null } = {}) {
     super();
-    Object.assign(this, { url, name, note });
+    Object.assign(this, { url, name, note, grant, socket });
+    this.walkId = 0;
     this.peers = new Map();
     this.desks = {};
     this.me = null;
   }
 
-  connect() {
+  async connect() {
+    // `ws` is loaded lazily so the SDK also runs where it isn't installed
+    // (the MCP server inside a Worker always passes `socket`).
+    const WebSocket = this.socket ? null : (await import('ws')).default;
+    const url = this.grant ? `${this.url}${this.url.includes('?') ? '&' : '?'}grant=${encodeURIComponent(this.grant)}` : this.url;
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      this.ws = this.socket ? this.socket() : new WebSocket(url);
       this.ws.on('open', () => this.send({ t: 'hello', kind: 'agent', name: this.name, note: this.note }));
       this.ws.on('error', reject);
       this.ws.on('close', () => this.emit('close'));
@@ -58,6 +66,7 @@ export class AgentClient extends EventEmitter {
       const p = this.peers.get(m.id);
       if (p) Object.assign(p, m);
     } else if (m.t === 'desks') this.desks = m.desks;
+    if (m.t === 'welcome' || m.t === 'notes') this.notes = m.notes;
   }
 
   send(msg) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(msg)); }
@@ -68,11 +77,14 @@ export class AgentClient extends EventEmitter {
 
   get zone() { return this.me && zoneAt(this.me.x, this.me.y); }
 
-  // Walk along the shared A* path at roughly human speed.
-  async walkTo(x, y) {
-    if (this.me.seat) this.send({ t: 'sit', seat: null });
+  // Walk along the shared A* path at roughly human speed. A newer walkTo
+  // cancels an older one. `onStep(done, total)` reports progress.
+  async walkTo(x, y, onStep = null) {
+    const id = ++this.walkId;
+    if (this.me.seat) { this.send({ t: 'sit', seat: null }); this.me.seat = null; }
     const path = findPath(this.me.x, this.me.y, x, y);
     if (!path) return false;
+    let done = 0;
     const speed = 4; // tiles per second
     for (const step of path.slice(1)) {
       const dx = step.x - this.me.x, dy = step.y - this.me.y;
@@ -83,7 +95,9 @@ export class AgentClient extends EventEmitter {
         this.me.x += dx / n; this.me.y += dy / n;
         this.send({ t: 'move', x: +this.me.x.toFixed(3), y: +this.me.y.toFixed(3), dir, moving: true });
         await sleep(100);
+        if (id !== this.walkId || this.ws?.readyState !== 1) return false;
       }
+      onStep?.(++done, path.length - 1);
     }
     this.send({ t: 'move', x: this.me.x, y: this.me.y, dir: 0, moving: false });
     return true;

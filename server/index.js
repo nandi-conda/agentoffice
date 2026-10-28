@@ -9,6 +9,8 @@ import { loadActor } from './atproto.js';
 import { Office } from './office.js';
 import { createAuth } from './auth.js';
 import { handleApi, isApiPath } from './app.js';
+import { AgentAuth } from './agentauth.js';
+import { McpHub } from './mcp.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -58,6 +60,8 @@ const office = new Office(await loadState(), {
   onChange: () => scheduleSave(office),
   loadActor: process.env.OFFLINE ? null : loadActor,
 });
+const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
+const mcp = new McpHub({ office, auth: agents });
 
 function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
@@ -73,10 +77,12 @@ const server = http.createServer(async (req, res) => {
       const ac = new AbortController();
       res.on('close', () => ac.abort());
       const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : req;
-      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth });
+      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth, agents, mcp });
       if (!out) return send(res, 404, { error: 'not found' });
       res.writeHead(out.status, Object.fromEntries(out.headers));
-      return res.end(Buffer.from(await out.arrayBuffer()));
+      // Stream, so MCP's server-sent events reach the agent as they happen.
+      if (out.body) try { for await (const chunk of out.body) res.write(chunk); } catch { /* client went away */ }
+      return res.end();
     }
 
     let p = decodeURIComponent(url.pathname);
@@ -102,7 +108,9 @@ wss.on('connection', async (ws, req) => {
   const early = [];
   const hold = (m) => early.push(m);
   ws.on('message', hold);
-  const did = await auth.didFromCookie(req.headers.cookie);
+  // Browsers sign in with OAuth (cookie); agents with a one-time grant.
+  const grant = new URL(req.url, 'http://x').searchParams.get('grant');
+  const did = (await auth.didFromCookie(req.headers.cookie)) || agents.redeem(grant)?.did || null;
   ws.off('message', hold);
   office.connect(ws, { did });
   for (const m of early) ws.emit('message', m);

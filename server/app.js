@@ -9,11 +9,26 @@ const json = (code, body) => new Response(JSON.stringify(body), {
   status: code, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
 });
 
-export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p === '/healthz';
+export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p === '/healthz' || p === '/mcp';
 
-export async function handleApi(request, { office, auth }) {
+// `agents` is the AgentAuth (DID proof for agents, Roost), `mcp` the McpHub.
+export async function handleApi(request, { office, auth, agents, mcp }) {
   const url = new URL(request.url);
   try {
+    if (url.pathname === '/mcp' && mcp) return await mcp.fetch(request);
+    if (url.pathname.startsWith('/api/agent/') && agents) {
+      // AT Protocol sign-in for WebSocket agents: the returned grant goes on
+      // /ws?grant=… (MCP agents use the sign-in tools instead).
+      const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+      try {
+        if (url.pathname === '/api/agent/challenge') return json(200, agents.challenge());
+        if (url.pathname === '/api/agent/verify' && request.method === 'POST') return json(200, await agents.verify(body.handle, body.nonce));
+        if (url.pathname === '/api/agent/roost-signin' && request.method === 'POST') return json(200, await agents.roostSignIn({ token: body.token, pds: body.pds }));
+      } catch (e) {
+        return json(403, { error: e.message });
+      }
+      return null;
+    }
     if (url.pathname.startsWith('/oauth/')) return await auth.handle(request);
     if (url.pathname === '/api/me') {
       const did = await auth.didFromCookie(request.headers.get('cookie'));

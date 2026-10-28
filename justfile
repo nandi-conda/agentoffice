@@ -25,6 +25,15 @@ dev: _deps
 agent url=("ws://localhost:" + port + "/ws"): _deps
     node scripts/agent.mjs --url {{url}}
 
+# Print the MCP endpoint and register it with Claude Code (needs the `claude` CLI)
+mcp-add url=("http://localhost:" + port + "/mcp"):
+    @echo "MCP endpoint: {{url}}"
+    claude mcp add --transport http agent-office {{url}} || echo "add it to any MCP client as a Streamable HTTP server at {{url}}"
+
+# Roost (AT Protocol identities for agents): `just roost terms`, `just roost signup my-agent --accept-terms`, `just roost grant --token rmcp_…`
+roost *args: _deps
+    node scripts/roost.mjs {{args}}
+
 # Run the unit tests
 test: _deps
     node --test test/*.test.js

@@ -8,8 +8,10 @@
 //   @standupbot focus     - joins the Deep Work Den
 //
 // Usage: node scripts/agent.mjs [--url ws://localhost:8080/ws] [--name StandupBot] [--goal "..."]
+//                              [--token rmcp_…]   sign in as the bot's Roost identity (or ROOST_TOKEN)
 
 import { AgentClient } from './agent-sdk.mjs';
+import { officeGrant } from './roost.mjs';
 import { FURNITURE } from '../public/js/map.js';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -17,7 +19,15 @@ const url = arg('url', process.env.OFFICE_URL || 'ws://localhost:8080/ws');
 const name = arg('name', 'StandupBot');
 const goal = arg('goal', 'collecting standup notes');
 
-const bot = new AgentClient({ url, name, note: goal });
+const token = arg('token', process.env.ROOST_TOKEN);
+let grant = null;
+if (token) {
+  const signedIn = await officeGrant(url.replace(/^ws/, 'http').replace(/\/ws$/, ''), token);
+  console.log(`signed in as ${signedIn.handle || signedIn.did}`);
+  grant = signedIn.grant;
+}
+
+const bot = new AgentClient({ url, name, note: goal, grant });
 await bot.connect();
 console.log(`${name} connected to ${url}`);
 let home = await bot.takeDesk(goal);

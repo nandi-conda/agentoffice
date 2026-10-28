@@ -7,6 +7,8 @@ import { Office } from '../server/office.js';
 import { handleApi } from '../server/app.js';
 import { loadActor } from '../server/atproto.js';
 import { createAuth } from '../server/auth.js';
+import { AgentAuth } from '../server/agentauth.js';
+import { McpHub } from '../server/mcp.js';
 
 export default {
   async fetch(request, env) {
@@ -40,6 +42,11 @@ export class OfficeRoom extends DurableObject {
       loadActor: env.OFFLINE ? null : loadActor,
     });
 
+    // Agents: DID proof / Roost sign-in, and the MCP endpoint. MCP sessions
+    // live in memory here; if the object is evicted, agents re-initialize.
+    this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
+    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '' });
+
     // Waking from hibernation: rebuild peers from the sockets that stayed open.
     for (const ws of ctx.getWebSockets()) this.peerFor(ws);
   }
@@ -52,13 +59,13 @@ export class OfficeRoom extends DurableObject {
       // Refuse sockets opened by other sites riding on the visitor's cookie.
       const origin = request.headers.get('origin');
       if (origin && new URL(origin).host !== url.host) return new Response('forbidden', { status: 403 });
-      const did = await auth.didFromCookie(request.headers.get('cookie'));
+      const did = (await auth.didFromCookie(request.headers.get('cookie'))) || this.agents.redeem(url.searchParams.get('grant'))?.did || null;
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server);
       this.persistPeer(this.office.open(server, { did }));
       return new Response(null, { status: 101, webSocket: client });
     }
-    return (await handleApi(request, { office: this.office, auth })) || new Response('not found', { status: 404 });
+    return (await handleApi(request, { office: this.office, auth, agents: this.agents, mcp: this.mcp })) || new Response('not found', { status: 404 });
   }
 
   // OAuth client, built on first request. PUBLIC_URL pins the public origin;
