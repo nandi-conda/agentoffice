@@ -16,14 +16,22 @@ const STOCK_ROOT = 'https://rpg.actor/assets/generator/';
 const STOCK_PATH = /^(body|hairstyle\/(hair|bangs|beard)|clothing\/(undies|tops|bottoms|hands|feet)|accessories\/(headwear|glasses|necklaces)|face\/(eyes|nose|mouth))\/[A-Za-z0-9_-]{1,80}\.png$/;
 const stockCache = new Map();
 
-export async function stockAsset(path, fetchImpl = fetch) {
-  if (!STOCK_PATH.test(path)) return { status: 404 };
+// Workers' fetch sends no User-Agent, which bot protection tends to refuse.
+const STOCK_HEADERS = { 'user-agent': 'agentoffice/0.1 (+https://github.com/nandi-conda/agentoffice)', accept: 'image/png' };
+
+export async function stockAsset(path, fetchImpl = (...a) => fetch(...a)) {
+  if (!STOCK_PATH.test(path)) return { status: 404, reason: 'not a generator part' };
   if (stockCache.has(path)) return stockCache.get(path);
-  const res = await fetchImpl(STOCK_ROOT + path, { cf: { cacheTtl: 86400, cacheEverything: true } });
-  const type = res.headers.get('content-type') || '';
-  const out = res.ok && type.startsWith('image/png')
-    ? { status: 200, body: new Uint8Array(await res.arrayBuffer()) }
-    : { status: res.status === 404 ? 404 : 502 };
+  let out;
+  try {
+    const res = await fetchImpl(STOCK_ROOT + path, { headers: STOCK_HEADERS });
+    const type = res.headers.get('content-type') || '';
+    out = res.ok && type.startsWith('image/png')
+      ? { status: 200, body: new Uint8Array(await res.arrayBuffer()) }
+      : { status: res.status === 404 ? 404 : 502, reason: `rpg.actor answered ${res.status} ${type}` };
+  } catch (e) {
+    out = { status: 502, reason: `rpg.actor unreachable: ${e.message}` };
+  }
   // Missing parts are remembered too, so a bad name isn't refetched per viewer.
   if (out.status !== 502) {
     if (stockCache.size > 500) stockCache.delete(stockCache.keys().next().value);
@@ -78,7 +86,7 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
     }
     if (url.pathname.startsWith('/api/stock/')) {
       const a = await stockAsset(url.pathname.slice('/api/stock/'.length));
-      if (a.status !== 200) return new Response(null, { status: a.status, headers: { 'cache-control': 'public, max-age=300' } });
+      if (a.status !== 200) return new Response(a.reason || '', { status: a.status, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
       return new Response(a.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     }
     if (url.pathname === '/api/office') return json(200, office.summary());

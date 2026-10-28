@@ -57,3 +57,13 @@ test('composite stacks layers and lets a black map pixel punch through', () => {
   assert.equal(out[3], 0);
   assert.deepEqual([...out.slice(4)], [200, 200, 200, 255]);
 });
+
+test('stock proxy sends a User-Agent and reports why rpg.actor failed', async () => {
+  let ua;
+  const a = await stockAsset('body/ua_check.png', async (url, init) => { ua = init.headers['user-agent']; return new Response('', { status: 403 }); });
+  assert.match(ua, /agentoffice/);
+  assert.equal(a.status, 502);
+  assert.match(a.reason, /403/);
+  const b = await stockAsset('body/throws.png', async () => { throw new Error('dns'); });
+  assert.match(b.reason, /unreachable: dns/);
+});

@@ -12,6 +12,9 @@
 // read their pixels without CORS trouble.
 
 export const STOCK_BASE = '/api/stock/';
+// Straight from rpg.actor, used when our proxy can't fetch a part. Only
+// usable when rpg.actor allows cross-origin reads; otherwise it fails too.
+export const STOCK_DIRECT = 'https://rpg.actor/assets/generator/';
 export const W = 144, H = 192;
 
 // --- recolour (after rpg.actor's generator-bake.js) ----------------------
@@ -201,21 +204,28 @@ function shade(hex, amt) {
 
 const pixelCache = new Map();
 
-function pixels(path) {
-  if (!pixelCache.has(path)) {
-    pixelCache.set(path, new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        if (img.width !== W || img.height !== H) return resolve(null);
+function readImage(url, cors) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (cors) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (img.width !== W || img.height !== H) return resolve(null);
+      try {
         const c = document.createElement('canvas');
         c.width = W; c.height = H;
         const g = c.getContext('2d');
         g.drawImage(img, 0, 0);
         resolve(g.getImageData(0, 0, W, H).data);
-      };
-      img.onerror = () => resolve(null);
-      img.src = STOCK_BASE + path;
-    }));
+      } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+function pixels(path) {
+  if (!pixelCache.has(path)) {
+    pixelCache.set(path, readImage(STOCK_BASE + path).then((d) => d || readImage(STOCK_DIRECT + path, true)));
   }
   return pixelCache.get(path);
 }
@@ -242,7 +252,13 @@ async function buildSheet(seedText, kind) {
   if (!first.base) {
     first.base = await pixels(`body/body_${body}.png`);
     first.map = await pixels(`body/body_${body}_c.png`);
-    if (!first.base) return null;
+    if (!first.base) {
+      const why = await fetch(STOCK_BASE + layers[0].path)
+        .then(async (r) => (r.ok ? `${r.status}, but not a 144x192 image` : `${r.status} ${await r.text()}`))
+        .catch((e) => e.message);
+      console.warn(`[stock] no rpg.actor body art (${layers[0].path}: ${why}); using the drawn fallback character`);
+      return null;
+    }
     faced = true;
   }
   const rest = layers.slice(1).filter((l) => !(faced && ['eyes', 'nose', 'mouth'].includes(l.id)));
