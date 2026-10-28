@@ -3,6 +3,7 @@
 // show and turns it into protocol messages (Office.apply).
 
 import { Entity } from './runtime.js';
+import { str, int, num as numS, bool, arr, obj, opt, WHO } from './schema.js';
 import { DESKS, ZONES } from '../../public/js/map.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, fmtTime, fmtRange } from '../../public/js/rooms.js';
 
@@ -21,7 +22,14 @@ const INBOX_MAX = 30;
 // events out to them. The World mirrors the subscriber count so it only
 // publishes to topics somebody listens to.
 export class Topic extends Entity {
-  static rpc = ['subscribe', 'unsubscribe', 'publish', 'subscribers'];
+  static doc = 'A pub/sub channel. Keeps its subscribers and fans events out to them; the World mirrors the subscriber count so it only publishes to topics somebody listens to.';
+  static api = {
+    view: { doc: 'How many subscribe.', returns: int('Subscriber count', 0) },
+    subscribers: { doc: 'Addresses subscribed to this topic.', returns: arr(str('Entity address'), 'Subscribers') },
+    subscribe: { doc: 'Add an entity to the topic.', params: { address: str('Subscriber address') }, returns: int('Subscriber count', 0), mutates: true, internal: true },
+    unsubscribe: { doc: 'Remove an entity from the topic.', params: { address: str('Subscriber address') }, mutates: true, internal: true },
+    publish: { doc: 'Send an event to every subscriber but the publisher (their notify()).', params: { ev: { type: 'object', description: 'The event, usually { type, ... }' }, from: str('Publisher address') }, returns: int('How many it went to', 0), internal: true },
+  };
 
   view() { return (this.state.subs || []).length; }
   subscribers() { return this.state.subs || []; }
@@ -56,7 +64,20 @@ export class Topic extends Entity {
 // Holds the rpg.actor character, the status they had last, notes that came
 // while they were away, and (for DIDs) their AT Protocol OAuth session.
 export class Actor extends Entity {
-  static rpc = ['arrive', 'depart', 'profile', 'remember', 'sessionGet', 'sessionSet', 'sessionDel'];
+  static doc = 'One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. Holds the rpg.actor character, the status they had last, notes that came while they were away, and (for DIDs) their AT Protocol OAuth session. Guests get none.';
+  static api = {
+    view: { doc: 'Whether they are in and when they were last seen.', returns: obj({ online: bool('In the office now'), lastSeen: { type: ['integer', 'null'], description: 'ms since epoch' } }), internal: true },
+    profile: { doc: 'Their rpg.actor character (cached 10 minutes; the last good one if the PDS is down).', params: { opts: opt(obj({ fresh: opt(bool('Skip the cache')) }, 'Options')) }, returns: { type: ['object', 'null'], description: '{ handle, sprite, stats, displayName, description }, null without a DID' }, internal: true },
+    arrive: { doc: 'Walking in: returns the character, last status and note, and the notes kept while they were away (and empties the inbox).', mutates: true, internal: true },
+    depart: { doc: 'Walking out.', mutates: true, internal: true },
+    remember: { doc: 'Keep their status and note for next time.', params: { last: obj({ status: opt(str('Status')), note: opt(str('Working-on note', 80)) }) }, mutates: true, internal: true },
+    sessionGet: { doc: 'The AT Protocol OAuth session, unless older than ttlMs.', params: { ttlMs: opt(int('Max age in ms', 0)) }, internal: true },
+    sessionSet: { doc: 'Store the OAuth session.', params: { session: { type: 'object', description: 'Tokens + DPoP key' } }, mutates: true, internal: true },
+    sessionDel: { doc: 'Forget the OAuth session.', mutates: true, internal: true },
+  };
+  // Internal all the way: any DID names an actor, so open reads would let
+  // anyone create Durable Objects at will. Look people up with look or /api/actor.
+  static events = { receives: { deliver: 'A protocol message for them: delivered now if they are in, kept in their inbox (30) if not.' } };
 
   get did() { return this.name.startsWith('did:') ? this.name : null; }
 
@@ -131,7 +152,15 @@ export class Actor extends Entity {
 // Each desk is claimed by one owner. Desks listen to each other on the
 // `desks` topic: claiming one lets go of any other desk you held.
 export class Desk extends Entity {
-  static rpc = ['claim', 'goal', 'release', 'touch'];
+  static doc = 'A desk, claimed by one owner with a goal. Claiming one lets go of any other desk you held (desks listen to each other on the desks topic). Someone else\'s desk frees up after 12 hours if they are not in.';
+  static api = {
+    view: { doc: 'Who holds it.', returns: { type: ['object', 'null'], description: '{ owner, name, handle, goal, since, seen } or null when free' } },
+    claim: { doc: 'Put your name and goal on the desk.', who: true, params: { goal: opt(str('What you are working on', 80)) }, returns: obj({ ok: bool('Claimed'), error: opt(str('Why not')) }), mutates: true },
+    goal: { doc: 'Change the goal on your desk.', who: true, params: { goal: str('What you are working on', 80) }, returns: obj({ ok: bool('Changed'), error: opt(str('Why not')) }), mutates: true },
+    release: { doc: 'Give your desk up.', who: true, returns: obj({ ok: bool('Released'), error: opt(str('Why not')) }), mutates: true },
+    touch: { doc: 'The owner came in: keeps the desk from going stale.', params: { key: str('Owner key') }, mutates: true, internal: true },
+  };
+  static events = { publishes: { desks: '{ type: "claimed", owner, desk } when someone claims this desk' }, subscribes: { desks: 'lets go of this desk when its owner claims another' } };
 
   async setup() { await this.subscribe('desks'); }
   view() { return this.state.holder || null; }
@@ -185,7 +214,15 @@ export class Desk extends Entity {
 // ---- the whiteboard ------------------------------------------------------------
 // Strokes are stored one key each, so drawing only writes what changed.
 export class Whiteboard extends Entity {
-  static rpc = ['stroke', 'clear'];
+  static doc = 'The Boardroom whiteboard. Strokes are kept one storage key each (the last 3000), so drawing only writes what changed.';
+  static api = {
+    view: { doc: 'Every stroke on the board.', returns: arr(obj({ points: arr(arr(numS('0..1', 0, 1)), 'Points'), color: str('#rrggbb'), size: numS('Width', 1, 24), by: str('Who drew it') }), 'Strokes') },
+    stroke: {
+      doc: 'Draw a stroke. Coordinates are 0..1 across the board, origin top-left.', who: true, mutates: true,
+      params: { stroke: obj({ points: arr(arr(numS('0..1', 0, 1), '[x, y]', 2), 'At least 2 points, at most 400', 400), color: opt(str('#rrggbb', 7, { pattern: '^#[0-9a-fA-F]{6}$' })), size: opt(numS('Width', 1, 24)) }, 'The stroke', ['points']) },
+    },
+    clear: { doc: 'Wipe the board.', mutates: true },
+  };
 
   async strokes() {
     return [...(await this.host.storage.list({ prefix: 's:' })).values()];
@@ -226,7 +263,12 @@ export class Whiteboard extends Entity {
 
 // ---- the notice board ----------------------------------------------------------
 export class NoticeBoard extends Entity {
-  static rpc = ['add', 'remove'];
+  static doc = 'The lobby notice board: sticky notes, newest first, at most 40.';
+  static api = {
+    view: { doc: 'The notes.', returns: arr(obj({ id: str('Note id'), text: str('Text'), by: str('Author name'), owner: str('Author key'), ts: int('ms since epoch', 0), color: str('Paper colour') }), 'Notes, newest first (at most 40)') },
+    add: { doc: 'Pin a note.', who: true, params: { text: str('Note text', 200) }, mutates: true },
+    remove: { doc: 'Take down one of your notes.', who: true, params: { id: str('Note id', 16) }, mutates: true },
+  };
   view() { return this.state.notes || []; }
   seed(notes) { if (Array.isArray(notes) && !this.state.notes) { this.state.notes = notes; return this.save(); } }
 
@@ -251,7 +293,11 @@ export class NoticeBoard extends Entity {
 
 // ---- the arcade ------------------------------------------------------------------
 export class Arcade extends Entity {
-  static rpc = ['score'];
+  static doc = 'The Byte Snake arcade cabinet and its top 20.';
+  static api = {
+    view: { doc: 'The leaderboard.', returns: arr(obj({ name: str('Player'), score: int('Score', 0), ts: int('ms since epoch', 0) }), 'Top scores') },
+    score: { doc: 'Submit a score.', who: true, params: { score: int('Score', 1, 10000) }, mutates: true },
+  };
   view() { return this.state.scores || []; }
   seed(scores) { if (Array.isArray(scores) && !this.state.scores) { this.state.scores = scores; return this.save(); } }
 
@@ -268,7 +314,11 @@ export class Arcade extends Entity {
 
 // ---- the coffee machine --------------------------------------------------------------
 export class CoffeeMachine extends Entity {
-  static rpc = ['brew'];
+  static doc = 'The kitchen coffee machine; counts cups.';
+  static api = {
+    view: { doc: 'Cups brewed.', returns: obj({ count: int('Cups', 0) }) },
+    brew: { doc: 'Count a cup (people get theirs with the protocol coffee message, which also hands them the mug).', returns: int('Cups so far', 0), mutates: true },
+  };
   view() { return { count: this.state.count || 0 }; }
   seed(count) { if (count && !this.state.count) { this.state.count = count; return this.save(); } }
 
@@ -284,7 +334,12 @@ export class CoffeeMachine extends Entity {
 // One per quiet zone, shared by everyone in it. Phases turn over on the
 // entity's own alarm.
 export class Pomodoro extends Entity {
-  static rpc = ['start', 'stop'];
+  static doc = 'A shared pomodoro timer, one per quiet zone. Phases turn over on its own alarm.';
+  static api = {
+    view: { doc: 'Phase, end time and rounds, plus focus sessions finished.', returns: obj({ state: obj({ phase: str('idle, focus or break'), endsAt: int('ms since epoch', 0), round: int('Round', 0), focusMin: int('Focus minutes', 1, 90), breakMin: int('Break minutes', 1, 30), startedBy: str('Who started it') }), count: int('Focus sessions done', 0) }) },
+    start: { doc: 'Start focusing.', who: true, inZone: true, params: { opts: opt(obj({ focusMin: opt(int('Focus minutes (default 25)', 1, 90)), breakMin: opt(int('Break minutes (default 5)', 1, 30)) }, 'Lengths')) }, mutates: true },
+    stop: { doc: 'Stop the timer.', inZone: true, mutates: true },
+  };
 
   view() {
     const { phase = 'idle', endsAt = 0, round = 0, focusMin = 25, breakMin = 5, startedBy } = this.state;
@@ -347,7 +402,28 @@ export function nextRoomEvent(bookings, now) {
 }
 
 export class Room extends Entity {
-  static rpc = ['book', 'tick'];
+  static doc = 'A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, locks people out of locked meetings, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking\'s owner go to their actor, so they get them even when away.';
+  static api = {
+    view: { doc: 'Its bookings (a day of history included).', returns: arr(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') }), 'Bookings') },
+    book: {
+      doc: 'Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking.', who: true, ctx: true, mutates: true,
+      params: { m: obj({
+        op: str('create, cancel, extend, end, update or admit', 8, { enum: ['create', 'cancel', 'extend', 'end', 'update', 'admit'] }),
+        id: opt(str('Booking id (all ops but create)', 16)),
+        title: opt(str('Title', 80)),
+        start: opt({ type: ['integer', 'string'], description: 'ms since epoch, or "now"' }),
+        end: opt(int('ms since epoch', 0)),
+        minutes: opt(int('Length for create (15..240), or how much to extend by (5..120)', 5, 240)),
+        invitees: opt(arr(str('Handle, DID or agent name', 253), 'Invitees', 20)),
+        lock: opt(bool('Keep everyone else out while it runs')),
+        autoRelease: opt(bool('Free the room if nobody turns up within 10 minutes (default true)')),
+        to: opt(str('Peer id to let in (admit)', 64)),
+      }, 'What to do', ['op']) },
+      returns: obj({ booking: opt(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') })), error: opt(str('Why not')) }),
+    },
+    tick: { doc: 'Send due reminders and announcements, release no-shows. Safe to call as often as you like; the alarm calls it.', params: { opts: opt(obj({ presence: arr(WHO, 'Who is in') })) }, mutates: true, internal: true },
+  };
+  static events = { subscribes: { 'zone:<room>': 'enter: a holder turning up keeps the booking from being released' } };
 
   get room() { return roomById(this.name); }
   get bookings() { return this.state.bookings || []; }

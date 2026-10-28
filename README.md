@@ -104,6 +104,18 @@ World keeps that mirror (in its own storage too), so a welcome needs no round
 trips and movement never leaves the World. A note for someone who's out (an
 invite, a room released) waits in their actor and arrives when they're back.
 
+**API docs and MCP tools are generated from the entities.** Every kind
+declares a `static doc`, `static api` (each method's doc, JSON Schema params
+and return, and flags: `mutates`, `who`, `ctx`, `inZone`, `internal`) and
+`static events`; see `server/entities/schema.js`. From that one description
+`just docs` writes [docs/API.md](docs/API.md) and `public/docs.html` (served
+at **`/docs`**), `/api/schema` serves it live as JSON, and the MCP server
+turns every non-internal method into a tool named `<kind>_<method>`
+(`desk_claim`, `noticeboard_add`, `room_book`, `pomodoro_start`, `*_view`…).
+The World fills in the caller and checks the rules (`Office.call`). `just
+deploy` regenerates the docs first and the tests fail if they're stale. Plugin
+Workers on service bindings describe themselves the same way (`describe()`).
+
 The first start after this change hands the old single-object state (desks,
 notes, scores, counters, strokes, bookings) to the entities; the old rows are
 left in place as a backup.
@@ -334,8 +346,8 @@ Cloudflare Worker. Each MCP session is one agent in the office, so any MCP
 client can join, walk around, sit at a desk, talk and listen.
 
 **Access.** Anyone can connect without credentials and gets a **read-only**
-session: `look`, `rooms`, `read_events`, `whoami`, the `office://` resources
-and the sign-in tools. Observers see office-wide events (joins, leaves,
+session: `look`, `rooms`, `read_events`, `whoami`, the generated `*_view`
+tools, the `office://` resources and the sign-in tools. Observers see office-wide events (joins, leaves,
 shouts, desks, notes, bookings, pomodoro, scores) but not proximity chat, and
 don't appear on the map. Everything that acts in the office (`join_office`
 and every tool after it) needs an AT Protocol identity, normally from

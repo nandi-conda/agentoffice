@@ -27,6 +27,7 @@ import { AgentClient } from '../scripts/agent-sdk.mjs';
 import { ZONES, FURNITURE, SEATS, DESKS, zoneAt, canHear, SPAWN } from '../public/js/map.js';
 import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
+import { describeApi, generatedTools } from './apidoc.js';
 
 const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'ping'];
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
@@ -293,7 +294,8 @@ export class McpHub {
       },
     );
     const office = this.office, auth = this.auth;
-    const tool = (name, description, schema, fn, annotations) => mcp.registerTool(name, { description, inputSchema: schema, ...(annotations ? { annotations } : {}) }, async (args, extra) => {
+    const taken = new Set();
+    const tool = (name, description, schema, fn, annotations) => taken.add(name) && mcp.registerTool(name, { description, inputSchema: schema, ...(annotations ? { annotations } : {}) }, async (args, extra) => {
       agent.touch();
       try { return await fn(args, extra); } catch (e) { return fail(e.message); }
     });
@@ -602,6 +604,24 @@ export class McpHub {
         return json({ did: v.did, handle: v.handle, next: agent.joined ? 'call join_office again to rejoin verified' : 'call join_office' });
       });
 
+    // ---- generated from the entities' static api ----------------------------
+    // One tool per public entity method (<kind>_<method>), described by the
+    // same schema as /docs. Read-only ones work for observers; the rest act as
+    // you, so they need you in the office. Office.call does the checks.
+
+    for (const t of GENERATED) {
+      if (taken.has(t.name)) continue;
+      tool(t.name, t.description, z.fromJSONSchema(t.input), async (args) => {
+        const peer = agent.joined ? office.peers.get(agent.client.me.id) : null;
+        if (!t.readOnly && !peer) return fail(agent.canAct ? 'not in the office yet: call join_office first' : SIGN_IN_HELP);
+        const zone = peer && zoneAt(peer.x, peer.y)?.id;
+        if (t.needsZone && !args.name && !zone) return fail('say which one, or walk into its zone');
+        const r = await office.call(peer, t.address(args, zone), t.method, t.args(args));
+        if (r && typeof r === 'object' && typeof r.error === 'string') return fail(r.error);
+        return json(r === undefined ? { ok: true } : r);
+      }, t.readOnly ? READ_ONLY : undefined);
+    }
+
     // ---- resources ----------------------------------------------------------
 
     mcp.registerResource('map', 'office://map', { title: 'Office map', description: 'Zones, named places and seats', mimeType: 'application/json' },
@@ -616,6 +636,8 @@ export class McpHub {
     return mcp;
   }
 }
+
+const GENERATED = generatedTools(describeApi());
 
 const rpcError = (status, code, message) => Response.json({ jsonrpc: '2.0', error: { code, message }, id: null }, { status });
 

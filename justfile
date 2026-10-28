@@ -38,6 +38,10 @@ roost *args: _deps
 test: _deps
     node --test test/*.test.js
 
+# Regenerate the API docs (docs/API.md, public/docs.html at /docs) from the entities' `static api`
+docs: _deps
+    node scripts/docs.mjs
+
 # Run the server and the demo agent together
 demo: _deps
     PORT={{port}} node server/index.js & server=$!; trap "kill $server" EXIT; sleep 1; node scripts/agent.mjs --url ws://localhost:{{port}}/ws
@@ -48,6 +52,7 @@ cf-dev: _deps
 
 # Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
 deploy *args: _deps
+    node scripts/docs.mjs
     node_modules/.bin/wrangler deploy {{args}}
 
 # Log wrangler in to your Cloudflare account via the browser

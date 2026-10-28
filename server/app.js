@@ -4,6 +4,7 @@
 // New endpoints belong here, written against fetch/Request/Response only.
 
 import { loadActor, fetchBlob } from './atproto.js';
+import { describeApi } from './apidoc.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const json = (code, body) => new Response(JSON.stringify(body), {
@@ -90,6 +91,8 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
       return new Response(a.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     }
     if (url.pathname === '/api/office') return json(200, office.summary());
+    // The whole API (entities, World, plugins) as JSON; /docs is the same, rendered.
+    if (url.pathname === '/api/schema') return json(200, describeApi());
     // Meeting rooms with their live status and schedule (read-only; book over /ws).
     if (url.pathname === '/api/rooms') {
       const now = office.now();

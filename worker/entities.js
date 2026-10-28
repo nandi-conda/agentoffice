@@ -8,11 +8,9 @@ import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
 
-// Which Durable Object class (binding) hosts each kind.
-export const BINDINGS = {
-  world: 'OFFICE', actor: 'ACTOR', room: 'ROOM', topic: 'TOPIC',
-  desk: 'ITEM', whiteboard: 'ITEM', noticeboard: 'ITEM', arcade: 'ITEM', coffee: 'ITEM', pomodoro: 'ITEM',
-};
+import { BINDINGS } from '../server/entities/bindings.js';
+
+export { BINDINGS };
 
 export class DORuntime {
   constructor(env) {

@@ -168,6 +168,7 @@ const server = http.createServer(async (req, res) => {
 
     let p = decodeURIComponent(url.pathname);
     if (p === '/') p = '/index.html';
+    else if (!path.extname(p)) p += '.html'; // /docs → docs.html, as Workers assets do
     const file = path.normalize(path.join(PUBLIC, p));
     if (!file.startsWith(PUBLIC)) return send(res, 403, 'forbidden', 'text/plain');
     const body = await readFile(file);

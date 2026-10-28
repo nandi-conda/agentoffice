@@ -6,7 +6,7 @@
 // (worker/entities.js); on Node they all live in this process
 // (LocalRuntime). Either way they share one messaging layer:
 //
-//   direct RPC   this.ref('room:board').book(...)       (methods in `static rpc`)
+//   direct RPC   this.ref('room:board').book(...)       (methods in `static api`, see schema.js)
 //   messages     this.tell('actor:did:plc:x', 'note', d) → onMessage({ type, data, from })
 //   pub/sub      this.subscribe('zone:board')            → onEvent(topic, ev, from)
 //                this.publish('desks', ev)
@@ -41,7 +41,8 @@ export function makeRef(address, invoke) {
 }
 
 export class Entity {
-  static rpc = [];
+  static rpc = []; // extra methods without a description; prefer `static api`
+  static api = {};
 
   // host: { address, kind, name, storage, now, setAlarm, ref, services }
   constructor(host) {
@@ -116,7 +117,7 @@ export class EntityHost {
   }
 
   async invoke(method, args = []) {
-    if (!BUILTIN.includes(method) && !(this.Kind.rpc || []).includes(method)) {
+    if (!BUILTIN.includes(method) && !(this.Kind.rpc || []).includes(method) && !Object.hasOwn(this.Kind.api || {}, method)) {
       throw new Error(`${this.address} has no method ${method}`);
     }
     await this.load();

@@ -12,6 +12,28 @@ import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked } from '../public/js/ma
 import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
 import { LocalRuntime, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, nextRoomEvent } from './entities/kinds.js';
+import { str, int, arr, obj, WHO, describeKind, paramList } from './entities/schema.js';
+
+// What entities may call on the World ('world:main'), in the same shape as
+// an entity's `static api` (see entities/schema.js), for the API docs.
+export const WORLD = {
+  doc: 'The office itself (OfficeRoom): everyone\'s socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.',
+  api: {
+    apply: {
+      doc: 'Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }. Entities call it through this.emit() and this.mirror().',
+      params: { effects: arr({ type: 'object', description: '{ op, from, ... }' }, 'Effects') }, mutates: true, internal: true,
+    },
+    presence: { doc: 'Who is in the office now.', returns: arr(WHO, 'People'), internal: true },
+    deliver: { doc: 'A protocol message for an actor, to each of their open connections. Returns how many got it.', params: { key: str('Owner key'), msg: { type: 'object', description: 'Protocol message { t, ... }' } }, returns: int('Connections reached', 0), internal: true },
+    summary: { doc: 'The public office summary (/api/office).', returns: obj({ online: arr(obj({}), 'People'), desks: obj({}), counters: obj({}) }), internal: true },
+  },
+  events: {
+    publishes: {
+      'zone:<id>': '{ type: "enter" | "exit", who } when someone walks in or out of a zone',
+      office: '{ type: "join" | "leave", who } when someone comes in or goes',
+    },
+  },
+};
 
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
 const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
@@ -103,6 +125,25 @@ export class Office {
     const out = {};
     for (const z of POMO_ZONES) out[z] = this.mirror.get(`pomodoro:${z}`)?.state || { ...IDLE_POMO };
     return out;
+  }
+
+  // ---- generated API calls ------------------------------------------------
+  // An entity method from its `static api`, called on behalf of peer p (null
+  // for a read-only observer). The same checks for every generated MCP tool:
+  // internal methods never, anything acting or naming the caller needs
+  // someone in the office, inZone needs them standing in the entity's zone.
+  // The World fills in `who` and `ctx`, so callers only pass the params.
+  async call(p, address, method, args = []) {
+    const { kind, name } = parse(address);
+    const spec = KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
+    if (!spec || spec.internal) throw new Error(`${address} has no public method ${method}`);
+    if ((spec.who || spec.mutates || spec.inZone) && !p?.ready) throw new Error('join the office first');
+    if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
+    if (method === 'view' && this.mirror.has(address)) return this.mirror.get(address);
+    const params = paramList(spec).map((_, i) => args[i]);
+    while (params.length && params.at(-1) === undefined) params.pop();
+    if (spec.ctx) params.length = paramList(spec).length;
+    return this.ref(address)[method](...(spec.who ? [this.who(p)] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : []));
   }
 
   // ---- what entities may call on the World --------------------------------
