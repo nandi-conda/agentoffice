@@ -409,7 +409,15 @@ export class FreeqBridge {
 
   // What clients see: area -> channel.
   state() {
-    return Object.fromEntries([...this.bindings].map(([z, b]) => [z, { channel: b.channel, members: b.members, topic: b.topic }]));
+    return Object.fromEntries([...this.bindings].map(([z, b]) => [z, { channel: b.channel, members: b.members, topic: b.topic, last: b.last || null }]));
+  }
+
+  // Someone spoke in a channel. Clients show "active 2m ago", so a fresh
+  // timestamp only needs to go out when the shown value would change.
+  touch(b) {
+    const now = Date.now(), stale = !b.last || now - b.last > 30000;
+    b.last = now;
+    if (stale) this.announce();
   }
 
   announce() {
@@ -528,6 +536,7 @@ export class FreeqBridge {
         if (f && lower(f.active) !== lower(channel)) this.place(f, channel);
         const action = text.match(/^\u0001ACTION (.*)\u0001$/);
         if (/^\u0001/.test(text) && !action) return; // other CTCP
+        this.touch(this.bindings.get(zoneId));
         this.office.remoteChat({ zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: m.nick, text: action ? `* ${m.nick} ${action[1]}` : text });
         return;
       }
@@ -547,6 +556,7 @@ export class FreeqBridge {
       u.used = Date.now();
       u.irc.join(b.channel);
       u.irc.say(b.channel, text);
+      this.touch(b);
       return null;
     } catch (e) {
       this.log(`freeq: ${p.handle || p.did} couldn't send to ${b.channel}: ${e.message}`);

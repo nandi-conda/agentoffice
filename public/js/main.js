@@ -242,6 +242,7 @@ function onMessage(m) {
       for (const p of m.peers) addPeer(p);
       desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
       freeqRooms = m.freeq || {};
+      refreshChannels();
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
@@ -281,7 +282,7 @@ function onMessage(m) {
       break;
     }
     case 'desks': desks = m.desks; refreshPeople(); break;
-    case 'freeq': freeqRooms = m.rooms || {}; if (me) zoneChanged(lastZone, true); break;
+    case 'freeq': freeqRooms = m.rooms || {}; if (me) zoneChanged(lastZone, true); refreshChannels(); break;
     case 'notes': notes = m.notes; if (modal.notesOpen) openNotes(); break;
     case 'pomo': {
       if (m.now) serverOffset = m.now - Date.now();
@@ -599,6 +600,48 @@ function refreshPeople() {
   }, 120);
 }
 setInterval(refreshPeople, 5000);
+
+// ---- freeq channels: what's attached where; click one to walk there ---------
+const channelsHead = $('.channels-head');
+function setChannelsCollapsed(c) {
+  $('.channels').classList.toggle('collapsed', c);
+  channelsHead.setAttribute('aria-expanded', String(!c));
+  store.set('channelsCollapsed', c);
+}
+setChannelsCollapsed(store.get('channelsCollapsed', false));
+channelsHead.addEventListener('click', () => setChannelsCollapsed(!$('.channels').classList.contains('collapsed')));
+const ago = (t) => {
+  const s = Math.max(0, (serverNow() - t) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
+};
+function refreshChannels() {
+  const here = me && zoneAt(me.x, me.y)?.id;
+  const list = Object.entries(freeqRooms).map(([zoneId, c]) => ({ ...c, zone: ZONES.find((z) => z.id === zoneId) })).filter((c) => c.zone)
+    .sort((a, b) => (b.last || 0) - (a.last || 0) || b.members - a.members || a.channel.localeCompare(b.channel));
+  $('.channels').hidden = !list.length;
+  $('.channels .count').textContent = list.length;
+  $('.channel-list').innerHTML = list.map((c) => {
+    const live = c.last && serverNow() - c.last < 5 * 60000;
+    const sub = [c.zone.name, c.last ? ago(c.last) : c.topic].filter(Boolean).join(' · ');
+    return `<li class="${c.zone.id === here ? 'here' : ''}"><button type="button" data-zone="${c.zone.id}" title="${esc(c.topic ? `${c.channel}: ${c.topic}` : c.channel)}. Walk to the ${esc(c.zone.name)}">`
+      + `<span class="hash" aria-hidden="true">#</span><span class="who"><b>${live ? '<span class="live" title="Active in the last 5 minutes"></span>' : ''}${esc(c.channel.replace(/^#/, ''))}</b><span>${esc(sub)}</span></span>`
+      + `<span class="members" title="People in the channel">${c.members} 👤</span></button></li>`;
+  }).join('');
+  $('.channel-list').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => walkToZone(ZONES.find((z) => z.id === b.dataset.zone))));
+}
+setInterval(refreshChannels, 30000);
+
+// Walk into an area: its middle, or the open tile nearest it when that's furniture.
+function walkToZone(z) {
+  if (!z || !me) return;
+  if (zoneAt(me.x, me.y)?.id === z.id) return toast(`You're already in the ${esc(z.name)}.`, [], 2500);
+  const cx = (z.x0 + z.x1 + 1) / 2, cy = (z.y0 + z.y1 + 1) / 2;
+  const spots = [];
+  for (let y = z.y0; y <= z.y1; y++) for (let x = z.x0; x <= z.x1; x++) if (!isBlocked(x, y)) spots.push({ x: x + 0.5, y: y + 0.5, d: Math.hypot(x + 0.5 - cx, y + 0.5 - cy) });
+  spots.sort((a, b) => a.d - b.d);
+  for (const s of spots.slice(0, 12)) if (findPath(me.x, me.y, s.x, s.y)) return walkTo(s.x, s.y);
+  toast(`Couldn't find a way into the ${esc(z.name)}.`, [], 3000);
+}
 
 const mini = $('#minimap');
 const mg = mini.getContext('2d');
@@ -1201,7 +1244,7 @@ function loop(t) {
       p.rx += (p.x - p.rx) * a; p.ry += (p.y - p.ry) * a;
     }
     const z = zoneAt(me.x, me.y);
-    if (z !== lastZone) { lastZone = z; zoneChanged(z); }
+    if (z !== lastZone) { lastZone = z; zoneChanged(z); refreshChannels(); }
 
     // Den focus sessions flip your status while you're inside.
     const den = pomo.focus;
