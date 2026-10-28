@@ -549,7 +549,24 @@ export class FreeqBridge {
       u.irc.say(b.channel, text);
       return null;
     } catch (e) {
-      return `Couldn't reach ${b.channel} on freeq as you: ${e.message}`;
+      this.log(`freeq: ${p.handle || p.did} couldn't send to ${b.channel}: ${e.message}`);
+      return `Your message stayed in the office, it didn't reach ${b.channel} on freeq: ${e.message}`;
+    }
+  }
+
+  // Tell a person (every tab they have open) how their freeq connection is doing.
+  notify(did, text, ok = false) {
+    for (const q of this.office.peers.values()) if (q.did === did && q.kind === 'human') this.office.sendTo(q, { t: 'freeq-note', text, ok });
+  }
+
+  // Replies on a person's own connection that mean a message didn't land.
+  onUserLine(did, m) {
+    const last = m.params[m.params.length - 1] || '';
+    const code = Number(m.command);
+    if (m.command === 'FAIL' || (code >= 400 && code < 600 && code !== 433)) {
+      this.log(`freeq: ${did}: ${m.command} ${m.params.join(' ')}`);
+      const what = m.params.slice(1, -1).filter(Boolean).join(' ');
+      this.notify(did, `freeq said no${what ? ` (${what})` : ''}: ${last}`);
     }
   }
 
@@ -557,16 +574,31 @@ export class FreeqBridge {
     let u = this.users.get(p.did);
     if (u && !u.irc.closed) { await u.ready; return u; }
     if (!this.auth?.freeqCredentials) throw new Error('sign-in tokens are not available');
-    const creds = (nonce) => this.auth.freeqCredentials(p.did, nonce);
+    const did = p.did;
+    const creds = (nonce) => this.auth.freeqCredentials(did, nonce);
     await creds(null); // fail early (and warm the PDS's DPoP nonce) before opening a socket
     const irc = new IrcClient({
       url: this.url, openSocket: this.openSocket, nick: ircNick(p.handle || p.name), respond: oauthResponder(creds),
-      onClose: () => { if (this.users.get(p.did)?.irc === irc) this.users.delete(p.did); },
+      onLine: (m) => this.onUserLine(did, m),
+      onClose: (why) => {
+        if (this.users.get(did)?.irc !== irc) return;
+        this.users.delete(did);
+        if (irc.registered && why !== 'closed') this.notify(did, `Your freeq connection dropped (${why}); the next thing you say reconnects.`);
+      },
     });
-    u = { irc, used: Date.now(), ready: irc.open() };
-    this.users.set(p.did, u);
+    // Never wait forever on a sign-in freeq doesn't finish.
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('freeq didn\'t finish signing you in within 20 seconds')), 20000));
+    u = { irc, used: Date.now(), ready: Promise.race([irc.open(), timeout]) };
+    this.users.set(did, u);
     if (!this.sweeper) this.sweeper = setInterval(() => this.sweep(), 60000);
-    try { await u.ready; } catch (e) { this.users.delete(p.did); throw e; }
+    try {
+      const who = await u.ready;
+      this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== did ? ` (freeq says you're ${who.did}, not ${did})` : ''}.`, true);
+    } catch (e) {
+      this.users.delete(did);
+      irc.close('sign-in failed');
+      throw e;
+    }
     return u;
   }
 

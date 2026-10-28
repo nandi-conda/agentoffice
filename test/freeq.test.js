@@ -182,6 +182,7 @@ test('populated channels attach to areas, and talk flows both ways', async () =>
   const line = bobGot.find((l) => l.includes('PRIVMSG #general :hello freeq'));
   assert.ok(line, 'bob should hear Alice');
   assert.match(line, /account=did:plc:alice/);
+  assert.ok(said.some((m) => m.t === 'freeq-note' && m.ok && /Talking on freeq as/.test(m.text)));
   // ...and the listener doesn't echo Alice back into the office.
   await tick();
   assert.equal(said.filter((m) => m.t === 'chat' && m.text === 'hello freeq').length, 1);
@@ -193,7 +194,7 @@ test('populated channels attach to areas, and talk flows both ways', async () =>
   guest.x = 36; guest.y = 26;
   await office.handle(guest, { t: 'chat', text: 'can anyone hear me' });
   await tick();
-  assert.ok(gsaid.some((m) => m.t === 'toast' && /signed-in/.test(m.text)));
+  assert.ok(gsaid.some((m) => m.t === 'freeq-note' && /signed-in/.test(m.text)));
 
   // Everyone leaves: the person's connection hangs up.
   office.leave(me);
@@ -240,6 +241,43 @@ test('someone in several channels is one person, standing where they last spoke'
   assert.ok(!/also/.test(p.note));
   bridge.onListenerLine(parseLine(`:bob!b@h QUIT :bye`));
   assert.equal(bobs().length, 0);
+  bridge.stop();
+});
+
+test('a failed freeq sign-in or a refused message tells the speaker why', async () => {
+  let refuse = true;
+  const server = fakeFreeq({ verify: async (r) => r.method === 'crypto' || !refuse });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    auth: { freeqCredentials: async (did) => ({ did, pds: 'https://pds.example', accessToken: 't', dpopProof: 'p' }) },
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async () => new Response(JSON.stringify([{ name: '#general', members: 3 }])),
+  });
+  server.outsider('bob', 'did:plc:bob').join('#general');
+  const said = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did: 'did:plc:alice' });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  await bridge.start();
+  await tick();
+  me.x = 36; me.y = 25;
+  await office.handle(me, { t: 'chat', text: 'one' });
+  for (let i = 0; i < 20 && !said.some((m) => m.t === 'freeq-note'); i++) await tick();
+  const fail = said.find((m) => m.t === 'freeq-note');
+  assert.equal(fail.ok, false);
+  assert.match(fail.text, /didn't reach #general.*sign-in failed/);
+
+  // Signed in, but the channel turns the message away.
+  refuse = false;
+  said.length = 0;
+  await office.handle(me, { t: 'chat', text: 'two' });
+  for (let i = 0; i < 20 && !bridge.users.get('did:plc:alice')?.irc.registered; i++) await tick();
+  const conn = [...server.conns].find((c) => c.account === 'did:plc:alice');
+  conn.out(':irc.freeq.at 404 alice #general :Cannot send to channel');
+  await tick();
+  assert.ok(said.some((m) => m.t === 'freeq-note' && !m.ok && /Cannot send to channel/.test(m.text)));
   bridge.stop();
 });
 

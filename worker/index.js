@@ -55,7 +55,9 @@ export class OfficeRoom extends DurableObject {
         office: this.office,
         // Talking as yourself needs your stored OAuth session, so the auth
         // object (built on the first request) is looked up when needed.
-        auth: { freeqCredentials: (did, nonce) => this.auth ? this.auth.freeqCredentials(did, nonce) : Promise.reject(new Error('sign in again to talk on freeq')) },
+        // After a hibernation wake-up the auth object hasn't been built yet
+        // (only HTTP requests build it), so rebuild it from the last origin seen.
+        auth: { freeqCredentials: (did, nonce) => this.authForFreeq().freeqCredentials(did, nonce) },
         url: env.FREEQ_URL || FREEQ_URL,
         rooms: env.FREEQ_ROOMS || '',
         minMembers: Number(env.FREEQ_MIN_MEMBERS) || 2,
@@ -105,8 +107,16 @@ export class OfficeRoom extends DurableObject {
   // OAuth client, built on first request. PUBLIC_URL pins the public origin;
   // without it a deployed Worker uses the origin it was reached on, and
   // localhost (wrangler dev) uses the AT Protocol loopback client.
+  authForFreeq() {
+    if (this.auth) return this.auth;
+    const row = this.sql.exec("SELECT v FROM meta WHERE k = 'origin'").toArray()[0];
+    if (!row && !this.env.PUBLIC_URL) throw new Error('the office has no sign-in setup yet; reload the page');
+    return this.authFor(new URL(this.env.PUBLIC_URL || row.v));
+  }
+
   authFor(url) {
     if (this.auth) return this.auth;
+    this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('origin', ?)", url.origin);
     const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     this.auth = createAuth({
       publicUrl: this.env.PUBLIC_URL || (local ? undefined : url.origin),

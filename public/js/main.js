@@ -342,6 +342,8 @@ function onMessage(m) {
       break;
     }
     case 'toast': toast(esc(m.text)); break;
+    // How the freeq bridge is doing for you: a line in the chat log, and a toast when something failed.
+    case 'freeq-note': sys(`${m.ok ? '💬' : '⚠️'} ${m.text}`); if (!m.ok) toast(`⚠️ ${esc(m.text)}`); break;
     case 'rtc': voice.onSignal(m.from, m.data); break;
     case 'error': toast(`⚠️ ${esc(m.message)}`); break;
   }

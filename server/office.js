@@ -267,8 +267,9 @@ export class Office {
     if (bridged) {
       msg.scope = bridged.channel;
       this.freeq.relay(p, zone.id, msg.text).then((note) => {
-        if (note && note !== p.freeqNote) this.sendTo(p, { t: 'toast', text: note });
-        p.freeqNote = note;
+        // The same note again within a minute (a guest chatting away) isn't news.
+        if (note && (note !== p.freeqNote || this.now() - p.freeqNoteAt > 60000)) this.sendTo(p, { t: 'freeq-note', text: note, ok: false });
+        if (note) { p.freeqNote = note; p.freeqNoteAt = this.now(); }
       });
     }
     const hears = (q) => (bridged ? zoneAt(q.x, q.y) === zone : canHear(p, q));
