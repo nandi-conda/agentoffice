@@ -15,8 +15,6 @@ export default {
   },
 };
 
-const KV_KEYS = ['desks', 'notes', 'scores', 'counters'];
-
 export class OfficeRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -152,7 +150,8 @@ export class OfficeRoom extends DurableObject {
 
   save() {
     const state = this.office.persisted();
-    for (const k of KV_KEYS) this.sql.exec('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, JSON.stringify(state[k]));
+    // Everything office.persisted() returns is one JSON row, except strokes.
+    for (const k of Object.keys(state)) if (k !== 'strokes') this.sql.exec('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, JSON.stringify(state[k]));
     const live = new Set();
     for (const s of state.strokes) {
       let id = this.strokeRows.get(s);
