@@ -1,6 +1,6 @@
 import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
 import { createRenderer, EMOJI } from './render.js';
-import { sheetsFor } from './sprites.js';
+import { sheetsFor, facing } from './sprites.js';
 import { tracedFrame, drawTraced } from './trace.js';
 import { STATUS, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
@@ -276,7 +276,7 @@ function onMessage(m) {
       const p = peers.get(m.id);
       if (!p || p === me) break;
       p.x = m.x; p.y = m.y; p.dir = m.dir; p.moving = m.moving; p.seat = m.seat;
-      if (Math.hypot(p.rx - p.x, p.ry - p.y) > 5) { p.rx = p.x; p.ry = p.y; }
+      track(p);
       break;
     }
     case 'peer': {
@@ -1302,10 +1302,14 @@ function stepMe(dt) {
   if (moving && me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
   if (moving) {
     const len = Math.hypot(vx, vy);
+    const x0 = me.x, y0 = me.y;
     const nx = me.x + (vx / len) * SPEED * dt, ny = me.y + (vy / len) * SPEED * dt;
     if (free(nx, me.y)) me.x = nx;
     if (free(me.x, ny)) me.y = ny;
-    me.dir = Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 1 : 2) : vy < 0 ? 3 : 0;
+    // Face where you actually go (sliding along a wall faces along it), or
+    // where you're pushing when you're stuck.
+    const mx = me.x - x0, my = me.y - y0;
+    me.dir = mx || my ? facing(me.dir, mx, my) : facing(me.dir, vx, vy);
   }
   me.moving = moving;
   me.rx = me.x; me.ry = me.y;
@@ -1315,6 +1319,31 @@ function stepMe(dt) {
     net.send({ t: 'move', x: +me.x.toFixed(3), y: +me.y.toFixed(3), dir: me.dir, moving });
     lastSent = now; sentMoving = moving; lastSentPos = { x: me.x, y: me.y };
   }
+}
+
+// Other people are drawn a little in the past, between the last two spots
+// they reported, so ~15 updates a second play back as an even walk instead
+// of lurch-and-stop. Big jumps (teleports, reconnects) snap.
+const BEHIND = 120;
+function track(p) {
+  const now = performance.now();
+  const tr = p.track || (p.track = []);
+  const prev = tr[tr.length - 1];
+  if (!prev || Math.hypot(p.x - p.rx, p.y - p.ry) > 5) { tr.length = 0; p.rx = p.x; p.ry = p.y; }
+  // Setting off after standing still: start from where they stood, just now.
+  else if (now - prev.t > 250) tr.push({ t: now - 66, x: prev.x, y: prev.y });
+  tr.push({ t: now, x: p.x, y: p.y });
+  if (tr.length > 20) tr.splice(0, tr.length - 20);
+}
+function glide(p, now) {
+  const tr = p.track;
+  if (!tr?.length) { p.rx = p.x; p.ry = p.y; return; }
+  const rt = now - BEHIND;
+  while (tr.length > 1 && tr[1].t <= rt) tr.shift();
+  const a = tr[0], b = tr[1];
+  if (!b || rt <= a.t) { p.rx = a.x; p.ry = a.y; return; }
+  const f = (rt - a.t) / (b.t - a.t);
+  p.rx = a.x + (b.x - a.x) * f; p.ry = a.y + (b.y - a.y) * f;
 }
 
 // ---- auto status -------------------------------------------------------------------
@@ -1375,8 +1404,7 @@ function loop(t) {
     stepMe(dt);
     for (const p of peers.values()) {
       if (p === me) continue;
-      const a = Math.min(1, dt * 12);
-      p.rx += (p.x - p.rx) * a; p.ry += (p.y - p.ry) * a;
+      glide(p, t);
     }
     const z = zoneAt(me.x, me.y);
     if (z !== lastZone) { lastZone = z; zoneChanged(z); refreshChannels(); }
@@ -1418,4 +1446,4 @@ function loop(t) {
 }
 
 // Debug/test hook.
-window.__office = { get me() { return me; }, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };
+window.__office = { get me() { return me; }, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };

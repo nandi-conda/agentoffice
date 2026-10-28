@@ -10,6 +10,18 @@ import { stockSheet } from './stock.js';
 export const FRAME = 48;
 export const WALK = [0, 1, 2, 1];
 
+// Sheet row facing a velocity: 0 down, 1 left, 2 right, 3 up. Keeps the
+// current row until the walk turns well away from it (over 60 degrees), so a
+// diagonal doesn't flip the character between two rows every few frames.
+const FACING = [[0, 1], [-1, 0], [1, 0], [0, -1]];
+export function facing(dir, vx, vy) {
+  const len = Math.hypot(vx, vy);
+  if (!len) return dir;
+  const f = FACING[dir];
+  if (f && (f[0] * vx + f[1] * vy) / len > 0.5) return dir;
+  return Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 1 : 2) : vy < 0 ? 3 : 0;
+}
+
 const images = new Map();
 
 export function loadImage(url) {

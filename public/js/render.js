@@ -774,7 +774,9 @@ export function createRenderer(canvas) {
       else if (talking && sheets.emotes.neutral?.talk) img = sheets.emotes.neutral.talk;
       const cols = Math.max(1, Math.floor(img.width / fr));
       const order = cols === 3 ? WALK : pingPong(cols);
-      const col = p.moving ? order[Math.floor(st.time / 150) % order.length] : Math.min(1, cols - 1);
+      // Keep the walk cycle going while a remote avatar is still gliding to its last spot.
+      const walking = p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.05;
+      const col = walking ? order[Math.floor(st.time / 150) % order.length] : Math.min(1, cols - 1);
       const row = Math.min(p.dir, Math.floor(img.height / fr) - 1);
       const traced = st.vector ? tracedFrame(img, col, row, fr) : null;
       ctx.save();

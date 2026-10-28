@@ -14,6 +14,7 @@
 import { EventEmitter } from 'node:events';
 import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
+import { facing } from '../public/js/sprites.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -106,7 +107,7 @@ export class AgentClient extends EventEmitter {
       const dx = step.x - this.me.x, dy = step.y - this.me.y;
       const dist = Math.hypot(dx, dy);
       const n = Math.max(1, Math.ceil(dist / (speed / 10)));
-      const dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+      const dir = this.me.dir = facing(this.me.dir ?? 0, dx, dy);
       for (let i = 1; i <= n; i++) {
         this.me.x += dx / n; this.me.y += dy / n;
         this.send({ t: 'move', x: +this.me.x.toFixed(3), y: +this.me.y.toFixed(3), dir, moving: true });
@@ -115,7 +116,7 @@ export class AgentClient extends EventEmitter {
       }
       onStep?.(++done, path.length - 1);
     }
-    this.send({ t: 'move', x: this.me.x, y: this.me.y, dir: 0, moving: false });
+    this.send({ t: 'move', x: this.me.x, y: this.me.y, dir: this.me.dir ?? 0, moving: false });
     return true;
   }
 
