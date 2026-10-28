@@ -57,7 +57,10 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
       const did = await auth.didFromCookie(request.headers.get('cookie'));
       if (!did) return json(200, { did: null });
       try {
-        const { pds, ...pub } = await loadActor(did);
+        // Don't keep the page waiting on a slow PDS; the office loads the
+        // character again on join anyway.
+        const timeout = new Promise((_, no) => setTimeout(() => no(new Error('slow')), 4000));
+        const { pds, ...pub } = await Promise.race([loadActor(did), timeout]);
         return json(200, pub);
       } catch {
         return json(200, { did, handle: null });

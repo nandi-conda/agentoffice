@@ -155,9 +155,11 @@ for (const el of [handleIn, nameIn, noteIn]) el.addEventListener('keydown', (e) 
 // the handle box on its own just previews a character.
 let account = null;
 const cleanHandle = () => handleIn.value.trim().replace(/^@/, '');
+let accountChecked = false;
 function updateEnter() {
   const h = cleanHandle();
-  $('#enter').textContent = account ? 'Walk in' : h ? `Sign in as @${h}` : 'Walk in as a guest';
+  $('#enter').disabled = !accountChecked;
+  $('#enter').textContent = !accountChecked ? 'Checking sign-in…' : account ? 'Walk in' : h ? `Sign in as @${h}` : 'Walk in as a guest';
 }
 handleIn.addEventListener('input', updateEnter);
 
@@ -171,14 +173,17 @@ async function loadAccount() {
     const a = await r.json();
     account = a.did ? a : null;
   } catch { account = null; }
+  accountChecked = true;
   $('.signed-in').hidden = !account;
   $('.handle-field').hidden = !!account;
   if (account) {
     $('.who').textContent = account.handle ? `@${account.handle}` : account.did;
     if (account.handle) { handleIn.value = account.handle; previewFor(account.handle); }
-    if (params.has('signedin')) enter();
   }
   updateEnter();
+  // Signed in already (just now, or on an earlier visit): the session cookie
+  // lasts 30 days, so a refresh walks straight back in.
+  if (account) enter();
 }
 $('.signout').addEventListener('click', async () => {
   await fetch('/oauth/logout', { method: 'POST' }).catch(() => {});
@@ -186,15 +191,22 @@ $('.signout').addEventListener('click', async () => {
   store.set('handle', '');
   location.reload();
 });
-loadAccount();
+updateEnter();
+const accountReady = loadAccount();
 
-function enter() {
+let entered = false;
+async function enter() {
+  // Never decide "not signed in" before /api/me has answered, or a quick
+  // Enter on a prefilled handle would start a fresh OAuth sign-in.
+  await accountReady;
+  if (entered) return;
   const handle = cleanHandle();
   store.set('handle', handle); store.set('name', nameIn.value.trim()); store.set('note', noteIn.value.trim());
   if (handle && !account) {
     location.href = `/oauth/login?handle=${encodeURIComponent(handle)}`;
     return;
   }
+  entered = true;
   const name = nameIn.value.trim() || account?.displayName || loginActor?.displayName || account?.handle || `guest-${Math.random().toString(36).slice(2, 6)}`;
   $('#login').hidden = true;
   $('#hud').hidden = false;
