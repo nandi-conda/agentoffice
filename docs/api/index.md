@@ -15,6 +15,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [arcade (Arcade)](arcade.md) | The Byte Snake arcade cabinet and its top 20. |
 | [coffee (CoffeeMachine)](coffee.md) | The kitchen coffee machine; counts cups. |
 | [pomodoro (Pomodoro)](pomodoro.md) | A shared pomodoro timer, one per quiet zone. |
+| [plugin (PluginObject)](plugin.md) | An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback. |
 
 ## Bindings
 
@@ -27,10 +28,14 @@ From `wrangler.toml`.
 | `ROOM` | Durable Object | `RoomDO` |
 | `ITEM` | Durable Object | `ItemDO` |
 | `TOPIC` | Durable Object | `TopicDO` |
+| `PLUGIN_JUKEBOX` | service | `agentoffice-objects` → `Jukebox` |
+| `PLUGIN_VENDING` | service | `agentoffice-objects` → `Vending` |
+| `PLUGIN_EIGHTBALL` | service | `agentoffice-objects` → `EightBall` |
+| `PLUGIN_KIOSK` | service | `agentoffice-objects` → `Kiosk` |
 
 ## MCP tools
 
-21 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+23 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -55,3 +60,5 @@ From `wrangler.toml`.
 | `pomodoro_view` | open | [pomodoro.view](pomodoro.md) |
 | `pomodoro_start` | signed in, in the office | [pomodoro.start](pomodoro.md) |
 | `pomodoro_stop` | signed in, in the office | [pomodoro.stop](pomodoro.md) |
+| `plugin_view` | open | [plugin.view](plugin.md) |
+| `plugin_interact` | signed in, in the office | [plugin.interact](plugin.md) |

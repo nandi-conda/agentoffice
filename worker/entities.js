@@ -7,6 +7,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
+import { PluginHost } from '../server/plugins.js';
 
 import { BINDINGS } from '../server/entities/bindings.js';
 
@@ -15,7 +16,9 @@ export { BINDINGS };
 export class DORuntime {
   constructor(env) {
     this.env = env;
-    this.services = { loadActor: env.OFFLINE ? null : loadActor };
+    // plugins: interactive objects call their plugin Worker through the
+    // PLUGIN_<NAME> service bindings in env (see server/plugins.js).
+    this.services = { loadActor: env.OFFLINE ? null : loadActor, plugins: new PluginHost({ env }) };
   }
 
   stub(address) {

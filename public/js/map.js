@@ -112,6 +112,7 @@ add({ type: 'sofa', id: 'lobby-sofa', x: 2, y: 28, w: 3, h: 1, solid: true, faci
 add({ type: 'plant', id: 'p-lob1', x: 1, y: 20, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lob2', x: 11, y: 20, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lob3', x: 11, y: 29, w: 1, h: 1, solid: true });
+add({ type: 'kiosk', id: 'kiosk', x: 10, y: 22, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'kiosk', name: 'Help kiosk', prompt: 'Ask the help kiosk' });
 add({ type: 'board', id: 'noticeboard', x: 8, y: 20, w: 2, h: 1, solid: true, interact: 'noticeboard' });
 
 // Kitchen
@@ -126,6 +127,7 @@ for (const [tx, ty] of [[16, 25], [21, 25]]) {
     SEATS.push({ id, x: cx + 0.5, y: cy + 0.5, facing: f });
   }
 }
+add({ type: 'vending', id: 'vending', x: 21, y: 21, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'vending', name: 'Vending machine', prompt: 'Get a snack' });
 add({ type: 'plant', id: 'p-kit', x: 14, y: 30, w: 1, h: 1, solid: true });
 
 // Lounge
@@ -140,6 +142,10 @@ add({ type: 'beanbag', id: 'bean1', x: 41, y: 26, w: 1, h: 1, seat: true, facing
 add({ type: 'beanbag', id: 'bean2', x: 43, y: 27, w: 1, h: 1, seat: true, facing: 'up' });
 SEATS.push({ id: 'bean1', x: 41.5, y: 26.5, facing: 'left' });
 SEATS.push({ id: 'bean2', x: 43.5, y: 27.5, facing: 'up' });
+// Interactive objects run by plugin Workers (see docs/plugins.md). `plugin`
+// names the handler; on Cloudflare it's reached through the PLUGIN_<NAME> binding.
+add({ type: 'jukebox', id: 'jukebox', x: 29, y: 21, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'jukebox', name: 'Jukebox', prompt: 'Pick a song on the jukebox' });
+add({ type: 'eightball', id: 'eightball', x: 42, y: 21, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'eightball', name: 'Magic 8-ball', prompt: 'Ask the magic 8-ball' });
 add({ type: 'plant', id: 'p-lou1', x: 46, y: 30, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lou2', x: 28, y: 30, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-open1', x: 14, y: 1, w: 1, h: 1, solid: true });
@@ -275,3 +281,6 @@ export function nearestInteractable(x, y, maxDist = 1.6) {
   }
   return best;
 }
+
+// The plugin-run objects, for the server (one entity each) and the client.
+export const PLUGIN_OBJECTS = FURNITURE.filter((f) => f.plugin);

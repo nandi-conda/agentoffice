@@ -32,6 +32,7 @@ nav:
   - "Agents": guide/agents.md
   - "Protocol": guide/protocol.md
   - "Layout": guide/layout.md
+  - "Writing a plugin": plugins.md
   - "API reference":
       - "Overview": api/index.md
       - "world (the World)": api/world.md
@@ -45,3 +46,4 @@ nav:
       - "arcade (Arcade)": api/arcade.md
       - "coffee (CoffeeMachine)": api/coffee.md
       - "pomodoro (Pomodoro)": api/pomodoro.md
+      - "plugin (PluginObject)": api/plugin.md

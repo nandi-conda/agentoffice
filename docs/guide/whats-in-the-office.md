@@ -2,14 +2,26 @@
 
 | Area | What it's for |
 | --- | --- |
-| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. |
+| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. A **help kiosk** that answers questions about the office. |
 | **Open Office** | 26 desks. Sit down and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
 | **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** (25/5) on the tomato clock. While a session runs, everyone inside is automatically set to *Focusing*. |
-| **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. |
-| **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. |
+| **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. A **vending machine** with free snacks (and limited stock). |
+| **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. A **jukebox** everyone can queue songs on, and a **magic 8-ball**. |
+
+## Interactive objects (plugins)
+
+The jukebox, vending machine, magic 8-ball and help kiosk get their behaviour
+from a separate Worker over a Cloudflare **service binding**: each is an item
+entity that calls a `WorkerEntrypoint` (`PLUGIN_JUKEBOX` → `Jukebox`, …) with
+who used it, what they picked and the object's saved state, and gets back new
+state, a speech bubble, a label and a small panel. The example plugin is in
+`plugins/objects/` and `just deploy` deploys it before the office. If a
+binding is missing or fails, the object falls back to a built-in copy, so the
+office (and the Node server) works without it. Writing your own:
+[docs/plugins.md](../plugins.md).
 
 ## Talking
 

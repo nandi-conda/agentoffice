@@ -7,6 +7,7 @@ import { connect } from './net.js';
 import { createVoice } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
+import { openObject } from './objects.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -22,6 +23,7 @@ let me = null;
 let net = null;
 let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
 let freeqRooms = {}; // area id -> { channel, members, topic } attached from freeq
+let objects = {}; // plugin object id -> { display, bubble } (see objects.js)
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
@@ -254,6 +256,8 @@ function onMessage(m) {
       for (const p of m.peers) addPeer(p);
       desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
       freeqRooms = m.freeq || {};
+      objects = {};
+      for (const [id, display] of Object.entries(m.objects || {})) objects[id] = { display };
       refreshChannels();
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
@@ -294,6 +298,23 @@ function onMessage(m) {
       break;
     }
     case 'desks': desks = m.desks; refreshPeople(); break;
+    // A plugin object changed how it looks, or said something to the people near it.
+    case 'obj': {
+      const o = (objects[m.id] ||= {});
+      if ('display' in m) o.display = m.display;
+      if (m.say) {
+        o.bubble = { text: m.say, at: performance.now() };
+        const f = FURNITURE.find((x) => x.id === m.id);
+        if (canHear(me, m)) logChat({ id: `obj:${m.id}`, name: f?.name || m.id, text: m.say, ts: serverNow(), scope: 'nearby' });
+      }
+      break;
+    }
+    case 'objui': {
+      if (m.toast) toast(esc(m.toast));
+      if (modal.obj?.id !== m.id) break;
+      if (m.ui) modal.obj.show(m.ui); else if (m.toast && !modal.body.querySelector('button')) modal.close(); else modal.obj.idle();
+      break;
+    }
     case 'freeq': freeqRooms = m.rooms || {}; if (me) zoneChanged(lastZone, true); refreshChannels(); break;
     case 'notes': notes = m.notes; if (modal.notesOpen) openNotes(); break;
     case 'pomo': {
@@ -604,7 +625,7 @@ function openHelp() {
     <details style="margin-top:12px"><summary class="small">With a keyboard</summary>
     <div class="help-grid" style="margin-top:8px">` : ''}
       <kbd>WASD</kbd><span>Walk (or click anywhere on the floor)</span>
-      <kbd>E</kbd><span>Interact: sit, claim a desk, whiteboard, coffee, pomodoro, arcade</span>
+      <kbd>E</kbd><span>Interact: sit, claim a desk, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball, help kiosk</span>
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
       <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
@@ -786,6 +807,7 @@ function promptFor(f) {
     case 'pomodoro': return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Stop the focus session' : 'Start a focus session (25 / 5)';
     case 'noticeboard': return 'Read the notice board';
     case 'arcade': return 'Play Byte Snake';
+    case 'plugin': return f.prompt || `Use the ${f.name}`;
     case 'room': {
       const { state, current, next } = roomStatus(bookings, f.zone, serverNow());
       const name = roomById(f.zone).name;
@@ -828,6 +850,7 @@ function interact(f) {
     }
     case 'noticeboard': openNotes(); break;
     case 'room': openRoom(f.zone); break;
+    case 'plugin': modal.obj = openObject(modal, f, (m) => net.send(m)); modal.onclose = () => (modal.obj = null); break;
     case 'arcade': modal.snake = openSnake(modal, { scores, onScore: (score) => net.send({ t: 'score', score }) }); { const prev = modal.onclose; modal.onclose = () => { prev?.(); modal.snake = null; }; } break;
   }
 }
@@ -1387,7 +1410,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z), freeq: freeqRooms,
+      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }

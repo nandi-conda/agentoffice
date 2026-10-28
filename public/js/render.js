@@ -21,7 +21,7 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 export function createRenderer(canvas) {
@@ -258,6 +258,10 @@ export function createRenderer(canvas) {
         }
         return;
       case 'arcade': return drawArcade(f, st);
+      case 'jukebox': return drawJukebox(f, st);
+      case 'vending': return drawVending(f, st);
+      case 'eightball': return drawEightBall(f, st);
+      case 'kiosk': return drawKiosk(f, st);
       case 'whiteboard': return drawWhiteboard(f, st);
       case 'board': return drawNoticeboard(f, st);
       case 'reception': return drawReception(f, st);
@@ -544,6 +548,109 @@ export function createRenderer(canvas) {
     st.lights.push({ x: x + 0.5, y: y + 1.2, r: 1.4, c: f.id === 'arcade' ? 'rgba(167,139,250,0.5)' : 'rgba(244,114,182,0.5)' });
   }
 
+  // ---- plugin objects ------------------------------------------------------
+  // Each can glow in a colour its plugin picks (st.objects[id].display.glow).
+  const objGlow = (f, st, d) => st.objects?.[f.id]?.display?.glow || d;
+
+  function drawJukebox(f, st) {
+    const { x, y, w, h } = f;
+    const hgt = HEIGHTS.jukebox;
+    const on = !!st.objects?.[f.id]?.display?.label;
+    const glow = objGlow(f, st, '#a78bfa');
+    box(x + 0.05, y, w - 0.1, h, hgt, '#7c2d12', '#431407', 0.1);
+    const fy = y + h - hgt;
+    // arched top
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.ellipse(S(x + 0.5), S(fy + 0.28), S(0.42), S(0.26), 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#fde68a'; ctx.fillRect(S(x + 0.14), S(fy + 0.3), S(0.72), S(0.3));
+    for (let i = 0; i < 5; i++) {
+      const lvl = on ? 0.5 + 0.5 * Math.abs(Math.sin(st.time / 180 + i * 1.3)) : 0.2;
+      ctx.fillStyle = ['#f472b6', '#38bdf8', '#4ade80', '#facc15', '#fb923c'][i];
+      ctx.fillRect(S(x + 0.2 + i * 0.13), S(fy + 0.58 - 0.24 * lvl), S(0.08), S(0.24 * lvl));
+    }
+    ctx.fillStyle = '#1c1917'; ctx.fillRect(S(x + 0.2), S(fy + 0.72), S(0.6), S(0.08));
+    ctx.fillRect(S(x + 0.2), S(fy + 0.86), S(0.6), S(0.08));
+    if (on) {
+      const t = st.time / 900;
+      ctx.fillStyle = glow; ctx.font = `${S(0.32)}px system-ui`; ctx.textAlign = 'center';
+      ctx.fillText('♪', S(x + 0.5 + 0.35 * Math.sin(t)), S(fy - 0.15 - ((t * 0.4) % 0.5)));
+      ctx.textAlign = 'left';
+      st.lights.push({ x: x + 0.5, y: y + 1.2, r: 1.8, c: 'rgba(167,139,250,0.45)' });
+    }
+  }
+
+  function drawVending(f, st) {
+    const { x, y, w, h } = f;
+    const hgt = HEIGHTS.vending;
+    const glow = objGlow(f, st, '#38bdf8');
+    box(x + 0.04, y, w - 0.08, h, hgt, '#dc2626', '#991b1b', 0.06);
+    const fy = y + h - hgt;
+    ctx.fillStyle = '#e0f2fe'; roundRect(ctx, S(x + 0.1), S(fy + 0.1), S(0.55), S(1.1), S(0.04)); ctx.fill();
+    const snacks = ['#f59e0b', '#7c2d12', '#22c55e', '#0ea5e9', '#eab308'];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+      ctx.fillStyle = snacks[(r * 3 + c) % snacks.length];
+      ctx.fillRect(S(x + 0.14 + c * 0.17), S(fy + 0.16 + r * 0.26), S(0.12), S(0.16));
+    }
+    ctx.fillStyle = '#1f2937'; ctx.fillRect(S(x + 0.7), S(fy + 0.15), S(0.2), S(0.5));
+    ctx.fillStyle = glow; ctx.fillRect(S(x + 0.72), S(fy + 0.18), S(0.16), S(0.08));
+    ctx.fillStyle = '#111827'; ctx.fillRect(S(x + 0.14), S(fy + 1.28), S(0.5), S(0.16));
+    st.lights.push({ x: x + 0.5, y: y + 1.1, r: 1.3, c: 'rgba(56,189,248,0.35)' });
+  }
+
+  function drawEightBall(f, st) {
+    const { x, y } = f;
+    const hgt = HEIGHTS.eightball;
+    // little pedestal
+    box(x + 0.25, y + 0.3, 0.5, 0.6, hgt - 0.35, '#e7e5e4', '#a8a29e', 0.04);
+    const cy = y + 0.9 - hgt + 0.1;
+    const wob = 0.02 * Math.sin(st.time / 400);
+    ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(S(x + 0.5 + wob), S(cy), S(0.3), 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.arc(S(x + 0.42 + wob), S(cy - 0.1), S(0.08), 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(S(x + 0.5 + wob), S(cy), S(0.13), 0, 7); ctx.fill();
+    ctx.fillStyle = '#0f172a'; ctx.font = `700 ${S(0.17)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('8', S(x + 0.5 + wob), S(cy + 0.01));
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawKiosk(f, st) {
+    const { x, y } = f;
+    const hgt = HEIGHTS.kiosk;
+    const glow = objGlow(f, st, '#22d3ee');
+    ctx.fillStyle = '#64748b'; ctx.fillRect(S(x + 0.44), S(y + 0.3), S(0.12), S(0.65));
+    ellipse(x + 0.5, y + 0.92, 0.3, 0.1, '#475569');
+    const fy = y + 1 - hgt;
+    ctx.fillStyle = '#1e293b'; roundRect(ctx, S(x + 0.08), S(fy), S(0.84), S(0.66), S(0.08)); ctx.fill();
+    ctx.fillStyle = glow; roundRect(ctx, S(x + 0.14), S(fy + 0.06), S(0.72), S(0.5), S(0.05)); ctx.fill();
+    // a friendly face that blinks
+    const blink = (st.time % 4000) < 150;
+    ctx.fillStyle = '#0f172a';
+    for (const ex of [0.36, 0.64]) ctx.fillRect(S(x + ex - 0.04), S(fy + 0.2), S(0.08), S(blink ? 0.02 : 0.1));
+    ctx.beginPath(); ctx.arc(S(x + 0.5), S(fy + 0.36), S(0.1), 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineWidth = Math.max(1, S(0.03)); ctx.strokeStyle = '#0f172a'; ctx.stroke();
+    st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.2, c: 'rgba(34,211,238,0.35)' });
+  }
+
+  // Speech bubbles and status labels over plugin objects.
+  function drawObjectLabels(st) {
+    for (const f of FURNITURE) {
+      const o = f.plugin && st.objects?.[f.id];
+      if (!o) continue;
+      const s = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5));
+      let top = s.y - 6;
+      const label = o.display?.label && (!o.display.until || o.display.until > st.serverNow()) ? o.display.label : null;
+      if (label) {
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        const lw = ctx.measureText(label).width + 14, lh = 18;
+        ctx.fillStyle = 'rgba(28,25,23,0.78)';
+        roundRect(ctx, s.x - lw / 2, top - lh, lw, lh, 9); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, s.x - lw / 2 + 7, top - lh / 2 + 0.5);
+        ctx.textBaseline = 'alphabetic';
+        top -= lh + 4;
+      }
+      if (o.bubble && st.time - o.bubble.at < 8000) drawBubble(s.x, top, o.bubble.text, Math.min(1, (8000 - (st.time - o.bubble.at)) / 600), '#ecfeff');
+    }
+  }
+
   function drawWhiteboard(f, st) {
     const { x, y, w, h } = f;
     const hgt = HEIGHTS.whiteboard;
@@ -723,22 +830,27 @@ export function createRenderer(canvas) {
       ctx.textAlign = 'left';
     }
     if (p.bubble && st.time - p.bubble.at < 7000) {
-      const a = Math.min(1, (7000 - (st.time - p.bubble.at)) / 600);
-      ctx.globalAlpha = a;
-      ctx.font = '500 12.5px Inter, system-ui, sans-serif';
-      const lines = wrapText(ctx, p.bubble.text, 200).slice(0, 4);
-      const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18;
-      const bh = lines.length * 16 + 10;
-      const bx = Math.round(s.x - bw / 2), byy = Math.round(by - bh - 6);
-      ctx.fillStyle = p.bubble.scope === 'office' ? '#fef3c7' : '#ffffff';
-      ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
-      roundRect(ctx, bx, byy, bw, bh, 10); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(s.x - 6, byy + bh - 1); ctx.lineTo(s.x, byy + bh + 6); ctx.lineTo(s.x + 6, byy + bh - 1); ctx.fill();
-      ctx.shadowColor = 'transparent';
-      ctx.fillStyle = '#1c1917'; ctx.textBaseline = 'top';
-      lines.forEach((l, i) => ctx.fillText(l, bx + 9, byy + 6 + i * 16));
-      ctx.globalAlpha = 1;
+      drawBubble(s.x, by, p.bubble.text, Math.min(1, (7000 - (st.time - p.bubble.at)) / 600), p.bubble.scope === 'office' ? '#fef3c7' : '#ffffff');
     }
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // A speech bubble whose tail points down at (x, bottom).
+  function drawBubble(x, bottom, text, alpha, fill) {
+    ctx.globalAlpha = alpha;
+    ctx.font = '500 12.5px Inter, system-ui, sans-serif';
+    const lines = wrapText(ctx, text, 200).slice(0, 4);
+    const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18;
+    const bh = lines.length * 16 + 10;
+    const bx = Math.round(x - bw / 2), byy = Math.round(bottom - bh - 6);
+    ctx.fillStyle = fill;
+    ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+    roundRect(ctx, bx, byy, bw, bh, 10); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - 6, byy + bh - 1); ctx.lineTo(x, byy + bh + 6); ctx.lineTo(x + 6, byy + bh - 1); ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#1c1917'; ctx.textBaseline = 'top';
+    lines.forEach((l, i) => ctx.fillText(l, bx + 9, byy + 6 + i * 16));
+    ctx.globalAlpha = 1;
     ctx.textBaseline = 'alphabetic';
   }
 
@@ -845,6 +957,7 @@ export function createRenderer(canvas) {
     // labels sit above the lighting so they stay readable at night
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawRoomTags(st);
+    drawObjectLabels(st);
     for (const p of st.peers) drawLabels(p, st, p.id === st.meId);
     const z = zoneAt(st.cam.x, st.cam.y);
     return z;

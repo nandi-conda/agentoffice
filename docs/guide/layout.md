@@ -12,7 +12,10 @@ public/js/main.js       client: input, UI, networking
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
+server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
+plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
+public/js/objects.js    panels for plugin objects
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in

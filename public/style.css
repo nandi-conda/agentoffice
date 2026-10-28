@@ -372,3 +372,13 @@ input, select, textarea { font: inherit; color: inherit; }
   .people-head .long { display: none; }
   .people-head .short { display: inline; }
 }
+
+/* plugin objects (jukebox, vending machine, 8-ball, kiosk) */
+.obj-text { line-height: 1.45; }
+.obj-items { display: grid; gap: 6px; margin: 10px 0; max-height: 45vh; overflow: auto; }
+.obj-item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: left; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: inherit; font: inherit; cursor: pointer; }
+.obj-item:hover:not(:disabled) { border-color: var(--accent); background: #eff6ff; }
+.obj-item:disabled { opacity: 0.5; cursor: default; }
+.obj-list { margin: 4px 0 10px 18px; padding: 0; }
+.obj-ask { gap: 8px; }
+.obj-ask input { flex: 1; min-width: 0; }

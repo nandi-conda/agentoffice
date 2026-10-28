@@ -52,13 +52,25 @@ docs-serve: _deps
 demo: _deps
     PORT={{port}} node server/index.js & server=$!; trap "kill $server" EXIT; sleep 1; node scripts/agent.mjs --url ws://localhost:{{port}}/ws
 
-# Run the Cloudflare Worker locally (Durable Object + assets) on :8787
+# Run the Cloudflare Worker locally (Durable Objects + assets) on :8787; plugin objects use their built-in fallbacks
 cf-dev: _deps
     node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1
 
-# Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
-deploy *args: docs
+# Like cf-dev, with every plugin Worker in plugins/ running alongside over real service bindings (needs `just cf-login`: the kiosk's Workers AI is remote)
+cf-dev-plugins: _deps
+    node_modules/.bin/wrangler dev -c wrangler.toml $(for c in plugins/*/wrangler.toml; do printf -- '-c %s ' "$c"; done) --port 8787 --ip 127.0.0.1
+
+# Deploy to Cloudflare Workers, plugins first so the office's service bindings resolve (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
+deploy *args: docs plugins-deploy
     node_modules/.bin/wrangler deploy {{args}}
+
+# Deploy the plugin Workers in plugins/ (all of them, or one: `just plugins-deploy objects`)
+plugins-deploy name="*": _deps
+    for c in plugins/{{name}}/wrangler.toml; do echo "deploying $c"; node_modules/.bin/wrangler deploy -c "$c" || exit 1; done
+
+# Stream live logs from a plugin Worker, e.g. `just plugins-tail objects`
+plugins-tail name="objects": _deps
+    node_modules/.bin/wrangler tail -c plugins/{{name}}/wrangler.toml
 
 # Log wrangler in to your Cloudflare account via the browser
 cf-login: _deps

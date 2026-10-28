@@ -99,7 +99,7 @@ theme:
       toggle: { icon: material/weather-sunny, name: Light mode }
 markdown_extensions: [admonition, attr_list, tables, toc: { permalink: true }]
 nav:
-${yamlNav([...guide.nav, { 'API reference': api.nav }])}
+${yamlNav([...guide.nav, { 'Writing a plugin': 'plugins.md' }, { 'API reference': api.nav }])}
 `;
   return files;
 }

@@ -8,7 +8,8 @@
 // and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
+import { SPAWN, DESKS, SEATS, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
+import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
 import { LocalRuntime, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, nextRoomEvent } from './entities/kinds.js';
@@ -206,6 +207,7 @@ export class Office {
       case 'noticeboard': return this.broadcast({ t: 'notes', notes: this.notes });
       case 'arcade': return this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
       case 'coffee': return this.broadcast({ t: 'counters', counters: this.counters });
+      case 'plugin': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
       case 'pomodoro': return this.broadcastPomo();
     }
   }
@@ -224,6 +226,8 @@ export class Office {
       bookings: this.bookings,
       upSince: this.upSince,
       freeq: this.freeq?.status() || null,
+      // How each plugin object was last reached: binding, builtin or offline.
+      objects: Object.fromEntries(PLUGIN_OBJECTS.map((f) => [f.id, this.mirror.get(`plugin:${f.id}`)?.via || 'unused'])),
     };
   }
 
@@ -371,6 +375,7 @@ export class Office {
       case 'note': return this.noticeboard(p, m);
       case 'coffee': return this.coffee(p);
       case 'score': return this.score(p, m);
+      case 'use': return this.use(p, m);
       case 'wave': return this.wave(p, m);
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
       case 'av': return this.av(p, m);
@@ -414,7 +419,7 @@ export class Office {
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
-      bookings: this.bookings, freeq: this.freeq?.state() || {},
+      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(),
     });
     for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
@@ -585,6 +590,22 @@ export class Office {
 
   score(p, m) {
     return this.ref('arcade:main').score(this.who(p), m.score);
+  }
+
+  // Using a plugin object (jukebox, vending machine…): its entity calls the
+  // plugin and answers with effects (see entities/plugin.js).
+  async use(p, m) {
+    const f = PLUGIN_OBJECTS.find((x) => x.id === m.id);
+    if (!f) return;
+    const cx = Math.max(f.x, Math.min(p.x, f.x + f.w)), cy = Math.max(f.y, Math.min(p.y, f.y + f.h));
+    if (Math.hypot(cx - p.x, cy - p.y) > 3) return this.sendTo(p, { t: 'objui', id: f.id, ui: null, toast: `Walk up to the ${f.name} to use it.` });
+    return this.ref(`plugin:${f.id}`).interact(this.who(p), cleanRequest(m));
+  }
+
+  objects() {
+    const out = {};
+    for (const f of PLUGIN_OBJECTS) { const v = this.mirror.get(`plugin:${f.id}`); if (v?.display) out[f.id] = v.display; }
+    return out;
   }
 
   wave(p, m) {

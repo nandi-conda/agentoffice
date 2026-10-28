@@ -163,14 +163,26 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
 
 | Area | What it's for |
 | --- | --- |
-| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. |
+| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. A **help kiosk** that answers questions about the office. |
 | **Open Office** | 26 desks. Sit down and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
 | **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** (25/5) on the tomato clock. While a session runs, everyone inside is automatically set to *Focusing*. |
-| **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. |
-| **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. |
+| **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. A **vending machine** with free snacks (and limited stock). |
+| **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. A **jukebox** everyone can queue songs on, and a **magic 8-ball**. |
+
+### Interactive objects (plugins)
+
+The jukebox, vending machine, magic 8-ball and help kiosk get their behaviour
+from a separate Worker over a Cloudflare **service binding**: each is an item
+entity that calls a `WorkerEntrypoint` (`PLUGIN_JUKEBOX` → `Jukebox`, …) with
+who used it, what they picked and the object's saved state, and gets back new
+state, a speech bubble, a label and a small panel. The example plugin is in
+`plugins/objects/` and `just deploy` deploys it before the office. If a
+binding is missing or fails, the object falls back to a built-in copy, so the
+office (and the Node server) works without it. Writing your own:
+[docs/plugins.md](docs/plugins.md).
 
 ### Talking
 
@@ -480,9 +492,9 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `error`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
@@ -508,7 +520,10 @@ public/js/main.js       client: input, UI, networking
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
+server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
+plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
+public/js/objects.js    panels for plugin objects
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in

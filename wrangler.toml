@@ -39,3 +39,28 @@ class_name = "TopicDO"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ActorDO", "RoomDO", "ItemDO", "TopicDO"]
+
+# Interactive objects (server/plugins.js, docs/plugins.md): each plugin
+# object on the map calls PLUGIN_<NAME>, a service binding to a
+# WorkerEntrypoint in a plugin Worker. `just deploy` deploys plugins/* first so
+# these resolve. A binding that's missing or failing falls back to the
+# built-in copy of the object, so the office keeps working without them.
+[[services]]
+binding = "PLUGIN_JUKEBOX"
+service = "agentoffice-objects"
+entrypoint = "Jukebox"
+
+[[services]]
+binding = "PLUGIN_VENDING"
+service = "agentoffice-objects"
+entrypoint = "Vending"
+
+[[services]]
+binding = "PLUGIN_EIGHTBALL"
+service = "agentoffice-objects"
+entrypoint = "EightBall"
+
+[[services]]
+binding = "PLUGIN_KIOSK"
+service = "agentoffice-objects"
+entrypoint = "Kiosk"

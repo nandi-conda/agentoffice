@@ -1,0 +1,130 @@
+// Interactive objects backed by plugin Workers. An object on the map names a
+// plugin (`plugin: 'jukebox'`); on Cloudflare the office's env carries a
+// service binding PLUGIN_JUKEBOX to a WorkerEntrypoint in another Worker, and
+// using the object calls its `interact()` over RPC. Whatever comes back is
+// treated as untrusted: clipped, shape-checked, and turned into plain data the
+// client renders without HTML.
+//
+// When the binding is missing or the call fails, the object falls back to a
+// built-in copy of the handler if the office ships one (the example objects in
+// plugins/objects/src/objects.js), and otherwise shows itself as out of order.
+// The Node server has no bindings, so it always runs the built-ins.
+
+import { OBJECTS } from '../plugins/objects/src/objects.js';
+
+export const TIMEOUT_MS = 5000;
+export const MAX_STATE = 32 * 1024;
+const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
+const COLOR = /^#[0-9a-f]{3,8}$/i;
+const ACTION = /^[\w:.-]{1,64}$/;
+
+export const bindingName = (plugin) => `PLUGIN_${String(plugin).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+
+// What a client may send: an action id and some typed text.
+export function cleanRequest(m) {
+  const action = typeof m?.action === 'string' && ACTION.test(m.action) ? m.action : 'use';
+  const input = m?.input == null ? null : clip(m.input, 500);
+  return { action, input };
+}
+
+export class PluginHost {
+  constructor({ env = {}, builtins = OBJECTS, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
+    this.env = env;
+    this.builtins = builtins;
+    this.timeoutMs = timeoutMs;
+    this.now = now;
+    // Last problem per plugin, for /api/office and the docs' troubleshooting.
+    this.problems = {};
+  }
+
+  // How each plugin is wired right now: 'binding', 'builtin' or 'missing'.
+  status(plugins) {
+    const out = {};
+    for (const name of plugins) {
+      out[name] = { via: this.env[bindingName(name)] ? 'binding' : this.builtins[name] ? 'builtin' : 'missing' };
+      if (this.problems[name]) out[name].problem = this.problems[name];
+    }
+    return out;
+  }
+
+  // object: { id, plugin, name, zone }; actor: { id, did, handle, name, kind }.
+  // Returns { result, state, via } where state is what the object should keep.
+  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [] }) {
+    const req = {
+      object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
+      actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
+      action, input, state, nearby: nearby.slice(0, 20), now: this.now(),
+    };
+    const binding = this.env[bindingName(object.plugin)];
+    let raw, via;
+    if (binding) {
+      try {
+        raw = await withTimeout(binding.interact(req), this.timeoutMs);
+        via = 'binding';
+        delete this.problems[object.plugin];
+      } catch (e) {
+        this.problems[object.plugin] = { at: req.now, message: clip(e?.message || e, 200) };
+        console.error(`plugin ${object.plugin}:`, e?.message || e);
+      }
+    }
+    if (!via) {
+      const builtin = this.builtins[object.plugin];
+      if (builtin) {
+        try { raw = await withTimeout(builtin(req, this.env), this.timeoutMs); via = 'builtin'; }
+        catch (e) { console.error(`builtin ${object.plugin}:`, e?.message || e); }
+      }
+    }
+    if (!via) {
+      return {
+        via: 'offline', state,
+        result: { say: null, toast: `${req.object.name} is out of order right now.`, display: { label: 'out of order', glow: '#ef4444' }, ui: null },
+      };
+    }
+    const result = sanitize(raw);
+    let next = state;
+    if (raw && 'state' in raw) {
+      const json = JSON.stringify(raw.state ?? null);
+      if (json.length <= MAX_STATE) next = JSON.parse(json);
+      else console.error(`plugin ${object.plugin}: state over ${MAX_STATE} bytes, not saved`);
+    }
+    return { result, state: next, via };
+  }
+}
+
+function withTimeout(p, ms) {
+  let t;
+  return Promise.race([
+    Promise.resolve(p).finally(() => clearTimeout(t)),
+    new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`no answer within ${ms} ms`)), ms); }),
+  ]);
+}
+
+// A plugin's answer, reduced to what the office knows how to show.
+export function sanitize(r) {
+  r = r && typeof r === 'object' ? r : {};
+  const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null };
+  if (r.display && typeof r.display === 'object') {
+    out.display = {
+      label: r.display.label ? clip(r.display.label, 40) : null,
+      glow: COLOR.test(r.display.glow || '') ? r.display.glow : null,
+      until: Number.isFinite(r.display.until) ? r.display.until : null,
+    };
+  }
+  const u = r.ui;
+  if (u && typeof u === 'object') {
+    out.ui = {
+      title: clip(u.title, 60),
+      text: clip(u.text, 1500),
+      items: (Array.isArray(u.items) ? u.items : []).slice(0, 24).filter((i) => act(i?.action))
+        .map((i) => ({ label: clip(i.label, 80), detail: clip(i.detail, 80), action: i.action, disabled: !!i.disabled })),
+      buttons: (Array.isArray(u.buttons) ? u.buttons : []).slice(0, 6).filter((b) => act(b?.action))
+        .map((b) => ({ label: clip(b.label, 30), action: b.action, primary: !!b.primary })),
+      list: u.list && Array.isArray(u.list.rows) ? { title: clip(u.list.title, 60), rows: u.list.rows.slice(0, 20).map((x) => clip(x, 120)) } : null,
+      input: u.input && act(u.input.action)
+        ? { placeholder: clip(u.input.placeholder, 80), action: u.input.action, button: clip(u.input.button, 20) || 'Send', maxLength: Math.min(500, Math.max(1, Number(u.input.maxLength) || 200)) }
+        : null,
+    };
+  }
+  return out;
+}
