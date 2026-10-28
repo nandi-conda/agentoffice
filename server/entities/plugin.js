@@ -24,6 +24,7 @@ export class PluginObject extends Entity {
       params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
       returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, via }: what the plugin answered; null when called again within 400 ms' },
       mutates: true,
+      near: 3,
     },
   };
 

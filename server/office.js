@@ -8,7 +8,7 @@
 // and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, DESKS, SEATS, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
+import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
 import { LocalRuntime, parse } from './entities/runtime.js';
@@ -138,8 +138,15 @@ export class Office {
     const { kind, name } = parse(address);
     const spec = KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
     if (!spec || spec.internal) throw new Error(`${address} has no public method ${method}`);
-    if ((spec.who || spec.mutates || spec.inZone) && !p?.ready) throw new Error('join the office first');
+    if ((spec.who || spec.mutates || spec.inZone || spec.near) && !p?.ready) throw new Error('join the office first');
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
+    if (spec.near) {
+      // Same rule as the browser: walk up to it (its nearest edge) first.
+      const f = FURNITURE.find((x) => x.id === name) || DESKS.find((x) => x.id === name);
+      if (!f) throw new Error(`${address} isn't on the map`);
+      const cx = Math.max(f.x, Math.min(p.x, f.x + (f.w || 1))), cy = Math.max(f.y, Math.min(p.y, f.y + (f.h || 1)));
+      if (Math.hypot(cx - p.x, cy - p.y) > spec.near) throw new Error(`you're too far from the ${f.name || name}: walk_to ${name} first (within ${spec.near} tiles)`);
+    }
     if (method === 'view' && this.mirror.has(address)) return this.mirror.get(address);
     const params = paramList(spec).map((_, i) => args[i]);
     while (params.length && params.at(-1) === undefined) params.pop();

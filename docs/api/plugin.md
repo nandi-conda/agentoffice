@@ -16,7 +16,7 @@ Returns `{ display, via }`
 
 ## `interact(who, req)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`plugin_interact`**
+`mutates` · `caller filled in by the World` · `caller must be within 3 tiles` · MCP tool **`plugin_interact`**
 
 Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.
 

@@ -83,9 +83,9 @@ export function generatedTools(api) {
       tools.push({
         name: `${e.kind}_${method}`,
         kind: e.kind, method,
-        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
+        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
         input,
-        readOnly: !spec.mutates && !spec.who && !spec.inZone,
+        readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near,
         needsZone: !!spec.inZone && many,
         address: (args, zone) => `${e.kind}:${many ? (args.name || zone) : e.instances[0]}`,
         args: (args) => (flat ? [Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'name' || !many))] : params.map(([k]) => args[k])),
@@ -124,6 +124,7 @@ const flags = (spec) => [
   spec.who && 'caller filled in by the World',
   spec.ctx && 'ctx { all, presence } filled in by the World',
   spec.inZone && 'caller must be in its zone',
+  spec.near && `caller must be within ${spec.near} tiles`,
   spec.internal && 'internal (entity to entity)',
 ].filter(Boolean);
 

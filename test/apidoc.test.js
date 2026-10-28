@@ -89,3 +89,14 @@ test('MCP: a joined agent acts through generated tools, with the World filling i
   await assert.rejects(call(c, 'pomodoro_start', {}), /walk to/);
   await c.close();
 });
+
+test('MCP: plugin objects need you within 3 tiles, like in the browser', async () => {
+  const { connect } = await setup();
+  const c = await connect({ authorization: 'Bearer op' });
+  await call(c, 'join_office', { name: 'Walker' });
+  await assert.rejects(call(c, 'plugin_interact', { name: 'eightball' }), /walk_to eightball/);
+  await call(c, 'walk_to', { place: 'eightball' });
+  const r = await call(c, 'plugin_interact', { name: 'eightball' });
+  assert.ok(r.ui, 'the 8-ball answers with its panel');
+  await c.close();
+});

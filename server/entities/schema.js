@@ -13,6 +13,8 @@
 //       who: true,                             first argument is the caller, filled in by the World
 //       ctx: true,                             last argument is { all: bookings, presence }, filled in by the World
 //       inZone: true,                          the caller must stand in the zone this entity is named after
+//       near: 3,                               the caller must stand within this many tiles of the
+//                                              thing on the map this entity is named after
 //       internal: true,                        entity-to-entity only: documented, but no MCP tool
 //     },
 //   }
