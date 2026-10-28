@@ -12,6 +12,9 @@ import { McpHub } from '../server/mcp.js';
 import { FreeqBridge, FREEQ_URL } from '../server/freeq.js';
 import { SESSION_TTL_MS } from '../server/auth.js';
 
+const HEARTBEAT_MS = 60 * 1000;
+const MCP_SESSION_TTL_MS = 10 * 60 * 1000; // matches the hub's idle drop
+
 export default {
   async fetch(request, env) {
     const stub = env.OFFICE.get(env.OFFICE.idFromName('main'));
@@ -28,6 +31,7 @@ export class OfficeRoom extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS actors (did TEXT PRIMARY KEY, v TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS oauth (k TEXT PRIMARY KEY, v TEXT, at INTEGER)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS mcp_sessions (k TEXT PRIMARY KEY, v TEXT, at INTEGER)');
     // Whiteboard strokes get one row each, so a save only writes what changed.
     this.strokeRows = new WeakMap();
 
@@ -45,9 +49,10 @@ export class OfficeRoom extends DurableObject {
     });
 
     // Agents: DID proof / Roost sign-in, and the MCP endpoint. MCP sessions
-    // live in memory here; if the object is evicted, agents re-initialize.
+    // live in memory but are noted in storage, so after a deploy or eviction
+    // an agent's next request resumes its session and puts it back in the office.
     this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
-    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '' });
+    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
 
     // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
     if (env.FREEQ !== 'off') {
@@ -69,22 +74,32 @@ export class OfficeRoom extends DurableObject {
       });
     }
 
-    // Waking from hibernation: rebuild peers from the sockets that stayed open.
+    // Waking from hibernation or a restart (deploys, evictions): rebuild
+    // peers from the sockets that stayed open, and if anyone is here, bring
+    // the freeq listener back now rather than on their next message.
     for (const ws of ctx.getWebSockets()) this.peerFor(ws);
-    this.armRooms();
+    this.freeq?.presence();
+    this.arm();
   }
 
-  // Room bookings need a wake-up for reminders and start/end announcements
-  // even while the object hibernates, so the next one is kept as an alarm.
-  armRooms() {
-    const t = this.office.nextRoomEvent();
-    if (t && t !== this.alarmAt) { this.alarmAt = t; this.ctx.storage.setAlarm(t); }
+  // One alarm does two jobs, even while the object hibernates: the next room
+  // booking event (reminders, start/end announcements), and while anyone is
+  // in, a heartbeat that restarts a freeq listener lost to an eviction.
+  arm() {
+    const here = [...this.office.peers.values()].some((p) => p.ready && p.kind !== 'freeq');
+    const t = Math.min(this.office.nextRoomEvent() || Infinity, this.freeq && here ? Date.now() + HEARTBEAT_MS : Infinity);
+    if (t === Infinity) return;
+    // Keep an alarm that's already due sooner, so the heartbeat isn't pushed back forever.
+    if (this.alarmAt > Date.now() && this.alarmAt <= t) return;
+    this.alarmAt = t;
+    this.ctx.storage.setAlarm(t);
   }
 
   async alarm() {
     this.alarmAt = null;
     this.office.tickRooms();
-    this.armRooms();
+    this.freeq?.presence();
+    this.arm();
   }
 
   async fetch(request) {
@@ -138,17 +153,17 @@ export class OfficeRoom extends DurableObject {
   }
 
   // OAuth state must survive the object being evicted between login and callback.
-  sqlStore(prefix, ttlMs) {
+  sqlStore(prefix, ttlMs, table = 'oauth') {
     const sql = this.sql;
     return {
-      async set(k, v) { sql.exec('INSERT OR REPLACE INTO oauth (k, v, at) VALUES (?, ?, ?)', `${prefix}:${k}`, JSON.stringify(v), Date.now()); },
+      async set(k, v) { sql.exec(`INSERT OR REPLACE INTO ${table} (k, v, at) VALUES (?, ?, ?)`, `${prefix}:${k}`, JSON.stringify(v), Date.now()); },
       async get(k) {
-        sql.exec('DELETE FROM oauth WHERE k LIKE ? AND at < ?', `${prefix}:%`, Date.now() - ttlMs);
-        const row = sql.exec('SELECT v, at FROM oauth WHERE k = ?', `${prefix}:${k}`).toArray()[0];
+        sql.exec(`DELETE FROM ${table} WHERE k LIKE ? AND at < ?`, `${prefix}:%`, Date.now() - ttlMs);
+        const row = sql.exec(`SELECT v, at FROM ${table} WHERE k = ?`, `${prefix}:${k}`).toArray()[0];
         if (!row || Date.now() - row.at > ttlMs) return undefined;
         return JSON.parse(row.v);
       },
-      async del(k) { sql.exec('DELETE FROM oauth WHERE k = ?', `${prefix}:${k}`); },
+      async del(k) { sql.exec(`DELETE FROM ${table} WHERE k = ?`, `${prefix}:${k}`); },
     };
   }
 
@@ -185,7 +200,7 @@ export class OfficeRoom extends DurableObject {
     this.persistPeer(p);
     // After hibernation the freeq listener is gone; the next message brings it back.
     this.freeq?.presence();
-    this.armRooms();
+    this.arm();
   }
 
   webSocketClose(ws) {

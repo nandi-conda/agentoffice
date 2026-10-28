@@ -127,6 +127,8 @@ class AgentSession {
       await Promise.race([bot.connect(), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('join timed out')), 15000); })]);
     } finally { clearTimeout(timer); }
     if (status) bot.status(status, note);
+    this.joinedAs = { name, note, status };
+    this.hub.persist(this);
     return bot;
   }
 
@@ -149,13 +151,19 @@ class AgentSession {
   close() {
     this.client?.close();
     this.client = null;
+    this.joinedAs = null;
+    this.hub.persist(this);
     for (const w of this.waiters) w();
   }
 }
 
 export class McpHub {
-  constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '' }) {
-    Object.assign(this, { office, auth, token });
+  // store (optional): { get(id), set(id, json), del(id) }, where get() returns
+  // what set() was given, or nothing once IDLE_MS has passed. With one,
+  // sessions outlive a restart of the process or Durable Object: the agent's
+  // next request picks its session up again and puts it back in the office.
+  constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '', store = null }) {
+    Object.assign(this, { office, auth, token, store });
     this.sessions = new Map(); // mcp session id -> { transport, agent }
     // Observers (sessions that haven't joined) get the office-wide
     // broadcasts: joins, leaves, shouts, desks, notes, bookings, pomodoro…
@@ -179,6 +187,63 @@ export class McpHub {
     if (!s) return;
     this.sessions.delete(id);
     s.agent.close();
+    this.store?.del(id);
+  }
+
+  // Save what a session needs to come back after a restart: who it signed
+  // in as, and whether (and as whom) it was in the office.
+  persist(agent) {
+    if (!this.store || !agent.sid || !this.sessions.has(agent.sid)) return;
+    const v = JSON.stringify({ identity: agent.identity, operator: agent.operator, joined: agent.joinedAs || null });
+    if (v === agent.saved && Date.now() - agent.savedAt < 60000) return;
+    agent.saved = v; agent.savedAt = Date.now();
+    this.store.set(agent.sid, v);
+  }
+
+  // An agent's GET stream and its next POST can both arrive after a restart;
+  // they share one restored session.
+  restore(sid) {
+    if (!this.store) return null;
+    this.restoring ||= new Map();
+    if (!this.restoring.has(sid)) this.restoring.set(sid, this.revive(sid).finally(() => this.restoring.delete(sid)));
+    return this.restoring.get(sid);
+  }
+
+  async revive(sid) {
+    const row = await this.store?.get(sid);
+    if (!row) return null;
+    const saved = JSON.parse(row);
+    const agent = new AgentSession(this);
+    agent.identity = saved.identity || null;
+    agent.operator = !!saved.operator;
+    const s = await this.open(agent);
+    // The client initialized this session before the restart; the SDK has
+    // no public way to adopt a session id, so set what initialize would have.
+    s.transport.sessionId = sid;
+    s.transport._initialized = true;
+    agent.sid = sid;
+    this.sessions.set(sid, s);
+    if (saved.joined) {
+      try {
+        await agent.join(saved.joined);
+        agent.push({ t: 'toast', text: 'the office restarted; you were put back in' });
+      } catch (e) {
+        agent.push({ t: 'toast', text: `the office restarted and couldn't put you back (${e.message}); call join_office` });
+      }
+    }
+    return s;
+  }
+
+  async open(agent) {
+    const s = { agent };
+    s.transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (id) => { agent.sid = id; this.sessions.set(id, s); this.persist(agent); },
+    });
+    s.transport.onclose = () => s.transport.sessionId && this.drop(s.transport.sessionId);
+    agent.mcp = this.build(agent);
+    await agent.mcp.connect(s.transport);
+    return s;
   }
 
   // fetch-style handler for POST/GET/DELETE /mcp.
@@ -189,7 +254,7 @@ export class McpHub {
       try { body = await request.json(); } catch { return rpcError(400, -32700, 'parse error'); }
     }
     const sid = request.headers.get('mcp-session-id');
-    let s = sid && this.sessions.get(sid);
+    let s = sid && (this.sessions.get(sid) || await this.restore(sid));
     if (!s) {
       if (sid) return rpcError(404, -32001, 'unknown session; initialize again');
       if (request.method !== 'POST' || !isInitializeRequest(body)) return rpcError(400, -32000, 'first request must be initialize');
@@ -212,16 +277,10 @@ export class McpHub {
             { status: 401, headers: { 'www-authenticate': 'Bearer realm="agent office"' } });
         }
       }
-      const transport = new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: () => crypto.randomUUID(),
-        onsessioninitialized: (id) => this.sessions.set(id, s),
-      });
-      transport.onclose = () => transport.sessionId && this.drop(transport.sessionId);
-      s = { transport, agent };
-      agent.mcp = this.build(agent);
-      await agent.mcp.connect(transport);
+      s = await this.open(agent);
     }
     s.agent.touch();
+    this.persist(s.agent); // at most once a minute unless something changed, which keeps it from expiring
     return s.transport.handleRequest(request, { parsedBody: body });
   }
 

@@ -28,6 +28,9 @@ export class Office {
     this.shouts = [];
     this.bookings = saved.bookings || [];
     this.lastTick = 0;
+    // When this copy of the office started; a recent time means a restart
+    // (deploy or eviction) wiped what lives only in memory.
+    this.upSince = this.now();
   }
 
   persisted() {
@@ -40,6 +43,8 @@ export class Office {
       desks: this.desks,
       counters: this.counters,
       bookings: this.bookings,
+      upSince: this.upSince,
+      freeq: this.freeq?.status() || null,
     };
   }
 

@@ -288,3 +288,28 @@ test('fixed area mapping and nick cleanup', () => {
   assert.equal(ircNick(''), 'office');
 });
 
+
+test('a listener sign-in that never finishes gives up, says why, and retries', async () => {
+  const office = new Office({}, { loadActor: null });
+  let opened = 0;
+  const silent = () => ({ readyState: 1, addEventListener() {}, send() {}, close() { this.readyState = 3; } });
+  const bridge = new FreeqBridge({
+    office, auth: null, log: () => {}, signInMs: 30,
+    openSocket: async () => { opened++; return silent(); },
+    keyStore: { get: async () => null, set: async () => {} },
+    fetch: async () => new Response('[]'),
+  });
+  const me = office.open({ readyState: 1, send() {} });
+  await office.handle(me, { t: 'hello', name: 'Alice' }); // presence() starts the listener
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(opened, 1);
+  const st = bridge.status();
+  assert.equal(st.listening, false);
+  assert.equal(st.retrying, true);
+  assert.match(st.lastError, /didn't finish signing the office in/);
+  assert.ok(!bridge.starting && !bridge.listener);
+  // More presence while the retry is pending doesn't open more connections.
+  bridge.presence();
+  assert.equal(opened, 1);
+  bridge.stop();
+});

@@ -27,6 +27,13 @@ const MAX_PEOPLE = 12; // freeq people drawn per area
 const REFRESH_MS = 5 * 60 * 1000;
 const IDLE_CLOSE_MS = 2 * 60 * 1000; // listener hangs up this long after the office empties
 const USER_IDLE_MS = 30 * 60 * 1000;
+const SIGN_IN_MS = 20 * 1000; // give up on a listener sign-in freeq doesn't finish
+
+// A promise that rejects with `why` if `p` takes longer than `ms`.
+const within = (p, ms, why) => {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(why)), ms); })]).finally(() => clearTimeout(t));
+};
 
 // ---- encoding helpers -------------------------------------------------------
 
@@ -266,8 +273,8 @@ export class FreeqBridge {
   // office: the Office. auth: has freeqCredentials(did) (see auth.js).
   // keyStore: { get(), set(jwk) } for the listener's key. rooms: optional
   // fixed "zone=#channel,…" mapping instead of picking populated channels.
-  constructor({ office, auth, openSocket, keyStore, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log }) {
-    Object.assign(this, { office, auth, openSocket, keyStore, url, minMembers, log });
+  constructor({ office, auth, openSocket, keyStore, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS }) {
+    Object.assign(this, { office, auth, openSocket, keyStore, url, minMembers, log, signInMs });
     // Wrapped: calling a stored fetch as this.fetch() throws "Illegal invocation" on Workers.
     this.fetch = (...a) => fetchImpl(...a);
     this.api = url.replace(/^ws/, 'http').replace(/\/irc\/?$/, '');
@@ -282,12 +289,14 @@ export class FreeqBridge {
 
   // ---- lifecycle: the listener only runs while somebody is in the office ----
 
-  // Call whenever office presence changes.
+  // Call whenever office presence changes, and on any wake-up: it's how a
+  // listener lost to a restart or a dropped connection comes back.
   presence() {
     const humans = [...this.office.peers.values()].some((p) => p.ready && p.kind !== 'freeq');
     if (humans) {
       clearTimeout(this.idleTimer); this.idleTimer = null;
-      if (!this.listener && !this.starting) this.start().catch((e) => this.log(`freeq: ${e.message}`));
+      // A pending retry owns the next attempt, so a busy office doesn't hammer freeq.
+      if (!this.listener && !this.starting && !this.retryTimer) this.start().catch((e) => this.log(`freeq: ${e.message}`));
     } else if (this.listener && !this.idleTimer) {
       this.idleTimer = setTimeout(() => this.stop(), IDLE_CLOSE_MS);
     }
@@ -295,31 +304,62 @@ export class FreeqBridge {
 
   async start() {
     this.starting = true;
+    let irc = null;
     try {
       const identity = await loadIdentity(this.keyStore);
-      const irc = new IrcClient({
+      irc = new IrcClient({
         url: this.url, openSocket: this.openSocket, nick: 'agentoffice', respond: cryptoResponder(identity),
         onLine: (m) => this.onListenerLine(m),
         onClose: (why) => this.onListenerClosed(irc, why),
       });
       this.listener = irc;
-      await irc.open();
+      // Without a time limit, a sign-in that never finishes leaves the
+      // bridge "starting" for good and nobody from freeq ever shows up.
+      await within(irc.open(), this.signInMs, `freeq didn't finish signing the office in within ${Math.round(this.signInMs / 1000)}s`);
       this.log(`freeq: listening as ${irc.nick} (${identity.did})`);
       this.backoff = 0;
-      await this.refresh();
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = setInterval(() => this.refresh().catch((e) => this.log(`freeq: ${e.message}`)), REFRESH_MS);
+      this.since = Date.now();
+      this.lastError = null;
     } catch (e) {
-      this.listener = null;
+      if (this.listener === irc) this.listener = null;
+      irc?.close('sign-in failed');
+      this.lastError = e.message;
+      this.retry();
       throw e;
     } finally {
       this.starting = false;
     }
+    // A failed channel list shouldn't cost the connection; the next refresh tries again.
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = setInterval(() => this.refresh().catch((e) => this.failed(e)), REFRESH_MS);
+    await this.refresh().catch((e) => this.failed(e));
+  }
+
+  failed(e) {
+    this.lastError = e.message;
+    this.log(`freeq: ${e.message}`);
+  }
+
+  // Try again later, backing off up to a minute.
+  retry() {
+    clearTimeout(this.retryTimer);
+    const wait = Math.min(60000, 2000 * 2 ** (this.backoff = (this.backoff || 0) + 1));
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; this.presence(); }, wait);
+  }
+
+  // For /api/office: is the bridge up, and if not, why.
+  status() {
+    return {
+      listening: !!this.listener?.registered, nick: this.listener?.nick || null, since: this.since || null,
+      channels: [...this.bindings.values()].map((b) => b.channel), people: this.people.size,
+      retrying: !!this.retryTimer, lastError: this.lastError || null,
+    };
   }
 
   stop() {
     clearInterval(this.refreshTimer); this.refreshTimer = null;
     clearTimeout(this.idleTimer); this.idleTimer = null;
+    clearTimeout(this.retryTimer); this.retryTimer = null;
     const l = this.listener; this.listener = null;
     l?.close('office closed for the night');
     for (const u of this.users.values()) u.irc.close();
@@ -331,10 +371,11 @@ export class FreeqBridge {
     if (this.listener !== irc) return;
     this.log(`freeq: listener disconnected (${why})`);
     this.listener = null;
+    this.lastError = `listener disconnected: ${why}`;
+    clearInterval(this.refreshTimer); this.refreshTimer = null;
     for (const zoneId of [...this.bindings.keys()]) this.unbind(zoneId);
     // Come back if people are still here.
-    const wait = Math.min(60000, 2000 * 2 ** (this.backoff = (this.backoff || 0) + 1));
-    setTimeout(() => this.presence(), wait);
+    this.retry();
   }
 
   // ---- which channels go where ---------------------------------------------

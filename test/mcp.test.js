@@ -251,3 +251,30 @@ test('verify works under the Workers fetch `this` rule', async (t) => {
   assert.equal(r.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
   await client.close();
 });
+
+test('a session outlives a restart and its agent is put back in the office', async () => {
+  const at = fakeAtproto();
+  const auth = new AgentAuth({ fetch: at.fetch, resolve: at.resolve });
+  const rows = new Map();
+  const store = { get: (k) => rows.get(k), set: (k, v) => rows.set(k, v), del: (k) => rows.delete(k) };
+  let hub = new McpHub({ office: new Office({}), auth, token: 'op-token', store });
+  const client = new Client({ name: 'test', version: '1' });
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://office.test/mcp'), {
+    fetch: (url, init) => hub.fetch(new Request(url, init)),
+    requestInit: { headers: OP },
+  }));
+  await call(client, 'join_office', { name: 'Bodhi', note: 'salon' });
+  assert.equal(rows.size, 1);
+
+  // A deploy: a fresh office and hub, same storage, same client.
+  const office = new Office({});
+  hub = new McpHub({ office, auth, token: 'op-token', store });
+  const me = await call(client, 'whoami');
+  assert.equal(me.operator, true);
+  assert.equal(me.inOffice, true);
+  assert.ok([...office.peers.values()].some((p) => p.ready && p.name === 'Bodhi'));
+
+  await call(client, 'leave_office');
+  assert.equal(JSON.parse([...rows.values()][0]).joined, null);
+  await client.close();
+});
