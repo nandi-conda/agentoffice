@@ -3,6 +3,7 @@
 // density. Sprites are drawn at whole-number scale with smoothing off.
 
 import { W, H, ZONES, FURNITURE, grid, zoneAt } from './map.js';
+import { ROOMS, roomStatus, fmtTime } from './rooms.js';
 import { WALL_H, daylight, statusColor, colorFor, roundRect, wrapText } from './style.js';
 import { WALK } from './sprites.js';
 import { tracedFrame, drawTraced } from './trace.js';
@@ -20,7 +21,7 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, screen: 1.2, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 export function createRenderer(canvas) {
@@ -244,21 +245,86 @@ export function createRenderer(canvas) {
       case 'board': return drawNoticeboard(f, st);
       case 'reception': return drawReception(f, st);
       case 'pomodoro': return drawPomodoro(f, st);
-      case 'screen':
-        ctx.fillStyle = '#334155'; ctx.fillRect(S(x + w / 2 - 0.04), S(y + h - 0.6), S(0.08), S(0.6));
-        box(x, y + 0.6, w, 0.15, 0.12, '#475569', '#334155', 0.04);
-        ctx.fillStyle = '#0f172a'; roundRect(ctx, S(x - 0.1), S(y + h - hgt - 0.1), S(w + 0.2), S(0.95), S(0.06)); ctx.fill();
-        {
-          const g = ctx.createLinearGradient(S(x), S(y), S(x + w), S(y + 1));
-          g.addColorStop(0, '#1e3a8a'); g.addColorStop(1, '#7c3aed');
-          ctx.fillStyle = g; ctx.fillRect(S(x - 0.02), S(y + h - hgt - 0.02), S(w + 0.04), S(0.79));
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.font = `600 ${S(0.16)}px Inter, system-ui`; ctx.textAlign = 'center';
-          ctx.fillText('standup 10:00', S(x + w / 2), S(y + h - hgt + 0.42)); ctx.textAlign = 'left';
-        }
-        return;
+      case 'screen': return drawScreen(f, st);
+      case 'panel': return drawPanel(f, st);
       case 'rug': return drawRug(f);
     }
+  }
+
+  // A room's wall screen: a live screen share for people in the room,
+  // otherwise the current booking (or "free").
+  function drawScreen(f, st) {
+    const { x, y, w, h } = f;
+    const hgt = HEIGHTS.screen;
+    ctx.fillStyle = '#334155'; ctx.fillRect(S(x + w / 2 - 0.04), S(y + h - 0.6), S(0.08), S(0.6));
+    box(x, y + 0.6, w, 0.15, 0.12, '#475569', '#334155', 0.04);
+    ctx.fillStyle = '#0f172a'; roundRect(ctx, S(x - 0.1), S(y + h - hgt - 0.1), S(w + 0.2), S(0.95), S(0.06)); ctx.fill();
+    const sx = x - 0.02, sy = y + h - hgt - 0.02, sw = w + 0.04, sh = 0.79;
+    const feed = st.screenFeed?.zone === f.zone ? st.screenFeed.video : null;
+    if (feed && feed.readyState >= 2 && feed.videoWidth) {
+      ctx.fillStyle = '#000'; ctx.fillRect(S(sx), S(sy), S(sw), S(sh));
+      const r = Math.min(sw / feed.videoWidth, sh / feed.videoHeight);
+      const dw = feed.videoWidth * r, dh = feed.videoHeight * r;
+      ctx.drawImage(feed, S(sx + (sw - dw) / 2), S(sy + (sh - dh) / 2), S(dw), S(dh));
+      st.lights.push({ x: x + w / 2, y: y + h + 0.4, r: 2, c: 'rgba(191,219,254,0.5)' });
+      return;
+    }
+    const g = ctx.createLinearGradient(S(x), S(y), S(x + w), S(y + 1));
+    g.addColorStop(0, '#1e3a8a'); g.addColorStop(1, '#7c3aed');
+    ctx.fillStyle = g; ctx.fillRect(S(sx), S(sy), S(sw), S(sh));
+    const { current, next } = f.zone ? roomStatus(st.bookings || [], f.zone, st.serverNow()) : {};
+    const lines = current ? [current.title, `until ${fmtTime(current.end)}`] : next ? ['free', `next ${fmtTime(next.start)}`] : ['free'];
+    ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.textAlign = 'center';
+    ctx.font = `600 ${S(0.16)}px Inter, system-ui`;
+    ctx.fillText(clipText(lines[0], S(w - 0.1)), S(x + w / 2), S(sy + (lines[1] ? 0.32 : 0.45)));
+    if (lines[1]) { ctx.font = `500 ${S(0.12)}px Inter, system-ui`; ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillText(lines[1], S(x + w / 2), S(sy + 0.55)); }
+    ctx.textAlign = 'left';
+  }
+
+  const STATE_COLOR = { free: '#22c55e', soon: '#f59e0b', busy: '#ef4444' };
+
+  // Booking panel: a little tablet hung on the wall by the door.
+  function drawPanel(f, st) {
+    const { state } = roomStatus(st.bookings || [], f.zone, st.serverNow());
+    const cx = f.x + 0.5, top = f.y + 0.68 - 1.15;
+    ctx.fillStyle = '#1f2937'; roundRect(ctx, S(cx - 0.2), S(top), S(0.4), S(0.32), S(0.05)); ctx.fill();
+    ctx.fillStyle = STATE_COLOR[state]; roundRect(ctx, S(cx - 0.16), S(top + 0.04), S(0.32), S(0.24), S(0.03)); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(S(cx - 0.1), S(top + 0.1), S(0.2), S(0.03));
+    ctx.fillRect(S(cx - 0.1), S(top + 0.16), S(0.13), S(0.03));
+    st.lights.push({ x: cx, y: top + 0.4, r: 0.7, c: state === 'busy' ? 'rgba(239,68,68,0.45)' : state === 'soon' ? 'rgba(245,158,11,0.45)' : 'rgba(34,197,94,0.4)' });
+  }
+
+  function clipText(text, max) {
+    if (ctx.measureText(text).width <= max) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(`${t}…`).width > max) t = t.slice(0, -1);
+    return `${t}…`;
+  }
+
+  // Status tag in the corner of each bookable room, readable from outside.
+  function drawRoomTags(st) {
+    const now = st.serverNow();
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (const r of ROOMS) {
+      const { state, current, next } = roomStatus(st.bookings || [], r.id, now);
+      const a = toScreen(r.x0 + 0.15, r.y0 + 0.2), b = toScreen(r.x1 + 0.85, r.y0 + 0.2);
+      if (b.x < 0 || a.x > vw || a.y < -20 || a.y > vh) continue;
+      const small = r.x1 - r.x0 < 4;
+      const text = small ? (state === 'busy' ? (current.lock ? '🔒 busy' : 'busy') : state === 'soon' ? fmtTime(next.start) : 'free')
+        : state === 'busy' ? `${current.lock ? '🔒 ' : ''}${current.title} · until ${fmtTime(current.end)}`
+          : state === 'soon' ? `free until ${fmtTime(next.start)}` : r.av ? 'free · A/V' : 'free';
+      const label = clipText(text, Math.max(30, b.x - a.x - 26));
+      const lw = ctx.measureText(label).width + 22, lh = 18;
+      ctx.fillStyle = 'rgba(28,25,23,0.72)';
+      roundRect(ctx, a.x, a.y, lw, lh, 9); ctx.fill();
+      ctx.fillStyle = STATE_COLOR[state];
+      ctx.beginPath(); ctx.arc(a.x + 9, a.y + lh / 2, 3.5, 0, 7); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, a.x + 16, a.y + lh / 2 + 0.5);
+    }
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawMug(x, y, c) {
@@ -626,6 +692,11 @@ export function createRenderer(canvas) {
       ctx.fillStyle = p.speaking ? '#4ade80' : 'rgba(255,255,255,0.6)';
       ctx.beginPath(); ctx.arc(lx + lw + 6, ly + lh / 2, 3, 0, 7); ctx.fill();
     }
+    if (p.video || p.screen) {
+      ctx.font = '11px system-ui';
+      ctx.fillText(`${p.video ? '📹' : ''}${p.screen ? '🖥️' : ''}`, lx + lw + 12, ly + lh / 2 + 4);
+      ctx.font = '600 11px Inter, system-ui, sans-serif';
+    }
     let by = ly - 6;
     // emote fallback (no rpg.actor sheet for it)
     if (p.emote && !(p.sheets?.emotes?.[p.emote])) {
@@ -721,7 +792,7 @@ export function createRenderer(canvas) {
       if (f.type === 'chair') {
         items.push({ k: f.y + 0.5, f });
         items.push({ k: f.facing === 'up' ? f.y + 1.05 : f.y + 0.3, back: f });
-      } else items.push({ k: f.seat ? f.y + 0.5 : f.y + f.h, f });
+      } else items.push({ k: f.seat ? f.y + 0.5 : f.type === 'panel' ? f.y + 0.7 : f.y + f.h, f });
     }
     for (const p of st.peers) {
       let k = p.ry + 0.2;
@@ -756,6 +827,7 @@ export function createRenderer(canvas) {
 
     // labels sit above the lighting so they stay readable at night
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawRoomTags(st);
     for (const p of st.peers) drawLabels(p, st, p.id === st.meId);
     const z = zoneAt(st.cam.x, st.cam.y);
     return z;

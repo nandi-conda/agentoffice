@@ -13,6 +13,7 @@
 
 import { EventEmitter } from 'node:events';
 import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
+import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -27,6 +28,9 @@ export class AgentClient extends EventEmitter {
     this.walkId = 0;
     this.peers = new Map();
     this.desks = {};
+    this.bookings = [];
+    this.pending = new Map(); // booking request ref -> { resolve, reject }
+    this.refs = 0;
     this.me = null;
   }
 
@@ -44,7 +48,8 @@ export class AgentClient extends EventEmitter {
         const m = JSON.parse(raw);
         this.track(m);
         if (m.t === 'welcome') resolve(this);
-        this.emit(m.t, m);
+        // An unheard 'error' event would throw; office errors are just messages.
+        if (m.t !== 'error' || this.listenerCount('error')) this.emit(m.t, m);
         if (m.t === 'chat' && m.id !== this.me?.id && this.mentions(m.text)) this.emit('mention', m);
       });
     });
@@ -67,6 +72,14 @@ export class AgentClient extends EventEmitter {
       if (p) Object.assign(p, m);
     } else if (m.t === 'desks') this.desks = m.desks;
     if (m.t === 'welcome' || m.t === 'notes') this.notes = m.notes;
+    if (m.t === 'welcome' || m.t === 'bookings') this.bookings = m.bookings || [];
+    // A locked room turned us away (or showed us out): stop walking, stand where the server says.
+    if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y, seat: null }); }
+    const wait = m.ref !== undefined && this.pending.get(m.ref);
+    if (wait && (m.t === 'booked' || m.t === 'error')) {
+      this.pending.delete(m.ref);
+      if (m.t === 'booked') wait.resolve(m.booking); else wait.reject(new Error(m.message));
+    }
   }
 
   send(msg) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(msg)); }
@@ -133,6 +146,32 @@ export class AgentClient extends EventEmitter {
     this.send({ t: 'desk', action: 'claim', desk: desk.id, goal });
     return desk.id;
   }
+
+  // ---- meeting rooms --------------------------------------------------------
+  // Rooms with their live status: { id, name, av, seats, state: free|soon|busy, current, next }.
+  rooms(now = Date.now()) {
+    return ROOMS.map((r) => ({ id: r.id, name: r.name, av: r.av, seats: r.seats, ...roomStatus(this.bookings, r.id, now) }));
+  }
+
+  // Send a booking op and wait for the server's answer (resolves the booking, rejects with its reason).
+  bookOp(op, args = {}) {
+    const ref = `a${++this.refs}`;
+    return new Promise((resolve, reject) => {
+      this.pending.set(ref, { resolve, reject });
+      this.send({ t: 'book', op, ref, ...args });
+      setTimeout(() => { if (this.pending.delete(ref)) reject(new Error('no answer from the office')); }, 10000);
+    });
+  }
+
+  // book({ room: 'board', start: Date|ms|ISO|'now', minutes: 30 | end, title, invitees: ['ada.bsky.social'], lock, autoRelease })
+  book({ start = 'now', end, ...rest } = {}) {
+    const t = (v) => (v instanceof Date ? v.getTime() : v);
+    return this.bookOp('create', { ...rest, start: t(start), ...(end !== undefined ? { end: t(end) } : {}) });
+  }
+  cancelBooking(id) { return this.bookOp('cancel', { id }); }
+  extendBooking(id, minutes = 15) { return this.bookOp('extend', { id, minutes }); }
+  endBooking(id) { return this.bookOp('end', { id }); }
+  updateBooking(id, changes) { return this.bookOp('update', { id, ...changes }); }
 
   close() { this.ws?.close(); }
 }

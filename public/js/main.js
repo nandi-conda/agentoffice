@@ -7,6 +7,7 @@ import { connect } from './net.js';
 import { createVoice } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
+import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -19,7 +20,7 @@ const store = {
 const peers = new Map();
 let me = null;
 let net = null;
-let desks = {}, notes = [], pomo = {}, counters = {}, scores = [];
+let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
@@ -200,7 +201,7 @@ function enter() {
 }
 
 // ---- networking -------------------------------------------------------------
-const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '' });
+const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended) });
 
 function start(hello) {
   net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), () => sys('Connection lost, reconnecting…'));
@@ -226,7 +227,7 @@ function onMessage(m) {
       peers.set(me.id, me);
       sheetsFor(me).then((s) => { me.sheets = s; buildEmotes(); });
       for (const p of m.peers) addPeer(p);
-      desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores;
+      desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
@@ -250,7 +251,7 @@ function onMessage(m) {
     case 'peer': {
       const p = peers.get(m.id);
       if (!p) break;
-      for (const key of ['status', 'note', 'emote', 'audio', 'cup', 'seat']) if (key in m) p[key] = m[key];
+      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'cup', 'seat']) if (key in m) p[key] = m[key];
       if (p === me && 'seat' in m) me.seat = m.seat;
       refreshPeople();
       break;
@@ -285,7 +286,44 @@ function onMessage(m) {
     case 'wave': {
       const p = peers.get(m.from);
       chime();
-      toast(`${m.kind === 'knock' ? '🚪' : '👋'} <b>${esc(m.name)}</b> ${m.kind === 'knock' ? 'is knocking' : 'waved at you'}`, p ? [['Walk over', () => walkTo(p.x, p.y)], ['Wave back', () => net.send({ t: 'wave', to: p.id })]] : []);
+      // A knock on a locked room I'm holding can be answered by letting them in.
+      const z = zoneAt(me.x, me.y);
+      const b = z?.bookable && activeBooking(bookings, z.id, serverNow());
+      const letIn = m.kind === 'knock' && p && b && b.lock && isHolder(b, me) && !isHolder(b, p);
+      toast(`${m.kind === 'knock' ? '🚪' : '👋'} <b>${esc(m.name)}</b> ${m.kind === 'knock' ? 'is knocking' : 'waved at you'}`, p ? [
+        ...(letIn ? [['Let in', () => net.send({ t: 'book', op: 'admit', id: b.id, to: p.id })]] : []),
+        ['Walk over', () => walkTo(p.x, p.y)], ['Wave back', () => net.send({ t: 'wave', to: p.id })],
+      ] : [], letIn ? 15000 : 6000);
+      break;
+    }
+    case 'bookings': {
+      bookings = m.bookings;
+      // Don't redraw the booking form out from under someone typing in it.
+      const typingInModal = modal.isOpen && modal.body.contains(document.activeElement) && document.activeElement.matches('input:not([type=checkbox]), select');
+      if (!typingInModal) modal.rooms?.();
+      break;
+    }
+    case 'booked': {
+      const b = m.booking, room = roomById(b.room);
+      if (b.cancelled) toast(`📅 Cancelled “${esc(b.title)}”`);
+      else if (m.ref === 'new') toast(`📅 Booked ${esc(room.name)} ${dayWord(b.start)} ${fmtRange(b)}: “${esc(b.title)}”`);
+      modal.rooms?.();
+      break;
+    }
+    case 'roomnote': {
+      const room = roomById(m.room);
+      const go = ['soon', 'start', 'invite', 'admit'].includes(m.kind) && zoneAt(me.x, me.y)?.id !== m.room;
+      chime(m.kind === 'start' ? 'focus' : 'soft');
+      toast(esc(m.text), go ? [['Walk there', () => walkInto(room)]] : [], 9000);
+      break;
+    }
+    case 'bounce': {
+      me.x = me.rx = m.x; me.y = me.ry = m.y; me.seat = null;
+      path = null; walkTarget = null; pendingUse = null; follow = null;
+      if (performance.now() - (onMessage.bounced || 0) > 4000) {
+        onMessage.bounced = performance.now();
+        toast(esc(m.text), [['Knock', () => knock(m.room)]], 8000);
+      }
       break;
     }
     case 'toast': toast(esc(m.text)); break;
@@ -420,11 +458,15 @@ function openHelp() {
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
       <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
+      <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
+      <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>V</kbd><span>Toggle traced-vector characters / original pixels</span>
       <kbd>+ −</kbd><span>Zoom</span>
     </div>
     <h3 style="margin-top:16px">Who hears you</h3>
     <p class="small">In open areas, anyone within a few steps. In the <b>Boardroom</b>, <b>Huddle Room</b> and <b>Phone Booths</b>, only people in the same room. The <b>Deep Work Den</b> is text-only and runs a shared pomodoro. Start a message with <code>/shout</code> to reach the whole office, or <code>@name</code> to tap someone anywhere.</p>
+    <h3>Meeting rooms</h3>
+    <p class="small">Book the Boardroom, Huddle Room or a phone booth from the 📅 button or the panel by each door. The Boardroom and Huddle Room are <b>A/V rooms</b>: inside, turn on your camera or share your screen with everyone in the room. A <b>locked</b> booking keeps everyone but invitees out (knock to be let in); bookings nobody turns up to are released after 10 minutes.</p>
     <h3>Agents</h3>
     <p class="small">AI agents can work here too. They connect over the same WebSocket protocol, claim desks and answer @mentions. See <code>scripts/agent.mjs</code>.</p>`);
 }
@@ -537,6 +579,11 @@ function promptFor(f) {
     case 'pomodoro': return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Stop the focus session' : 'Start a focus session (25 / 5)';
     case 'noticeboard': return 'Read the notice board';
     case 'arcade': return 'Play Byte Snake';
+    case 'room': {
+      const { state, current, next } = roomStatus(bookings, f.zone, serverNow());
+      const name = roomById(f.zone).name;
+      return state === 'busy' ? `${name}: “${current.title}” until ${fmtTime(current.end)}` : state === 'soon' ? `${name}: free until ${fmtTime(next.start)}` : `${name} is free · book it`;
+    }
   }
   return null;
 }
@@ -573,6 +620,7 @@ function interact(f) {
       break;
     }
     case 'noticeboard': openNotes(); break;
+    case 'room': openRoom(f.zone); break;
     case 'arcade': modal.snake = openSnake(modal, { scores, onScore: (score) => net.send({ t: 'score', score }) }); { const prev = modal.onclose; modal.onclose = () => { prev?.(); modal.snake = null; }; } break;
   }
 }
@@ -614,6 +662,277 @@ function openNotes() {
   if (!wasOpen) input.focus();
 }
 
+// ---- meeting rooms ----------------------------------------------------------------
+const DAY = 24 * 60 * MIN;
+const pad = (n) => String(n).padStart(2, '0');
+const isoDay = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const hm = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fromLocal = (day, time) => { const [Y, M, D] = day.split('-').map(Number); const [h, m] = time.split(':').map(Number); return new Date(Y, M - 1, D, h, m).getTime(); };
+function dayWord(t) {
+  const today = isoDay(serverNow()), d = isoDay(t);
+  if (d === today) return 'today';
+  if (d === isoDay(serverNow() + DAY)) return 'tomorrow';
+  return new Date(t).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+const statusDot = (state) => `<span class="dot st-${state}"></span>`;
+const canBook = () => !!me?.did;
+const signInHint = '<p class="small muted">Sign in with your AT Protocol handle (on the way in) to book rooms. Guests can see the schedule.</p>';
+
+function walkInto(room) {
+  if (!room) return;
+  walkTo((room.x0 + room.x1 + 1) / 2, (room.y0 + room.y1 + 1) / 2);
+}
+
+// Knock on a locked room: taps someone from the meeting who's inside.
+function knock(roomId) {
+  const b = activeBooking(bookings, roomId, serverNow());
+  const inside = [...peers.values()].filter((p) => p !== me && zoneAt(p.x, p.y)?.id === roomId && isHolder(b, p));
+  const who = inside.find((p) => keyOf(p) === b?.owner) || inside[0];
+  if (!who) return toast('🚪 Nobody from the meeting is inside yet.');
+  net.send({ t: 'wave', to: who.id, kind: 'knock' });
+  toast(`🚪 You knocked. ${esc(who.name)} can let you in.`);
+}
+
+const roomHud = $('.room-hud');
+let roomHudT = 0;
+roomHud.addEventListener('click', () => { const z = zoneAt(me.x, me.y); if (z?.bookable) openRoom(z.id); });
+function updateRoomHud(z) {
+  if (!z?.bookable) { roomHud.hidden = true; return; }
+  const { state, current, next } = roomStatus(bookings, z.id, serverNow());
+  roomHud.hidden = false;
+  roomHud.innerHTML = state === 'busy'
+    ? `${statusDot(state)}${current.lock ? '🔒 ' : ''}“${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
+    : state === 'soon' ? `${statusDot(state)}Free until ${fmtTime(next.start)}` : `${statusDot(state)}Free · book this room`;
+}
+
+const draft = { room: 'board', date: '', time: '', minutes: 30, title: '', invitees: '', lock: false, autoRelease: true };
+
+function openSchedule(opts = {}) {
+  Object.assign(draft, opts);
+  if (!draft.date) draft.date = isoDay(serverNow());
+  const render = () => {
+    const now = serverNow();
+    if (!draft.time) draft.time = draft.date === isoDay(now) ? hm(Math.ceil((now + 5 * MIN) / (30 * MIN)) * 30 * MIN) : '10:00';
+    // 07:00–21:00, stretched to fit early or late bookings (and now).
+    const dayStart = fromLocal(draft.date, '00:00'), dayEnd = dayStart + DAY;
+    const times = bookings.filter((b) => b.end > dayStart && b.start < dayEnd).flatMap((b) => [b.start, b.end]);
+    if (now > dayStart && now < dayEnd) times.push(now);
+    const hourOf = (t) => (t - dayStart) / (60 * MIN);
+    let h0 = Math.max(0, Math.min(7, ...times.map((t) => Math.floor(hourOf(t)))));
+    let h1 = Math.min(24, Math.max(21, ...times.map((t) => Math.ceil(hourOf(t) + 0.5))));
+    if ((h1 - h0) % 2) h1 < 24 ? h1++ : h0--;
+    const from = dayStart + h0 * 60 * MIN, to = dayStart + h1 * 60 * MIN;
+    const pct = (t) => ((Math.min(to, Math.max(from, t)) - from) / (to - from)) * 100;
+    const hours = Array.from({ length: (h1 - h0) / 2 }, (_, i) => h0 + i * 2).map((h) => `<span style="left:${pct(dayStart + h * 60 * MIN)}%">${pad(h)}:00</span>`).join('');
+    const rows = ROOMS.map((r) => {
+      const st = roomStatus(bookings, r.id, now);
+      const blocks = bookings.filter((b) => b.room === r.id && b.end > from && b.start < to).map((b) => `
+        <div class="tl-block${b.owner === keyOf(me) ? ' mine' : ''}${b.lock ? ' locked' : ''}${b.end <= now ? ' past' : ''}" data-id="${b.id}"
+          style="left:${pct(b.start)}%;width:${pct(b.end) - pct(b.start)}%"
+          title="${esc(`${b.title} · ${fmtRange(b)} · ${b.name}${b.invitees?.length ? ` · with ${b.invitees.join(', ')}` : ''}`)}">${esc(b.title)}</div>`).join('');
+      const nowLine = now > from && now < to ? `<div class="tl-now" style="left:${pct(now)}%"></div>` : '';
+      return `<div class="tl-name">${esc(r.name)}<small>${statusDot(st.state)}${r.av ? '<span class="badge av">A/V</span>' : 'voice'} · ${r.seats} seat${r.seats > 1 ? 's' : ''}</small></div>
+        <div class="tl-track" data-room="${r.id}" style="--hours:${h1 - h0}">${blocks}${nowLine}</div>`;
+    }).join('');
+    const mine = bookings.filter((b) => b.end > now && (b.owner === keyOf(me) || isHolder(b, me))).sort((a, b) => a.start - b.start);
+    const durations = [15, 30, 45, 60, 90, 120, 180, 240];
+    modal.open(`
+      <div class="sched">
+        <div class="sched-head"><h2>Meeting rooms</h2>
+          <div class="day-nav"><button class="prev" aria-label="Previous day">‹</button><b>${esc(dayWord(fromLocal(draft.date, '12:00')))}</b><button class="next" aria-label="Next day">›</button></div></div>
+        <div class="timeline"><div></div><div class="tl-hours">${hours}</div>${rows}</div>
+        <p class="tiny muted">Click an empty spot to pick a time. 🔒 means only invitees can walk in.</p>
+        ${canBook() ? `<form class="book-form">
+          <label>Room<select name="room">${ROOMS.map((r) => `<option value="${r.id}"${r.id === draft.room ? ' selected' : ''}>${esc(r.name)}${r.av ? ' (A/V)' : ''}</option>`).join('')}</select></label>
+          <label>Day<input type="date" name="date" value="${draft.date}" min="${isoDay(now)}" max="${isoDay(now + RULES.ahead)}"></label>
+          <label>Start<input type="time" name="time" step="300" value="${draft.time}"></label>
+          <label>Length<select name="minutes">${durations.map((d) => `<option value="${d}"${d === +draft.minutes ? ' selected' : ''}>${d < 60 ? `${d} min` : `${d / 60} h`}</option>`).join('')}</select></label>
+          <label class="wide">What's it for<input name="title" maxlength="80" value="${esc(draft.title)}" placeholder="e.g. Design review"></label>
+          <label class="wide">Invite (handles, comma separated; agents by name)<input name="invitees" value="${esc(draft.invitees)}" placeholder="ada.bsky.social, StandupBot"></label>
+          <div class="checks">
+            <label><input type="checkbox" name="lock"${draft.lock ? ' checked' : ''}> 🔒 Lock the room: only invitees can walk in</label>
+            <label><input type="checkbox" name="autoRelease"${draft.autoRelease ? ' checked' : ''}> Release it if nobody shows up in 10 min</label>
+          </div>
+          <button class="btn primary wide">Book</button>
+        </form>` : signInHint}
+        <h3 style="margin-top:16px">Your bookings</h3>
+        <ul class="my-bookings">${mine.map((b) => bookingRow(b, now)).join('') || '<li class="muted">Nothing booked.</li>'}</ul>
+      </div>`, 'wide');
+    modal.rooms = render;
+    modal.onclose = () => (modal.rooms = null);
+    const body = modal.body;
+    const shift = (d) => { draft.date = isoDay(fromLocal(draft.date, '12:00') + d * DAY); draft.time = ''; render(); };
+    body.querySelector('.prev').onclick = () => shift(-1);
+    body.querySelector('.next').onclick = () => shift(1);
+    body.querySelectorAll('.tl-track').forEach((tr) => tr.addEventListener('click', (e) => {
+      if (e.target.closest('.tl-block')) return;
+      const r = tr.getBoundingClientRect();
+      const t = from + ((e.clientX - r.left) / r.width) * (to - from);
+      Object.assign(draft, { room: tr.dataset.room, time: hm(Math.floor(t / (15 * MIN)) * 15 * MIN) });
+      render();
+      modal.body.querySelector('[name=title]')?.focus();
+    }));
+    body.querySelectorAll('.tl-block').forEach((el) => el.addEventListener('click', () => {
+      const b = bookings.find((x) => x.id === el.dataset.id);
+      if (b) toast(`📅 <b>${esc(b.title)}</b> · ${esc(roomById(b.room).name)} · ${dayWord(b.start)} ${fmtRange(b)} · booked by ${esc(b.name)}`);
+    }));
+    wireBookingRows(body);
+    const form = body.querySelector('.book-form');
+    if (!form) return;
+    form.addEventListener('input', (e) => {
+      const el = e.target;
+      draft[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+      if (el.name === 'date') render();
+    });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const start = fromLocal(draft.date, draft.time || '10:00');
+      net.send({
+        t: 'book', op: 'create', ref: 'new', room: draft.room, start, end: start + draft.minutes * MIN,
+        title: draft.title, invitees: draft.invitees, lock: draft.lock, autoRelease: draft.autoRelease,
+      });
+      draft.title = ''; draft.invitees = '';
+    });
+  };
+  render();
+}
+
+function bookingRow(b, now) {
+  const live = b.start <= now && now < b.end;
+  const own = b.owner === keyOf(me);
+  return `<li data-id="${b.id}">${statusDot(live ? 'busy' : 'soon')}
+    <span class="grow"><b>${esc(b.title)}</b>${b.lock ? ' 🔒' : ''}<br><span class="small muted">${esc(roomById(b.room).name)} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
+    ${zoneAt(me.x, me.y)?.id !== b.room ? '<button data-act="go">Walk there</button>' : ''}
+    ${own && live ? '<button data-act="extend">+15 min</button><button data-act="end">End now</button>' : ''}
+    ${own && !live ? '<button data-act="cancel">Cancel</button>' : ''}</li>`;
+}
+
+function wireBookingRows(body) {
+  body.querySelectorAll('li[data-id] button').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.closest('li').dataset.id, act = btn.dataset.act;
+    const b = bookings.find((x) => x.id === id);
+    if (!b) return;
+    if (act === 'go') { modal.close(); walkInto(roomById(b.room)); return; }
+    if (act === 'cancel' && !confirm(`Cancel “${b.title}”?`)) return;
+    net.send({ t: 'book', op: act, id, minutes: 15 });
+  }));
+}
+
+// The panel by a room's door: what's on now, what's next, quick booking.
+function openRoom(id) {
+  const room = roomById(id);
+  const render = () => {
+    const now = serverNow();
+    const { state, current, next } = roomStatus(bookings, id, now);
+    const upcoming = forRoom(bookings, id).filter((b) => b.end > now).slice(0, 6);
+    const gap = next ? next.start - now : 60 * MIN;
+    const quick = Math.min(30 * MIN, Math.floor(gap / (5 * MIN)) * 5 * MIN);
+    const lockedOutNow = current?.lock && !isHolder(current, me);
+    modal.open(`
+      <h2>${esc(room.name)} ${room.av ? '<span class="badge av">A/V</span>' : ''}</h2>
+      <p class="small muted">${room.seats} seat${room.seats > 1 ? 's' : ''} · ${room.av ? 'voice, video and screen share for everyone inside' : 'private voice'}</p>
+      <div class="room-now ${state}">${statusDot(state)}<div>${state === 'busy'
+        ? `<b>In use${current.lock ? ' 🔒' : ''}:</b> “${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
+        : state === 'soon' ? `<b>Free</b> until ${fmtTime(next.start)} (“${esc(next.title)}”)` : '<b>Free</b>'}</div></div>
+      <div class="row">
+        ${!current && canBook() && quick >= RULES.minLen ? `<button class="btn primary quick">Book now · ${quick / MIN} min</button>` : ''}
+        ${canBook() ? '<button class="btn ghost later">Book a time…</button>' : ''}
+        ${lockedOutNow ? '<button class="btn knock">🚪 Knock</button>' : ''}
+        ${zoneAt(me.x, me.y)?.id !== id && !lockedOutNow ? '<button class="btn ghost go">Walk in</button>' : ''}
+      </div>
+      ${canBook() ? '' : signInHint}
+      <h3 style="margin-top:16px">Coming up</h3>
+      <ul class="room-day">${upcoming.map((b) => bookingRow(b, now)).join('') || '<li class="muted">Nothing booked.</li>'}</ul>`);
+    modal.rooms = render;
+    modal.onclose = () => (modal.rooms = null);
+    const body = modal.body;
+    body.querySelector('.quick')?.addEventListener('click', () => net.send({ t: 'book', op: 'create', ref: 'new', room: id, start: now, end: now + quick, title: `${me.name}'s meeting` }));
+    body.querySelector('.later')?.addEventListener('click', () => openSchedule({ room: id }));
+    body.querySelector('.knock')?.addEventListener('click', () => { knock(id); modal.close(); });
+    body.querySelector('.go')?.addEventListener('click', () => { modal.close(); walkInto(room); });
+    wireBookingRows(body);
+  };
+  render();
+}
+$('.rooms-btn').addEventListener('click', () => openSchedule());
+
+// ---- A/V rooms: camera, screen share and the video stage -----------------------------
+const camBtn = $('.cam'), shareBtn = $('.share');
+camBtn.addEventListener('click', toggleCam);
+shareBtn.addEventListener('click', toggleShare);
+
+async function ensureVoice() {
+  if (voice.on) return true;
+  if (!(await voice.enable({ silent: true }))) return false;
+  net.send({ t: 'audio', on: true });
+  me.audio = true;
+  micBtn.className = 'tb mic on';
+  return true;
+}
+async function toggleCam() {
+  if (voice.cam) return voice.stopCam();
+  await ensureVoice();
+  if (!(await voice.startCam())) toast('📷 Camera permission was blocked. Allow it in your browser to turn it on.');
+}
+async function toggleShare() {
+  if (voice.screen) return voice.stopScreen();
+  await ensureVoice();
+  if (!(await voice.startScreen())) toast('🖥️ Screen sharing was cancelled or blocked.');
+}
+
+let sentAv = { video: false, screen: false };
+function mediaChanged(ended) {
+  const now = { video: !!voice.cam, screen: !!voice.screen };
+  camBtn.classList.toggle('on', now.video);
+  shareBtn.classList.toggle('on', now.screen);
+  if (me && (now.video !== sentAv.video || now.screen !== sentAv.screen)) {
+    sentAv = now;
+    me.video = now.video; me.screen = now.screen;
+    net.send({ t: 'av', ...now });
+  }
+  if (ended) toast('🖥️ You stopped sharing your screen.', [], 3000);
+  updateStage();
+}
+
+const stage = $('.av-stage');
+const tiles = new Map(); // key -> tile element
+function updateStage() {
+  const z = me && zoneAt(me.x, me.y);
+  const want = [];
+  if (z?.av) {
+    const others = [...peers.values()].filter((p) => p !== me && zoneAt(p.x, p.y) === z);
+    if (voice.screen) want.push({ key: 'me:screen', stream: voice.screen, name: 'Your screen', kind: 'screen' });
+    for (const p of others) { const r = voice.remote(p.id); if (r.screen) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s screen`, kind: 'screen', id: p.id }); }
+    if (voice.cam) want.push({ key: 'me:cam', stream: voice.cam, name: 'You', kind: 'cam self', id: me.id });
+    for (const p of others) { const r = voice.remote(p.id); if (r.cam) want.push({ key: `${p.id}:cam`, stream: r.cam, name: p.name, kind: 'cam', id: p.id }); }
+  }
+  const keys = new Set(want.map((w) => w.key));
+  for (const [k2, el] of tiles) if (!keys.has(k2)) { el.remove(); tiles.delete(k2); }
+  for (const w of want) {
+    let el = tiles.get(w.key);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = `tile ${w.kind}`;
+      el.innerHTML = '<video autoplay playsinline muted></video><span class="tag"></span><button class="grow-btn" title="Enlarge">⤢</button>';
+      el.querySelector('.grow-btn').onclick = () => el.classList.toggle('big');
+      tiles.set(w.key, el);
+      stage.append(el);
+    }
+    const v = el.querySelector('video');
+    if (v.srcObject !== w.stream) { v.srcObject = w.stream; v.play().catch(() => {}); }
+    el.querySelector('.tag').textContent = w.name;
+    el.classList.toggle('speaking', !!(w.id && peers.get(w.id)?.speaking));
+  }
+  stage.hidden = !want.length;
+}
+
+// A screen being shared in my room also plays on the room's wall screen.
+function screenFeed(z) {
+  if (!z?.av) return null;
+  for (const [k2, el] of tiles) if (k2.endsWith(':screen')) return { zone: z.id, video: el.querySelector('video') };
+  return null;
+}
+
 // ---- input ----------------------------------------------------------------------
 const keys = new Set();
 const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -626,6 +945,8 @@ addEventListener('keydown', (e) => {
   else if (key === 'e' || key === ' ') { interact(nearestInteractable(me.x, me.y)); e.preventDefault(); }
   else if (key === 'Enter') { chatIn.focus(); e.preventDefault(); }
   else if (key === 'm') toggleMic();
+  else if (key === 'b') openSchedule();
+  else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
   else if (key === 'v') toggleVector();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);
@@ -662,6 +983,8 @@ let pendingUse = null;
 // ---- movement ---------------------------------------------------------------------
 const SPEED = 4.4, RAD = 0.26;
 function free(x, y) {
+  const z = zoneAt(x, y);
+  if (z?.bookable && z !== zoneAt(me.x, me.y) && lockedOut(bookings, z.id, me, serverNow())) return false;
   return !isBlocked(Math.floor(x - RAD), Math.floor(y - RAD * 0.6)) && !isBlocked(Math.floor(x + RAD), Math.floor(y - RAD * 0.6))
     && !isBlocked(Math.floor(x - RAD), Math.floor(y + RAD * 0.6)) && !isBlocked(Math.floor(x + RAD), Math.floor(y + RAD * 0.6));
 }
@@ -724,7 +1047,17 @@ function zoneChanged(z) {
   if (z?.kind === 'room' && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }
   else if (autoStatus === 'meeting' && z?.kind !== 'room') { autoStatus = null; setStatus('available'); }
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
+  // Camera and screen share belong to A/V rooms; they stop at the door.
+  camBtn.hidden = shareBtn.hidden = !z?.av;
+  if (!z?.av && (voice.cam || voice.screen)) { voice.stopCam(); voice.stopScreen(); }
+  if (z?.av && !avHinted) { avHinted = true; toast(`🎥 ${esc(z.name)} is an A/V room: turn on your camera or share your screen with everyone in here.`, [['Camera', toggleCam], ['Share screen', toggleShare]], 7000); }
+  if (z?.bookable) {
+    const b = activeBooking(bookings, z.id, serverNow());
+    if (b && !isHolder(b, me)) toast(`📅 ${esc(z.name)} is booked for “${esc(b.title)}” (${esc(b.name)}) until ${fmtTime(b.end)}`, [], 5000);
+  }
+  roomHudT = 0;
 }
+let avHinted = false;
 
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
@@ -779,11 +1112,12 @@ function loop(t) {
       pomoHud.hidden = false;
       pomoHud.textContent = `${den.phase === 'focus' ? '🍅 Focus' : '🌿 Break'} ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
     } else pomoHud.hidden = true;
+    if (t - roomHudT > 500) { roomHudT = t; updateRoomHud(z); updateStage(); }
 
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target, walkTarget, lastCoffee, vector,
+      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z),
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
@@ -791,4 +1125,4 @@ function loop(t) {
 }
 
 // Debug/test hook.
-window.__office = { get me() { return me; }, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, walkTo, interact, FURNITURE, DESKS };
+window.__office = { get me() { return me; }, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };

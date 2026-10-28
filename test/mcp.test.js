@@ -161,3 +161,22 @@ test('MCP_TOKEN guards the endpoint', async () => {
   const r = await hub.fetch(new Request('http://x/mcp', { method: 'POST', body: '{}' }));
   assert.equal(r.status, 401);
 });
+
+test('agents book, list and cancel meeting rooms over MCP', async () => {
+  const { office, connect } = await setup();
+  const c = await connect();
+  await call(c, 'join_office', { name: 'Sched Bot' });
+  const start = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const { booked } = await call(c, 'book_room', { room: 'huddle', title: 'Retro', start, minutes: 45, invitees: ['ada.bsky.social'], lock: true });
+  assert.equal(booked.room, 'huddle');
+  assert.equal(booked.locked, true);
+  assert.equal(office.bookings.length, 1);
+  await tick();
+  const rooms = await call(c, 'rooms');
+  assert.equal(rooms.bookings[0].title, 'Retro');
+  assert.equal(rooms.rooms.find((r) => r.id === 'board').av, true);
+  await assert.rejects(call(c, 'book_room', { room: 'huddle', start, minutes: 30 }), /booked/);
+  await call(c, 'manage_booking', { id: booked.id, op: 'cancel' });
+  assert.equal(office.bookings.length, 0);
+  await c.close();
+});

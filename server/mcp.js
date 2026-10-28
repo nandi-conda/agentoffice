@@ -26,8 +26,9 @@ import { isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema }
 import { AgentClient } from '../scripts/agent-sdk.mjs';
 import { ZONES, FURNITURE, SEATS, DESKS, zoneAt, canHear, SPAWN } from '../public/js/map.js';
 import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
+import { ROOMS } from '../public/js/rooms.js';
 
-const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'ping'];
+const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'ping'];
 const MAX_EVENTS = 300;
 const IDLE_MS = 10 * 60 * 1000; // drop agents that stop calling in
 const later = (fn) => setTimeout(fn, 0);
@@ -65,6 +66,7 @@ function shapeEvent(m, client) {
     case 'wb': return m.op === 'clear' ? { type: 'wb', op: 'clear' } : { type: 'wb', op: 'stroke', by: m.stroke?.by, color: m.stroke?.color, points: m.stroke?.points?.length };
     case 'wave': return { type: 'wave', from: m.name, fromId: m.from, kind: m.kind };
     case 'peer': { const { t, ...rest } = m; return { type: 'peer', name: name(m.id), ...rest }; }
+    case 'bookings': return { type: 'bookings', upcoming: m.bookings.filter((b) => b.end > Date.now()).length, tip: 'call rooms for the schedule' };
     default: { const { t, ...rest } = m; return { type: t, ...rest }; }
   }
 }
@@ -394,6 +396,62 @@ export class McpHub {
       { to: z.string(), data: z.record(z.string(), z.unknown()) },
       async ({ to, data }) => { send({ t: 'rtc', to, data }); return json({ ok: true }); });
 
+    // ---- meeting rooms -----------------------------------------------------
+
+    const shapeBooking = (b) => b && {
+      id: b.id, room: b.room, title: b.title, start: new Date(b.start).toISOString(), end: new Date(b.end).toISOString(),
+      by: b.name, handle: b.handle, invitees: b.invitees, locked: b.lock, autoRelease: b.autoRelease, cancelled: b.cancelled,
+    };
+
+    tool('rooms',
+      'Meeting rooms and their schedule: each bookable room (Boardroom and Huddle Room are A/V: video + screen share; booths are voice only) with its state now (free, soon, busy), the current and next booking, and every upcoming booking.',
+      {},
+      async () => {
+        const c = agent.need(), now = Date.now();
+        return json({
+          now: new Date(now).toISOString(),
+          rooms: c.rooms(now).map((r) => ({ id: r.id, name: r.name, av: r.av, seats: r.seats, state: r.state, current: shapeBooking(r.current), next: shapeBooking(r.next) })),
+          bookings: c.bookings.filter((b) => b.end > now).map(shapeBooking),
+        });
+      });
+
+    tool('book_room',
+      'Book a meeting room (protocol `book` op create). Times are ISO 8601 with a timezone (or "now"); give minutes or end. 15 min to 4 h, up to 14 days ahead, no overlaps. invitees are handles, DIDs or agent names; lock=true keeps everyone else out while it runs. Unless autoRelease=false, the room is freed if no invitee (or you) is in it 10 minutes after the start.',
+      {
+        room: z.enum(ROOMS.map((r) => r.id)),
+        title: z.string().max(80).optional(),
+        start: z.string().optional().describe('ISO time, or "now" (default)'),
+        end: z.string().optional().describe('ISO time; or use minutes'),
+        minutes: z.number().int().min(15).max(240).optional(),
+        invitees: z.array(z.string()).max(20).optional(),
+        lock: z.boolean().optional(),
+        autoRelease: z.boolean().optional(),
+      },
+      async ({ start = 'now', end, ...rest }) => {
+        const t = (v) => (v === 'now' ? v : Date.parse(v));
+        const b = await agent.need().book({ ...rest, start: t(start), ...(end ? { end: t(end) } : {}) });
+        return json({ booked: shapeBooking(b) });
+      });
+
+    tool('manage_booking',
+      'Change one of your bookings: cancel, extend (by minutes), end (now), update (title, invitees, lock, start/end ISO), or admit someone knocking on a locked room you hold (to = their peer id).',
+      {
+        id: z.string(),
+        op: z.enum(['cancel', 'extend', 'end', 'update', 'admit']),
+        minutes: z.number().int().min(5).max(120).optional(),
+        title: z.string().max(80).optional(),
+        invitees: z.array(z.string()).max(20).optional(),
+        lock: z.boolean().optional(),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        to: z.string().optional(),
+      },
+      async ({ id, op, start, end, ...rest }) => {
+        const extra = { ...rest, ...(start ? { start: Date.parse(start) } : {}), ...(end ? { end: Date.parse(end) } : {}) };
+        const b = await agent.need().bookOp(op, { id, ...extra });
+        return json({ booking: shapeBooking(b) });
+      });
+
     tool('send', `Send any raw protocol message (JSON with \`t\`): ${CLIENT_TYPES.join(', ')}. For anything the typed tools don't cover.`,
       { message: z.record(z.string(), z.unknown()) },
       async ({ message }) => {
@@ -490,4 +548,5 @@ const INSTRUCTIONS = `You are an agent in Agent Office, a 2D virtual coworking o
 Start with join_office (optionally sign in first: roost_signup + roost_sign_in, or atproto_challenge + atproto_verify, to appear with a verified AT Protocol identity).
 Then look around with look, and keep up with the office through read_events (long-poll; pass next back as since) or the office://events resource and log notifications.
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
-walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.`;
+walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
+Meeting rooms: rooms shows the schedule, book_room books one (you can invite people and lock it), manage_booking changes it; roomnote events carry reminders and start/end notices.`;

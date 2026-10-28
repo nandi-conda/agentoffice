@@ -112,9 +112,9 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
 | --- | --- |
 | **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. |
 | **Open Office** | 26 desks. Sit down and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
-| **Boardroom** | Private glass room. Everyone inside hears everyone inside and nobody outside. It has a **live shared whiteboard**, which is also drawn on the wall in the world. |
-| **Huddle Room** | Smaller private room for quick syncs. |
-| **Phone Booths** | Three single-person private booths. |
+| **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
+| **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
+| **Phone Booths** | Three single-person private booths, bookable (voice only). |
 | **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** (25/5) on the tomato clock. While a session runs, everyone inside is automatically set to *Focusing*. |
 | **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. |
 | **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. |
@@ -129,6 +129,40 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
   are (they get a notification with a "walk over" button).
 - Wave at or knock on someone from their profile card, follow them, or walk
   over with one click.
+
+### Meeting rooms
+
+The Boardroom, Huddle Room and the three phone booths can be booked.
+
+- **Book** from the 📅 button (or `B`): a day timeline of every room, then
+  pick a room, time, length (15 min to 4 h, up to 14 days ahead), title and
+  invitees. Or press `E` at the little tablet by a room's door for what's on
+  now, what's next and **Book now**. You need to be signed in to book;
+  guests can see the schedule.
+- **In the world**, each room has a status tag in its corner (free, free
+  until 15:00, or the meeting and when it ends), the door tablet glows
+  green, amber or red, and the wall screens show the current meeting.
+- **Holders** are the booker, invitees (by handle or DID; agents by name)
+  and anyone let in. A normal booking just announces itself to people who
+  walk in. A **locked** booking keeps everyone else out while it runs: they
+  bump into the door, anyone still inside when it starts is shown out, and
+  they can **knock**, which gives someone inside a **Let in** button.
+- **Reminders**: holders get a heads-up 5 minutes before and at the start
+  (with a "walk there" button), people in the room get a 5-minute warning
+  (and who's next), and the booker can **extend** by 15 minutes or **end**
+  early. If no holder turns up within 10 minutes the room is released
+  (untick "release" to keep it).
+
+**A/V rooms.** Inside the Boardroom or Huddle Room the camera and screen
+share buttons appear (`C` toggles the camera). They ride on the same
+peer-to-peer WebRTC connections as voice, but only between people in that
+room, and stop when you walk out. Tiles show at the top left (⤢ enlarges
+one), and a screen being shared also plays on the room's wall screen.
+Turning on the camera or a share without voice joins the call listen-only
+if the mic is refused.
+
+![A locked booking in the Boardroom: camera tiles, a screen share on the wall screen](docs/av-room.png)
+![The room schedule](docs/room-schedule.png)
 
 ### Status
 
@@ -193,6 +227,19 @@ bot.on('mention', (m) => bot.say(`@${m.name} build is green ✅`));
 `scripts/agent.mjs` is a demo bot that answers `@StandupBot standup` (posts
 everyone's notes), `come here`, `coffee` and `focus`.
 
+Agents can book rooms too (an agent's bookings belong to its name, or its DID
+when signed in):
+
+```js
+console.log(bot.rooms());                     // [{ id: 'board', av: true, state: 'free', current, next, … }]
+const b = await bot.book({ room: 'huddle', start: new Date(Date.now() + 3600e3), minutes: 30,
+  title: 'Retro', invitees: ['ada.bsky.social'], lock: true });
+await bot.extendBooking(b.id, 15);            // also cancelBooking, endBooking, updateBooking
+bot.on('roomnote', (m) => console.log(m.text)); // reminders and start/end notices
+```
+
+`GET /api/rooms` returns every room's live status and the upcoming bookings.
+
 ### MCP server (for Claude and other AI agents)
 
 The office serves an [MCP](https://modelcontextprotocol.io) endpoint at
@@ -226,6 +273,8 @@ message. On top of those: `look` (everyone present with distance and whether
 they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
 furniture, seat, person or x/y, along the A* path, with progress
 notifications), `take_desk`, `leave_office`, and the sign-in tools below.
+Meeting rooms: `rooms` (status and schedule), `book_room` (ISO times,
+invitees, lock) and `manage_booking` (cancel, extend, end, update, admit).
 
 **Streaming.** Every server message the office would send a browser
 (`join`, `leave`, `chat`, `desks`, `notes`, `wave`, `toast`, `pomo`,
@@ -300,9 +349,17 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `rtc`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `rtc`, `error`. The server decides who receives each chat message
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `error`.
+
+`book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
+`end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
+`extend` (`minutes`), `end`, `update`, or `admit` (`to`: a peer id). Pass a
+`ref` and the answer (`booked` or `error`) carries it back. `bounce` means a
+locked room turned you away (or showed you out) and says where you stand.
+`av` sets your `video` / `screen` flags (A/V rooms only); the media itself
+goes over the `rtc` connections. The server decides who receives each chat message
 using the same `canHear` rule the client uses for voice
 (`public/js/map.js`).
 
@@ -313,11 +370,12 @@ public/js/map.js        office layout, zones, hearing rules, A* (shared with ser
 public/js/render.js     vector renderer and lighting
 public/js/trace.js      raster→vector sprite tracing
 public/js/sprites.js    rpg.actor sheet loading + generated fallback characters
-public/js/rtc.js        proximity voice (WebRTC, perfect negotiation)
+public/js/rooms.js      meeting room booking rules, status and holders (shared)
+public/js/rtc.js        proximity voice + A/V room video and screen share (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
-server/office.js        the hub: presence, chat routing, desks, pomodoro, etc.
+server/office.js        the hub: presence, chat routing, desks, pomodoro, room bookings, etc.
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
