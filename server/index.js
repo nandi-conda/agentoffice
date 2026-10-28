@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { loadActor } from './atproto.js';
 import { Office } from './office.js';
-import { createAuth } from './auth.js';
+import { createAuth, SESSION_TTL_MS } from './auth.js';
 import { handleApi, isApiPath } from './app.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
@@ -55,7 +55,33 @@ async function sessionSecret() {
   return secret;
 }
 
-const auth = createAuth({ publicUrl: process.env.PUBLIC_URL, port: PORT, secret: await sessionSecret() });
+// Signed-in people's OAuth sessions (used to talk on freeq as them) are kept
+// in DATA_DIR, so a restart (or `just dev` reloading) doesn't lose them while
+// their cookie still says they're signed in.
+async function fileStore(name, ttlMs) {
+  const file = path.join(DATA_DIR, name);
+  let data = {};
+  try { data = JSON.parse(await readFile(file, 'utf8')); } catch { /* none yet */ }
+  const save = async () => {
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+  };
+  return {
+    async set(k, v) { data[k] = { v, at: Date.now() }; await save(); },
+    async get(k) {
+      const e = data[k];
+      if (!e) return undefined;
+      if (Date.now() - e.at > ttlMs) { delete data[k]; await save(); return undefined; }
+      return e.v;
+    },
+    async del(k) { if (k in data) { delete data[k]; await save(); } },
+  };
+}
+
+const auth = createAuth({
+  publicUrl: process.env.PUBLIC_URL, port: PORT, secret: await sessionSecret(),
+  sessionStore: await fileStore('oauth-sessions.json', SESSION_TTL_MS),
+});
 
 const office = new Office(await loadState(), {
   onChange: () => scheduleSave(office),
