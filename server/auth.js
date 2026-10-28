@@ -13,13 +13,12 @@
 
 import { OAuthClient } from '@atproto/oauth-client';
 import { JoseKey } from '@atproto/jwk-jose';
-import { AtprotoDohHandleResolver } from '@atproto-labs/handle-resolver';
 import { buildAtprotoLoopbackClientId } from '@atproto/oauth-types';
+import { identityResolver } from './atproto.js';
 
 export const COOKIE = 'ao_session';
 const MAX_AGE = 30 * 24 * 3600; // seconds
 const SCOPE = 'atproto';
-const DOH = 'https://cloudflare-dns.com/dns-query';
 
 const isLoopbackUrl = (u) => !u || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(u);
 
@@ -116,6 +115,9 @@ export function memoryStore(ttlMs) {
 }
 
 // Stores only ever see plain JSON: the DPoP key goes in as a private JWK.
+// The OAuth client wraps errors ("Failed to resolve identity: x"); surface the cause too.
+const reason = (e) => [e?.message, e?.cause?.message].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i).join(': ');
+
 function jsonKeyStore(store) {
   return {
     async set(k, { dpopKey, ...data }) { await store.set(k, { ...data, dpopJwk: dpopKey.privateJwk }); },
@@ -140,7 +142,9 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
   const client = new OAuthClient({
     responseMode: 'query',
     clientMetadata: cfg.metadata,
-    handleResolver: new AtprotoDohHandleResolver({ dohEndpoint: DOH, fetch: fetchImpl }),
+    // Handle (DoH, .well-known, public API) and DID document resolution live
+    // in atproto.js; see the note there on why.
+    identityResolver,
     fetch: fetchImpl,
     stateStore: jsonKeyStore(stateStore || memoryStore(15 * 60 * 1000)),
     sessionStore: jsonKeyStore(sessionStore || memoryStore(60 * 60 * 1000)),
@@ -185,7 +189,7 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
           const to = await client.authorize(handle, { scope: SCOPE, signal: request.signal });
           return redirect(to.toString());
         } catch (e) {
-          return fail(`couldn't start sign-in for @${handle}: ${e.message}`);
+          return fail(`couldn't start sign-in for @${handle}: ${reason(e)}`);
         }
       }
       if (url.pathname === '/oauth/callback') {
@@ -196,7 +200,7 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
           session.signOut().catch(() => {});
           return redirect('/?signedin=1', { 'set-cookie': cookie(await signSession(did, secret), MAX_AGE) });
         } catch (e) {
-          return fail(`sign-in failed: ${e.message}`);
+          return fail(`sign-in failed: ${reason(e)}`);
         }
       }
       if (url.pathname === '/oauth/logout' && request.method === 'POST') {

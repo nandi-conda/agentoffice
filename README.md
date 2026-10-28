@@ -59,7 +59,10 @@ you over).
 `server/auth.js` only uses `fetch`, `Request`/`Response` and Web Crypto, so it
 runs unchanged on Cloudflare Workers, where the Durable Object passes it
 SQLite-backed state and session stores (see *Hosting on Cloudflare Workers*). Handles are resolved
-over DNS-over-HTTPS (Cloudflare) plus `/.well-known/atproto-did`.
+over DNS-over-HTTPS (Cloudflare, then Google), then `/.well-known/atproto-did`,
+then the public Bluesky resolver; DID documents come from plc.directory or
+`did:web`. This lives in `server/atproto.js` rather than the @atproto resolvers,
+which build `redirect: 'error'` requests that Workers reject.
 
 ## Hosting on Cloudflare Workers
 

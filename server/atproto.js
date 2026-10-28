@@ -31,9 +31,17 @@ async function getJson(url, timeout = 6000, accept = 'application/json') {
 }
 
 // DNS TXT lookup over DNS-over-HTTPS, since Workers have no resolver API.
+// Cloudflare first, Google if that fails.
+const DOH = ['https://cloudflare-dns.com/dns-query', 'https://dns.google/resolve'];
 async function resolveTxt(name) {
-  const j = await getJson(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=TXT`, 4000, 'application/dns-json');
-  return (j.Answer || []).filter((a) => a.type === 16).map((a) => a.data.replace(/^"|"$/g, '').replace(/" "/g, ''));
+  let err;
+  for (const base of DOH) {
+    try {
+      const j = await getJson(`${base}?name=${encodeURIComponent(name)}&type=TXT`, 4000, 'application/dns-json');
+      return (j.Answer || []).filter((a) => a.type === 16).map((a) => a.data.replace(/^"|"$/g, '').replace(/" "/g, ''));
+    } catch (e) { err = e; }
+  }
+  throw err;
 }
 
 export async function resolveHandle(handle) {
@@ -58,15 +66,38 @@ export async function resolveHandle(handle) {
   });
 }
 
-export async function resolveDid(did) {
+// The raw DID document: plc.directory for did:plc, /.well-known/did.json for did:web.
+export async function fetchDidDoc(did) {
   if (!isDid(did)) throw new Error('not a valid DID');
-  return cached(`d:${did}`, async () => {
+  return cached(`doc:${did}`, async () => {
     const doc = did.startsWith('did:plc:')
-      ? await getJson(`https://plc.directory/${did}`)
+      ? await getJson(`https://plc.directory/${did}`, 6000, 'application/did+ld+json,application/json')
       : await getJson(`https://${decodeURIComponent(did.slice(8).replace(/:/g, '/'))}/.well-known/did.json`);
-    return parseDidDoc(doc);
+    if (doc?.id !== did) throw new Error(`DID document for ${did} names a different DID`);
+    return doc;
   });
 }
+
+export async function resolveDid(did) {
+  return parseDidDoc(await fetchDidDoc(did));
+}
+
+// Identity resolution for the OAuth client. We do it ourselves instead of
+// using @atproto's resolvers because those build `new Request(...,
+// { redirect: 'error' })`, which Cloudflare Workers rejects, so every
+// sign-in failed there with "Failed to resolve identity".
+export const identityResolver = {
+  async resolve(input) {
+    const id = String(input).trim().replace(/^@/, '').replace(/^at:\/\//, '').toLowerCase();
+    const did = isDid(id) ? id : await resolveHandle(id);
+    const didDoc = await fetchDidDoc(did);
+    const { handle: claimed } = parseDidDoc(didDoc); // also checks there is a PDS
+    let handle = 'handle.invalid';
+    if (claimed && (claimed.toLowerCase() === id || (await resolveHandle(claimed).catch(() => null)) === did)) handle = claimed.toLowerCase();
+    if (!isDid(id) && handle !== id) throw new Error(`@${id} points to ${did}, but that DID doesn't list @${id} as its handle`);
+    return { did, didDoc, handle };
+  },
+};
 
 export function parseDidDoc(doc) {
   const svc = (doc.service || []).find((s) => s.id === '#atproto_pds' || s.id?.endsWith('#atproto_pds'));
