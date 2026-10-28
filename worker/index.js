@@ -1,6 +1,8 @@
 // Cloudflare Workers entry. Static files in public/ are served by Workers
 // static assets before this code runs; everything else (the /ws socket and
-// the /api routes) goes to one Durable Object that holds the office.
+// the /api routes) goes to the World, the Durable Object that holds the
+// sockets. Every entity (actors, rooms, desks, the whiteboard, topics…) is
+// its own Durable Object too, see worker/entities.js.
 
 import { DurableObject } from 'cloudflare:workers';
 import { Office } from '../server/office.js';
@@ -11,6 +13,9 @@ import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
 import { FreeqBridge, FREEQ_URL } from '../server/freeq.js';
 import { SESSION_TTL_MS } from '../server/auth.js';
+import { DORuntime } from './entities.js';
+
+export { ActorDO, RoomDO, ItemDO, TopicDO } from './entities.js';
 
 const HEARTBEAT_MS = 60 * 1000;
 const MCP_SESSION_TTL_MS = 10 * 60 * 1000; // matches the hub's idle drop
@@ -32,20 +37,24 @@ export class OfficeRoom extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS actors (did TEXT PRIMARY KEY, v TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS oauth (k TEXT PRIMARY KEY, v TEXT, at INTEGER)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS mcp_sessions (k TEXT PRIMARY KEY, v TEXT, at INTEGER)');
-    // Whiteboard strokes get one row each, so a save only writes what changed.
-    this.strokeRows = new WeakMap();
 
     const saved = {};
     for (const { k, v } of this.sql.exec('SELECT k, v FROM kv')) saved[k] = JSON.parse(v);
-    saved.strokes = [];
-    for (const { id, data } of this.sql.exec('SELECT id, data FROM strokes ORDER BY id')) {
-      const s = JSON.parse(data);
-      this.strokeRows.set(s, id);
-      saved.strokes.push(s);
-    }
+    // Before entities, the whiteboard lived here (kv and strokes are kept,
+    // untouched, as a backup; the entities have their own copies now).
+    if (!saved.migrated) saved.strokes = this.sql.exec('SELECT data FROM strokes ORDER BY id').toArray().map((r) => JSON.parse(r.data));
+    // The World's copy of what each entity shows, kept so waking from
+    // hibernation doesn't mean asking every entity again.
+    this.sql.exec('CREATE TABLE IF NOT EXISTS mirror (k TEXT PRIMARY KEY, v TEXT)');
+    const mirror = saved.migrated ? this.sql.exec('SELECT k, v FROM mirror').toArray().map((r) => [r.k, JSON.parse(r.v)]) : [];
+    this.mirrorDirty = new Set();
+    this.runtime = new DORuntime(env);
     this.office = new Office(saved, {
       onChange: () => this.scheduleSave(),
       loadActor: env.OFFLINE ? null : loadActor,
+      runtime: this.runtime,
+      mirror,
+      onMirror: (k) => { this.mirrorDirty.add(k); this.scheduleSave(); },
     });
 
     // Agents: DID proof / Roost sign-in, and the MCP endpoint. MCP sessions
@@ -82,13 +91,21 @@ export class OfficeRoom extends DurableObject {
     this.arm();
   }
 
-  // One alarm does two jobs, even while the object hibernates: the next room
-  // booking event (reminders, start/end announcements), and while anyone is
-  // in, a heartbeat that restarts a freeq listener lost to an eviction.
+  // Durable Object RPC from entities: the World's side of the messaging layer.
+  async invoke(address, method, args = []) {
+    if (address !== 'world:main') throw new Error(`this is the world, not ${address}`);
+    const api = this.office.worldApi();
+    if (!api[method]) throw new Error(`the world has no method ${method}`);
+    return api[method](...args);
+  }
+
+  // While anyone is in, a heartbeat alarm restarts a freeq listener lost to
+  // an eviction, even while the object hibernates. (Rooms, pomodoro timers
+  // and other entities keep their own alarms.)
   arm() {
     const here = [...this.office.peers.values()].some((p) => p.ready && p.kind !== 'freeq');
-    const t = Math.min(this.office.nextRoomEvent() || Infinity, this.freeq && here ? Date.now() + HEARTBEAT_MS : Infinity);
-    if (t === Infinity) return;
+    if (!this.freeq || !here) return;
+    const t = Date.now() + HEARTBEAT_MS;
     // Keep an alarm that's already due sooner, so the heartbeat isn't pushed back forever.
     if (this.alarmAt > Date.now() && this.alarmAt <= t) return;
     this.alarmAt = t;
@@ -97,12 +114,12 @@ export class OfficeRoom extends DurableObject {
 
   async alarm() {
     this.alarmAt = null;
-    this.office.tickRooms();
     this.freeq?.presence();
     this.arm();
   }
 
   async fetch(request) {
+    await this.office.ready;
     const url = new URL(request.url);
     const auth = this.authFor(url);
     if (url.pathname === '/ws') {
@@ -138,7 +155,7 @@ export class OfficeRoom extends DurableObject {
       port: Number(url.port) || 8787,
       secret: this.env.SESSION_SECRET || this.sessionSecret(),
       stateStore: this.sqlStore('state', 15 * 60 * 1000),
-      sessionStore: this.sqlStore('session', SESSION_TTL_MS),
+      sessionStore: this.actorSessionStore(),
     });
     return this.auth;
   }
@@ -150,6 +167,24 @@ export class OfficeRoom extends DurableObject {
     const secret = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
     this.sql.exec("INSERT INTO meta (k, v) VALUES ('session-secret', ?)", secret);
     return secret;
+  }
+
+  // Each person's OAuth session lives in their actor's Durable Object.
+  // Sessions saved here before that move over on first use.
+  actorSessionStore() {
+    const legacy = this.sqlStore('session', SESSION_TTL_MS);
+    const actor = (did) => this.runtime.ref(`actor:${did}`);
+    return {
+      async set(did, v) { await actor(did).sessionSet(v); },
+      async get(did) {
+        const v = await actor(did).sessionGet(SESSION_TTL_MS);
+        if (v !== undefined) return v;
+        const old = await legacy.get(did);
+        if (old !== undefined) { await actor(did).sessionSet(old); await legacy.del(did); }
+        return old;
+      },
+      async del(did) { await actor(did).sessionDel(); await legacy.del(did); },
+    };
   }
 
   // OAuth state must survive the object being evicted between login and callback.
@@ -217,23 +252,13 @@ export class OfficeRoom extends DurableObject {
     this.saveTimer = setTimeout(() => this.save(), 1000);
   }
 
+  // The World's own state is small now (one JSON row per key); everything
+  // else is kept by the entities.
   save() {
     const state = this.office.persisted();
-    // Everything office.persisted() returns is one JSON row, except strokes.
-    for (const k of Object.keys(state)) if (k !== 'strokes') this.sql.exec('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, JSON.stringify(state[k]));
-    const live = new Set();
-    for (const s of state.strokes) {
-      let id = this.strokeRows.get(s);
-      if (id === undefined) {
-        id = this.sql.exec('INSERT INTO strokes (data) VALUES (?) RETURNING id', JSON.stringify(s)).one().id;
-        this.strokeRows.set(s, id);
-      }
-      live.add(id);
-    }
-    // Strokes trimmed off the front, or a cleared board.
-    const first = Math.min(...live);
-    if (!live.size) this.sql.exec('DELETE FROM strokes');
-    else this.sql.exec('DELETE FROM strokes WHERE id < ?', first);
+    for (const k of Object.keys(state)) this.sql.exec('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)', k, JSON.stringify(state[k]));
+    for (const k of this.mirrorDirty) this.sql.exec('INSERT OR REPLACE INTO mirror (k, v) VALUES (?, ?)', k, JSON.stringify(this.office.mirror.get(k) ?? null));
+    this.mirrorDirty.clear();
   }
 }
 

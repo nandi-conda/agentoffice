@@ -67,7 +67,7 @@ test('desk claims are exclusive while the owner is around', async () => {
   assert.match(b.ws.last('error').message, /ada's desk/);
   a.ws.msg({ t: 'desk', action: 'claim', desk: 'desk-2' }); await tick();
   assert.equal(o.desks['desk-1'], undefined, 'claiming a new desk frees the old one');
-  assert.ok(saves.length > 0);
+  assert.equal(o.runtime.data['desk:desk-2'].state.holder.name, 'ada', 'the desk entity keeps its own state');
 });
 
 test('sitting snaps to the seat and blocks double booking', async () => {

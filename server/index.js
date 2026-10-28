@@ -12,11 +12,14 @@ import { handleApi, isApiPath } from './app.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
+import { LocalRuntime } from './entities/runtime.js';
+import { KINDS } from './entities/kinds.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
 const DATA_DIR = process.env.DATA_DIR || path.join(root, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
+const ENTITIES_FILE = path.join(DATA_DIR, 'entities.json');
 const PORT = Number(process.env.PORT || 8080);
 
 const MIME = {
@@ -33,15 +36,18 @@ async function loadState() {
   try { return JSON.parse(await readFile(STATE_FILE, 'utf8')); } catch { return {}; }
 }
 
-let saveTimer = null;
-function scheduleSave(office) {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
-      await writeFile(STATE_FILE, JSON.stringify(office.persisted()));
-    } catch (e) { console.error('save failed', e.message); }
-  }, 1000);
+// Debounced JSON saves: the World's own state, and every entity's.
+function saver(file, data) {
+  let timer = null;
+  return () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
+        await writeFile(file, JSON.stringify(data()), { mode: 0o600 });
+      } catch (e) { console.error('save failed', e.message); }
+    }, 1000);
+  };
 }
 
 // Cookie-signing key: SESSION_SECRET, or one generated once and kept in DATA_DIR.
@@ -55,9 +61,7 @@ async function sessionSecret() {
   return secret;
 }
 
-// Signed-in people's OAuth sessions (used to talk on freeq as them) are kept
-// in DATA_DIR, so a restart (or `just dev` reloading) doesn't lose them while
-// their cookie still says they're signed in.
+// Where OAuth sessions were kept before actors held them (read once, then moved).
 async function fileStore(name, ttlMs) {
   const file = path.join(DATA_DIR, name);
   let data = {};
@@ -78,14 +82,38 @@ async function fileStore(name, ttlMs) {
   };
 }
 
-const auth = createAuth({
-  publicUrl: process.env.PUBLIC_URL, port: PORT, secret: await sessionSecret(),
-  sessionStore: await fileStore('oauth-sessions.json', SESSION_TTL_MS),
-});
+// Entities (actors, rooms, desks, the whiteboard…) live in this process,
+// saved together in DATA_DIR/entities.json; on Workers each is a Durable Object.
+let entityData = {};
+try { entityData = JSON.parse(await readFile(ENTITIES_FILE, 'utf8')); } catch { /* first run */ }
+const actorLoader = process.env.OFFLINE ? null : loadActor;
+const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader }, onWrite: saver(ENTITIES_FILE, () => entityData) });
 
-const office = new Office(await loadState(), {
-  onChange: () => scheduleSave(office),
-  loadActor: process.env.OFFLINE ? null : loadActor,
+// Each person's OAuth session is kept by their actor entity, so a restart
+// (or `just dev` reloading) doesn't lose it while their cookie still says
+// they're signed in. Sessions from the older oauth-sessions.json move over.
+const oldSessions = await fileStore('oauth-sessions.json', SESSION_TTL_MS);
+const actor = (did) => runtime.ref(`actor:${did}`);
+const sessionStore = {
+  async get(did) {
+    const v = await actor(did).sessionGet(SESSION_TTL_MS);
+    if (v !== undefined) return v;
+    const old = await oldSessions.get(did);
+    if (old !== undefined) { await actor(did).sessionSet(old); await oldSessions.del(did); }
+    return old;
+  },
+  set: (did, v) => actor(did).sessionSet(v),
+  async del(did) { await actor(did).sessionDel(); await oldSessions.del(did); },
+};
+const auth = createAuth({ publicUrl: process.env.PUBLIC_URL, port: PORT, secret: await sessionSecret(), sessionStore });
+
+const saved = await loadState();
+// state.json from before entities: keep a copy, the entities take it over.
+if (!saved.migrated && Object.keys(saved).length) await writeFile(path.join(DATA_DIR, 'state.pre-entities.json'), JSON.stringify(saved)).catch(() => {});
+const office = new Office(saved, {
+  onChange: saver(STATE_FILE, () => office.persisted()),
+  loadActor: actorLoader,
+  runtime,
 });
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
 const mcp = new McpHub({ office, auth: agents });
@@ -106,8 +134,8 @@ if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
   });
 }
 
-// Booking reminders and announcements (the Worker uses a Durable Object alarm).
-setInterval(() => office.tickRooms(), 15000).unref();
+// Booking reminders run on each room's alarm; this is a safety net.
+setInterval(() => office.tickRooms().catch(() => {}), 60000).unref();
 
 function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });

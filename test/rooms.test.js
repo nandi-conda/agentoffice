@@ -84,7 +84,7 @@ test('guests cannot book; signed-in people and agents can', async () => {
   assert.equal(guest.ws.last('bookings').bookings.length, 1, 'everyone sees the schedule');
   const bot = await join(o, 'BuildBot', { kind: 'agent' });
   assert.ok(await book(bot, { room: 'huddle', start: new Date(T0 + 60 * MIN).toISOString(), end: new Date(T0 + 90 * MIN).toISOString() }));
-  assert.deepEqual(Object.keys(o.persisted()).includes('bookings'), true);
+  assert.equal((await o.ref('room:huddle').inspect()).state.bookings.length, 1, 'each room keeps its own bookings');
 });
 
 test('only the booker can cancel or extend; extending checks the next booking', async () => {
@@ -110,7 +110,7 @@ test('a locked booking keeps others out, shows them out at the start, and holder
   const cat = await join(o, 'cat', { did: 'did:plc:cat', handle: 'cat.test' });
   await place(bob, 40, 8); // bob is camped in the boardroom
   const b = await book(ada, { room: 'board', start: T0 + 10 * MIN, minutes: 30, lock: true, invitees: 'cat.test', title: 'Offsite plan' });
-  clock.t = T0 + 10 * MIN; o.tickRooms();
+  clock.t = T0 + 10 * MIN; await o.tickRooms();
   assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'open', 'bob was shown out');
   assert.match(bob.ws.last('bounce').text, /Offsite plan/);
   assert.match(ada.ws.last('roomnote').text, /starting now/);
@@ -131,18 +131,18 @@ test('an unlocked booking only announces; reminders and end notes go out once', 
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
   await place(bob, 36.5, 13.5);
   const b = await book(ada, { room: 'huddle', start: T0 + 30 * MIN, minutes: 30, title: 'Sync' });
-  clock.t = T0 + 26 * MIN; o.tickRooms(); o.tickRooms();
+  clock.t = T0 + 26 * MIN; await o.tickRooms(); await o.tickRooms();
   assert.equal(ada.ws.all('roomnote').filter((m) => m.kind === 'soon').length, 1);
-  clock.t = T0 + 30 * MIN; o.tickRooms();
+  clock.t = T0 + 30 * MIN; await o.tickRooms();
   assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'huddle', 'not locked, so bob stays');
   assert.match(bob.ws.last('roomnote').text, /booked now for “Sync”/);
   await place(ada, 39, 13);
-  clock.t = T0 + 56 * MIN; o.tickRooms();
+  clock.t = T0 + 56 * MIN; await o.tickRooms();
   assert.match(ada.ws.last('roomnote').text, /minutes left/);
-  clock.t = T0 + 60 * MIN; o.tickRooms();
+  clock.t = T0 + 60 * MIN; await o.tickRooms();
   assert.equal(ada.ws.last('roomnote').kind, 'ended');
   assert.ok(o.bookings.find((x) => x.id === b.id), 'kept as history for a day');
-  clock.t = T0 + 25 * 60 * MIN; o.tickRooms();
+  clock.t = T0 + 25 * 60 * MIN; await o.tickRooms();
   assert.equal(o.bookings.length, 0);
 });
 
@@ -152,7 +152,7 @@ test('rooms nobody turns up to are released after the grace period', async () =>
   await book(ada, { room: 'booth1', start: T0, minutes: 60 });
   await book(ada, { room: 'booth2', start: T0, minutes: 60, autoRelease: false });
   assert.ok(o.nextRoomEvent() > T0);
-  clock.t = T0 + 11 * MIN; o.tickRooms();
+  clock.t = T0 + 11 * MIN; await o.tickRooms();
   assert.deepEqual(o.bookings.map((b) => b.room), ['booth2']);
   assert.match(ada.ws.last('roomnote').text, /Nobody turned up/);
 });
@@ -163,7 +163,7 @@ test('turning up in time keeps the booking', async () => {
   await book(ada, { room: 'booth1', start: T0, minutes: 60 });
   clock.t = T0 + 5 * MIN;
   await place(ada, 2.5, 15.5);
-  clock.t = T0 + 11 * MIN; o.tickRooms();
+  clock.t = T0 + 11 * MIN; await o.tickRooms();
   assert.equal(o.bookings.length, 1);
 });
 

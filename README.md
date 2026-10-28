@@ -70,13 +70,43 @@ which build `redirect: 'error'` requests that Workers reject.
 
 The same office runs as a Cloudflare Worker (`wrangler.toml`,
 `worker/index.js`). `public/` is served as Workers static assets, and
-everything else (`/ws`, `/api/*`, `/oauth/*`, `/healthz`) goes to a single
-Durable Object, `OfficeRoom`, that holds the office. It uses the WebSocket
-Hibernation API, so an idle office with people connected isn't billed for
-wall-clock time: each socket carries its peer in its attachment and the room
-rebuilds itself when it wakes. Desks, notes, scores, counters and whiteboard
-strokes live in the object's SQLite storage (one row per stroke), as do the
-OAuth login state and the cookie-signing key.
+everything else (`/ws`, `/api/*`, `/oauth/*`, `/healthz`) goes to the
+World, the Durable Object `OfficeRoom` that holds everyone's socket. It uses
+the WebSocket Hibernation API, so an idle office with people connected isn't
+billed for wall-clock time: each socket carries its peer in its attachment
+and the World rebuilds itself when it wakes. It keeps the OAuth login state
+and the cookie-signing key.
+
+### Everything is an entity
+
+Everything else with state of its own is an entity, and each entity is its
+own Durable Object (`worker/entities.js`; on Node they all run in-process,
+saved to `$DATA_DIR/entities.json`):
+
+| Entity | Durable Object | Owns |
+| --- | --- | --- |
+| `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, the OAuth session |
+| `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
+| `desk:<id>` | `ItemDO` | who holds the desk and their goal |
+| `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
+| `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
+| `topic:<name>` | `TopicDO` | a pub/sub channel's subscribers |
+
+They talk to each other three ways (`server/entities/runtime.js`): direct RPC
+(`this.ref('room:board').book(...)`), messages (`this.tell(address, type,
+data)`, handled in `onMessage`), and pub/sub (`this.subscribe('zone:board')`,
+`this.publish('desks', ev)`, handled in `onEvent`). The World publishes
+`zone:<id>` enter/exit and `office` join/leave events, so a room notices its
+holder walking in, and desks hear each other on `desks` (claiming one lets go
+of your old one). Entities reach people by handing the World effects
+(`send`, `broadcast`, `showOut`, and `mirror`: what they show changed). The
+World keeps that mirror (in its own storage too), so a welcome needs no round
+trips and movement never leaves the World. A note for someone who's out (an
+invite, a room released) waits in their actor and arrives when they're back.
+
+The first start after this change hands the old single-object state (desks,
+notes, scores, counters, strokes, bookings) to the entities; the old rows are
+left in place as a backup.
 
 ```sh
 just cf-dev                    # local Worker + Durable Object on http://127.0.0.1:8787
@@ -456,7 +486,9 @@ public/js/rtc.js        proximity voice + A/V room video and screen share (WebRT
 public/js/main.js       client: input, UI, networking
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
-server/office.js        the hub: presence, chat routing, desks, pomodoro, room bookings, etc.
+server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js)
+worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
 server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channels ↔ areas

@@ -16,3 +16,26 @@ class_name = "OfficeRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["OfficeRoom"]
+
+# Every entity is its own Durable Object (worker/entities.js): one per actor
+# (DID or agent), per meeting room, per item (desks, whiteboard, notice
+# board, arcade, coffee machine, pomodoro timers) and per pub/sub topic.
+[[durable_objects.bindings]]
+name = "ACTOR"
+class_name = "ActorDO"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "RoomDO"
+
+[[durable_objects.bindings]]
+name = "ITEM"
+class_name = "ItemDO"
+
+[[durable_objects.bindings]]
+name = "TOPIC"
+class_name = "TopicDO"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ActorDO", "RoomDO", "ItemDO", "TopicDO"]

@@ -1,40 +1,175 @@
-// The office hub: presence, proximity chat, desks, pomodoro, whiteboard,
-// notice board, arcade scores, meeting room bookings and WebRTC signalling relay.
+// The World: the office hub that holds everyone's socket. Movement,
+// presence, proximity chat, sitting, emotes, A/V flags and the WebRTC
+// signalling relay happen here, because they need to be fast. Everything
+// else with its own state is an entity (server/entities): each actor, each
+// meeting room, each desk, each pomodoro timer, the whiteboard, the notice
+// board, the arcade and the coffee machine. The World hands them requests,
+// mirrors what they show (so a welcome is one message, with no round trips),
+// and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked, ZONES } from '../public/js/map.js';
-import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, lockedOut, activeBooking, keyOf, fmtTime, fmtRange } from '../public/js/rooms.js';
+import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
+import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
+import { LocalRuntime, parse } from './entities/runtime.js';
+import { KINDS, MIRRORED, POMO_ZONES, nextRoomEvent } from './entities/kinds.js';
 
-const POMO_ZONES = ZONES.filter((z) => z.kind === 'quiet').map((z) => z.id);
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
-const MAX_STROKES = 3000;
-const MAX_NOTES = 40;
+const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
 
 export class Office {
-  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now() } = {}) {
+  // runtime: where the entities live (a LocalRuntime in this process by
+  // default; the Worker passes one backed by Durable Objects).
+  // mirror/onMirror: a saved copy of the mirror, and a hook for keeping it,
+  // so a Durable Object waking from hibernation doesn't ask every entity again.
+  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now(), runtime = null, mirror = null, onMirror = () => {} } = {}) {
     this.peers = new Map();
     this.onChange = onChange;
     this.loadActor = loadActor;
     this.now = now;
-    this.desks = saved.desks || {};
-    this.strokes = saved.strokes || [];
-    this.notes = saved.notes || [];
-    this.scores = saved.scores || [];
-    this.counters = { coffees: 0, pomodoros: 0, waves: 0, ...(saved.counters || {}) };
-    this.pomo = {};
-    for (const z of POMO_ZONES) this.pomo[z] = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
+    this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor } });
+    this.runtime.setWorld?.(this.worldApi());
+    this.mirror = new Map(mirror || []); // entity address -> what it shows
+    this.onMirror = onMirror;
+    this.waves = saved.counters?.waves || saved.waves || 0;
     this.shouts = [];
-    this.bookings = saved.bookings || [];
-    this.lastTick = 0;
     // When this copy of the office started; a recent time means a restart
     // (deploy or eviction) wiped what lives only in memory.
     this.upSince = this.now();
+    // With a saved mirror the office is ready at once and refreshes behind.
+    const booting = this.boot(saved.migrated ? null : saved, !!mirror?.length);
+    this.ready = mirror?.length ? Promise.resolve() : booting;
+  }
+
+  ref(address) { return this.runtime.ref(address); }
+
+  // Background entity calls (publishing, touching desks…): never let one
+  // failing take a message down with it.
+  bg(promise) { promise.catch((e) => console.error('entity call', e.message)); }
+
+  // First start after the move to entities: hand the old single-object
+  // state to the entities that own it now. Then pull what everyone shows.
+  async boot(legacy, cached = false) {
+    if (legacy && ['desks', 'strokes', 'notes', 'scores', 'bookings', 'counters'].some((k) => legacy[k])) {
+      const c = legacy.counters || {};
+      await Promise.all([
+        ...Object.entries(legacy.desks || {}).map(([id, h]) => this.ref(`desk:${id}`).seed(h)),
+        ...ROOMS.map((r) => this.ref(`room:${r.id}`).seed(legacy.bookings || [])),
+        this.ref('whiteboard:main').seed(legacy.strokes || []),
+        this.ref('noticeboard:main').seed(legacy.notes || []),
+        this.ref('arcade:main').seed(legacy.scores || []),
+        this.ref('coffee:main').seed(c.coffees || 0),
+        this.ref(`pomodoro:${POMO_ZONES[0]}`).seed(c.pomodoros || 0),
+      ]);
+      this.migrated = true;
+      this.onChange();
+    }
+    this.migrated = true;
+    if (cached) return;
+    // Anything an entity pushes meanwhile is newer than the view it answered.
+    const pushed = (this.pushed = new Set());
+    const views = await Promise.allSettled(MIRRORED.map((a) => this.ref(a).view()));
+    this.pushed = null;
+    views.forEach((r, i) => {
+      if (pushed.has(MIRRORED[i])) return;
+      if (r.status === 'fulfilled') { this.mirror.set(MIRRORED[i], r.value); this.onMirror(MIRRORED[i]); }
+      else console.error(`${MIRRORED[i]} view`, r.reason?.message);
+    });
   }
 
   persisted() {
-    return { desks: this.desks, strokes: this.strokes, notes: this.notes, scores: this.scores, counters: this.counters, bookings: this.bookings };
+    return { migrated: true, counters: { waves: this.waves } };
+  }
+
+  // ---- what the entities show, from the mirror ---------------------------
+  get desks() {
+    const out = {};
+    for (const d of DESKS) { const v = this.mirror.get(`desk:${d.id}`); if (v) out[d.id] = v; }
+    return out;
+  }
+  get bookings() { return ROOMS.flatMap((r) => this.mirror.get(`room:${r.id}`) || []).sort((a, b) => a.start - b.start); }
+  get strokes() { return this.mirror.get('whiteboard:main') || []; }
+  get notes() { return this.mirror.get('noticeboard:main') || []; }
+  get scores() { return this.mirror.get('arcade:main') || []; }
+  get counters() {
+    const pomodoros = POMO_ZONES.reduce((n, z) => n + (this.mirror.get(`pomodoro:${z}`)?.count || 0), 0);
+    return { coffees: this.mirror.get('coffee:main')?.count || 0, pomodoros, waves: this.waves };
+  }
+  pomoState() {
+    const out = {};
+    for (const z of POMO_ZONES) out[z] = this.mirror.get(`pomodoro:${z}`)?.state || { ...IDLE_POMO };
+    return out;
+  }
+
+  // ---- what entities may call on the World --------------------------------
+  worldApi() {
+    return {
+      apply: (effects) => this.apply(effects),
+      presence: () => this.presence(),
+      deliver: (key, msg) => this.deliver(key, msg),
+      summary: () => this.summary(),
+    };
+  }
+
+  // Who's in the office, as entities see them.
+  presence() {
+    return [...this.peers.values()].filter((q) => q.ready && q.kind !== 'freeq').map((q) => this.who(q));
+  }
+
+  who(p) {
+    return { id: p.id, key: this.ownerKey(p), name: p.name, handle: p.handle, did: p.did, kind: p.kind, zone: zoneAt(p.x, p.y)?.id || null };
+  }
+
+  // A message for an actor: to each of their open connections. Returns how
+  // many got it, so the actor can keep it for later when nobody did.
+  deliver(key, msg) {
+    let n = 0;
+    for (const q of this.peers.values()) {
+      if (q.ready && q.ws.readyState === 1 && this.ownerKey(q) === key) { this.sendTo(q, msg); n++; }
+    }
+    return n;
+  }
+
+  // Effects from entities:
+  //   { op: 'mirror', from, value | push+max, except?, quiet? }  what `from` shows changed
+  //   { op: 'send', to: peerId, msg }   { op: 'broadcast', msg, except? }
+  //   { op: 'showOut', to: peerId, room, text }
+  apply(effects) {
+    for (const e of effects || []) {
+      if (e.op === 'mirror') this.mirrored(e);
+      else if (e.op === 'send') { const q = this.peers.get(e.to); if (q?.ready) this.sendTo(q, e.msg); }
+      else if (e.op === 'broadcast') this.broadcast(e.msg, this.peers.get(e.except) || null);
+      else if (e.op === 'showOut') { const q = this.peers.get(e.to), room = roomById(e.room); if (q?.ready && room) this.showOut(q, room, e.text); }
+    }
+    return true;
+  }
+
+  mirrored({ from, value, push, max, except, quiet }) {
+    if (push !== undefined) {
+      const list = this.mirror.get(from) || [];
+      list.push(push);
+      while (list.length > max) list.shift();
+      this.mirror.set(from, list);
+    } else this.mirror.set(from, value);
+    this.pushed?.add(from);
+    this.onMirror(from);
+    if (quiet) return;
+    switch (parse(from).kind) {
+      case 'desk': return this.broadcast({ t: 'desks', desks: this.desks });
+      case 'room': return this.broadcast({ t: 'bookings', bookings: this.bookings });
+      case 'whiteboard': return this.broadcast(push !== undefined ? { t: 'wb', op: 'stroke', stroke: push } : { t: 'wb', op: 'clear' }, this.peers.get(except) || null);
+      case 'noticeboard': return this.broadcast({ t: 'notes', notes: this.notes });
+      case 'arcade': return this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
+      case 'coffee': return this.broadcast({ t: 'counters', counters: this.counters });
+      case 'pomodoro': return this.broadcastPomo();
+    }
+  }
+
+  // Publish to a topic, but only if something listens (the World mirrors
+  // subscriber counts for the topics it publishes to).
+  publish(topic, ev) {
+    if (this.mirror.get(`topic:${topic}`) > 0) this.bg(this.ref(`topic:${topic}`).publish(ev, 'world:main'));
   }
 
   summary() {
@@ -108,7 +243,16 @@ export class Office {
     this.peers.delete(p.id);
     if (p.ready) this.broadcast({ t: 'leave', id: p.id });
     if (p.kind !== 'freeq') { this.freeq?.leave(p); this.freeq?.presence(); }
+    if (!p.ready || p.kind === 'freeq') return;
+    const key = this.actorKey(p);
+    if (key) this.bg(this.ref(`actor:${key}`).depart());
+    const zone = zoneAt(p.x, p.y);
+    if (zone) this.publish(`zone:${zone.id}`, { type: 'exit', who: this.who(p) });
+    this.publish('office', { type: 'leave', who: this.who(p) });
   }
+
+  // The actor entity for a peer: their DID, or the agent's name. Guests have none.
+  actorKey(p) { return p.did || (p.kind === 'agent' ? `agent:${p.name}` : null); }
 
   // ---- people from outside (the freeq bridge, see freeq.js) ----------------
   // They have no socket: they're drawn, can be heard and mentioned, and never
@@ -143,8 +287,8 @@ export class Office {
     p.did = did;
     if (!this.loadActor) return;
     try {
-      const a = await this.loadActor(did);
-      if (!this.peers.has(p.id)) return;
+      const a = await this.ref(`actor:${did}`).profile();
+      if (!a || !this.peers.has(p.id)) return;
       p.handle = a.handle;
       p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
       this.broadcast({ t: 'leave', id: p.id });
@@ -167,11 +311,9 @@ export class Office {
   ownerKey(p) { return p.did || `${p.kind}:${p.name}`; }
 
   async handle(p, m) {
+    await this.ready;
     if (m.t === 'hello') return this.hello(p, m);
     if (!p.ready) return;
-    // Room timers also run from setInterval / a Durable Object alarm; this
-    // catches up whenever anyone is active.
-    if (this.now() - this.lastTick > 5000) this.tickRooms();
     switch (m.t) {
       case 'move': return this.move(p, m);
       case 'chat': return this.chat(p, m);
@@ -194,28 +336,32 @@ export class Office {
   }
 
   async hello(p, m) {
-    if (p.ready) return;
+    if (p.ready || p.greeting) return;
+    p.greeting = true;
     p.kind = m.kind === 'agent' ? 'agent' : 'human';
     p.name = clip(m.name, 32) || (p.kind === 'agent' ? 'agent' : 'guest');
+    let arrival = null;
     if (p.authDid) {
       // Identity comes from the signed-in DID only, never from the hello
       // message, so nobody can walk in wearing someone else's handle.
       p.did = p.authDid;
-      if (this.loadActor) {
-        try {
-          const a = await this.loadActor(p.authDid);
-          p.handle = a.handle;
-          p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
-          p.name = clip(m.name, 32) || a.displayName || a.handle || p.name;
-        } catch (e) {
-          this.sendTo(p, { t: 'error', message: `couldn't load your character: ${e.message}` });
-        }
-      }
     } else if (m.handle) {
       this.sendTo(p, { t: 'error', message: `sign in to use @${clip(m.handle, 253)}; walking in as a guest` });
     }
+    // Their actor entity has their character, last status and notes kept for them.
+    const key = this.actorKey(p);
+    if (key) arrival = await this.ref(`actor:${key}`).arrive().catch((e) => ({ error: e.message }));
+    if (arrival?.profile) {
+      const a = arrival.profile;
+      p.handle = a.handle;
+      p.actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
+      p.name = clip(m.name, 32) || a.displayName || a.handle || p.name;
+    } else if (p.did && arrival?.error && this.loadActor) {
+      this.sendTo(p, { t: 'error', message: `couldn't load your character: ${arrival.error}` });
+    }
     if (m.status && STATUSES.has(m.status)) p.status = m.status;
-    p.note = clip(m.note, 80);
+    else if (STATUSES.has(arrival?.status)) p.status = arrival.status;
+    p.note = clip(m.note ?? arrival?.note ?? '', 80);
     p.ready = true;
     this.sendTo(p, {
       t: 'welcome', id: p.id, now: this.now(), you: this.publicPeer(p),
@@ -224,8 +370,12 @@ export class Office {
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
       bookings: this.bookings, freeq: this.freeq?.state() || {},
     });
+    for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
     this.touchDesk(p);
+    const zone = zoneAt(p.x, p.y);
+    if (zone) this.publish(`zone:${zone.id}`, { type: 'enter', who: this.who(p) });
+    this.publish('office', { type: 'join', who: this.who(p) });
     this.freeq?.presence();
   }
 
@@ -235,18 +385,20 @@ export class Office {
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
     // A locked booking keeps everyone but its holders out of the room.
-    const to = zoneAt(x, y);
-    if (to?.bookable && to !== zoneAt(p.x, p.y) && lockedOut(this.bookings, to.id, p, this.now())) {
+    const from = zoneAt(p.x, p.y), to = zoneAt(x, y);
+    if (to?.bookable && to !== from && lockedOut(this.bookings, to.id, p, this.now())) {
       const b = activeBooking(this.bookings, to.id, this.now());
       return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${fmtTime(b.end)}. Knock to be let in.` });
-    }
-    if (to?.bookable && to !== zoneAt(p.x, p.y)) {
-      const b = activeBooking(this.bookings, to.id, this.now());
-      if (b && !b.seen && isHolder(b, p)) { b.seen = true; this.onChange(); }
     }
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (p.seat && m.moving) p.seat = null;
     this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving, seat: p.seat }, p);
+    // Areas are topics: rooms (and anything else) can react to people coming and going.
+    if (to !== from) {
+      const who = this.who(p);
+      if (from) this.publish(`zone:${from.id}`, { type: 'exit', who });
+      if (to) this.publish(`zone:${to.id}`, { type: 'enter', who });
+    }
   }
 
   chat(p, m) {
@@ -295,6 +447,8 @@ export class Office {
     if (m.status && STATUSES.has(m.status)) p.status = m.status;
     if (m.note !== undefined) p.note = clip(m.note, 80);
     this.broadcast({ t: 'peer', id: p.id, status: p.status, note: p.note });
+    const key = this.actorKey(p);
+    if (key) this.bg(this.ref(`actor:${key}`).remember({ status: p.status, note: p.note }));
   }
 
   emote(p, m) {
@@ -316,120 +470,54 @@ export class Office {
     this.broadcast({ t: 'move', id: p.id, x: p.x, y: p.y, dir: p.dir, moving: false, seat: p.seat });
   }
 
-  desk(p, m) {
+  // ---- items: each is its own entity -------------------------------------
+  async desk(p, m) {
     const d = DESKS.find((x) => x.id === m.desk);
     if (!d) return;
-    const key = this.ownerKey(p);
-    const cur = this.desks[d.id];
+    const desk = this.ref(`desk:${d.id}`), who = this.who(p);
     if (m.action === 'claim') {
-      const stale = cur && this.now() - (cur.seen || 0) > 12 * 3600 * 1000;
-      const ownerOnline = cur && [...this.peers.values()].some((q) => q.ready && this.ownerKey(q) === cur.owner);
-      if (cur && cur.owner !== key && (ownerOnline || !stale)) {
-        return this.sendTo(p, { t: 'error', message: `${cur.name}'s desk` });
-      }
-      for (const [id, v] of Object.entries(this.desks)) if (v.owner === key && id !== d.id) delete this.desks[id];
-      this.desks[d.id] = { owner: key, name: p.name, handle: p.handle, goal: clip(m.goal, 80), since: cur?.owner === key ? cur.since : this.now(), seen: this.now() };
-    } else if (m.action === 'goal' && cur?.owner === key) {
-      cur.goal = clip(m.goal, 80);
-    } else if (m.action === 'release' && cur?.owner === key) {
-      delete this.desks[d.id];
-    } else return;
-    this.onChange();
-    this.broadcast({ t: 'desks', desks: this.desks });
+      const r = await desk.claim(who, m.goal);
+      if (r?.error) this.sendTo(p, { t: 'error', message: r.error });
+    } else if (m.action === 'goal') await desk.goal(who, m.goal);
+    else if (m.action === 'release') await desk.release(who);
   }
 
   touchDesk(p) {
     const key = this.ownerKey(p);
-    for (const v of Object.values(this.desks)) if (v.owner === key) { v.seen = this.now(); this.onChange(); }
+    for (const [id, v] of Object.entries(this.desks)) if (v.owner === key) this.bg(this.ref(`desk:${id}`).touch(key));
   }
 
-  pomoState() {
-    const out = {};
-    for (const [k, v] of Object.entries(this.pomo)) { const { timer, ...rest } = v; out[k] = rest; }
-    return out;
-  }
-
-  pomodoro(p, m) {
+  async pomodoro(p, m) {
     const zone = zoneAt(p.x, p.y);
-    const st = zone && this.pomo[zone.id];
-    if (!st) return;
-    if (m.action === 'start') {
-      st.focusMin = num(m.focusMin, 1, 90, 25) | 0;
-      st.breakMin = num(m.breakMin, 1, 30, 5) | 0;
-      st.round = 1; st.startedBy = p.name;
-      this.setPhase(zone.id, 'focus');
-    } else if (m.action === 'stop') {
-      clearTimeout(st.timer);
-      st.phase = 'idle'; st.endsAt = 0; st.round = 0;
-      this.broadcastPomo();
-    }
-  }
-
-  setPhase(zoneId, phase) {
-    const st = this.pomo[zoneId];
-    clearTimeout(st.timer);
-    st.phase = phase;
-    const mins = phase === 'focus' ? st.focusMin : st.breakMin;
-    st.endsAt = this.now() + mins * 60000;
-    st.timer = setTimeout(() => {
-      if (phase === 'focus') {
-        this.counters.pomodoros++;
-        this.onChange();
-        this.setPhase(zoneId, 'break');
-      } else {
-        st.round++;
-        this.setPhase(zoneId, 'focus');
-      }
-    }, mins * 60000);
-    st.timer.unref?.();
-    this.broadcastPomo();
+    if (!zone || !POMO_ZONES.includes(zone.id)) return;
+    const timer = this.ref(`pomodoro:${zone.id}`);
+    if (m.action === 'start') await timer.start(this.who(p), { focusMin: m.focusMin, breakMin: m.breakMin });
+    else if (m.action === 'stop') await timer.stop();
   }
 
   broadcastPomo() {
     this.broadcast({ t: 'pomo', pomo: this.pomoState(), counters: this.counters, now: this.now() });
   }
 
-  whiteboard(p, m) {
-    if (m.op === 'clear') {
-      this.strokes = [];
-    } else if (m.op === 'stroke' && Array.isArray(m.points) && m.points.length >= 2) {
-      const points = m.points.slice(0, 400).map((pt) => [num(pt[0], 0, 1), num(pt[1], 0, 1)]);
-      const color = /^#[0-9a-f]{6}$/i.test(m.color) ? m.color : '#1f2937';
-      const stroke = { points, color, size: num(m.size, 1, 24, 3), by: p.name };
-      this.strokes.push(stroke);
-      if (this.strokes.length > MAX_STROKES) this.strokes.shift();
-      this.broadcast({ t: 'wb', op: 'stroke', stroke }, p);
-      return this.onChange();
-    } else return;
-    this.onChange();
-    this.broadcast({ t: 'wb', op: 'clear' });
+  async whiteboard(p, m) {
+    const board = this.ref('whiteboard:main');
+    if (m.op === 'clear') await board.clear();
+    else if (m.op === 'stroke') await board.stroke(this.who(p), { points: m.points, color: m.color, size: m.size });
   }
 
-  noticeboard(p, m) {
-    if (m.op === 'add') {
-      const text = clip(m.text, 200);
-      if (!text) return;
-      const colors = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
-      this.notes.unshift({ id: crypto.randomUUID().slice(0, 8), text, by: p.name, owner: this.ownerKey(p), ts: this.now(), color: colors[(Math.random() * colors.length) | 0] });
-      this.notes = this.notes.slice(0, MAX_NOTES);
-    } else if (m.op === 'remove') {
-      const n = this.notes.find((x) => x.id === m.id);
-      if (!n || n.owner !== this.ownerKey(p)) return;
-      this.notes = this.notes.filter((x) => x !== n);
-    } else return;
-    this.onChange();
-    this.broadcast({ t: 'notes', notes: this.notes });
+  async noticeboard(p, m) {
+    const board = this.ref('noticeboard:main');
+    if (m.op === 'add') await board.add(this.who(p), m.text);
+    else if (m.op === 'remove') await board.remove(this.who(p), m.id);
   }
 
-  coffee(p) {
+  async coffee(p) {
     p.cup = true;
     clearTimeout(p.cupTimer);
     p.cupTimer = setTimeout(() => { p.cup = false; this.broadcast({ t: 'peer', id: p.id, cup: false }); }, 5 * 60000);
     p.cupTimer.unref?.();
-    this.counters.coffees++;
-    this.onChange();
     this.broadcast({ t: 'peer', id: p.id, cup: true });
-    this.broadcast({ t: 'counters', counters: this.counters });
+    await this.ref('coffee:main').brew();
     // Tell anyone nearby that a coffee chat is brewing.
     for (const q of this.peers.values()) {
       if (q !== p && q.ready && canHear(p, q)) this.sendTo(q, { t: 'toast', text: `☕ ${p.name} grabbed a coffee nearby. Coffee chat?` });
@@ -437,19 +525,14 @@ export class Office {
   }
 
   score(p, m) {
-    const score = num(m.score, 0, 10000, 0) | 0;
-    if (!score) return;
-    this.scores.push({ name: p.name, score, ts: this.now() });
-    this.scores.sort((a, b) => b.score - a.score);
-    this.scores = this.scores.slice(0, 20);
-    this.onChange();
-    this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
+    return this.ref('arcade:main').score(this.who(p), m.score);
   }
 
   wave(p, m) {
     const q = this.peers.get(m.to);
     if (!q || !q.ready) return;
-    this.counters.waves++;
+    this.waves++;
+    this.onChange();
     this.sendTo(q, { t: 'wave', from: p.id, name: p.name, kind: m.kind === 'knock' ? 'knock' : 'wave' });
     this.broadcast({ t: 'peer', id: p.id, emote: 'wave' });
   }
@@ -470,168 +553,27 @@ export class Office {
     this.broadcast({ t: 'peer', id: p.id, video: p.video, screen: p.screen });
   }
 
-  // ---- meeting room bookings -------------------------------------------------
+  // ---- meeting room bookings: each room is its own entity -----------------
   // { t: 'book', op: 'create' | 'cancel' | 'extend' | 'end' | 'update' | 'admit', ref? }
   // Replies { t: 'booked', ref, booking } or { t: 'error', ref, message }.
-  book(p, m) {
-    const now = this.now();
+  async book(p, m) {
     const ref = typeof m.ref === 'string' || typeof m.ref === 'number' ? m.ref : undefined;
     const fail = (message) => this.sendTo(p, { t: 'error', message, ref });
-    const done = (b) => { this.roomsChanged(); this.sendTo(p, { t: 'booked', ref, booking: b }); };
-    const key = this.ownerKey(p);
-
-    if (m.op === 'create') {
-      if (!p.did && p.kind !== 'agent') return fail('sign in to book a room');
-      const room = roomById(m.room);
-      if (!room) return fail('no such room');
-      const start = m.start === undefined || m.start === 'now' ? now : toTime(m.start, now);
-      const end = m.end !== undefined ? toTime(m.end, now) : start + num(m.minutes, 15, 240, 30) * MIN;
-      const slot = checkSlot(this.bookings, { room: room.id, start, end, owner: key }, now);
-      if (slot.error) return fail(slot.error);
-      const b = {
-        id: crypto.randomUUID().slice(0, 8), room: room.id, title: clip(m.title, 80) || `${p.name}'s meeting`,
-        start: slot.start, end: slot.end, owner: key, name: p.name, handle: p.handle,
-        invitees: parseInvitees(m.invitees), lock: !!m.lock, autoRelease: m.autoRelease !== false,
-        seen: false, admitted: [], sent: {}, created: now,
-      };
-      this.bookings.push(b);
-      this.bookings.sort((a, c) => a.start - c.start);
-      done(b);
-      for (const q of this.peers.values()) {
-        if (q !== p && q.ready && isHolder(b, q)) this.note(q, b, 'invite', `📅 ${p.name} invited you to “${b.title}” in ${room.name}, ${fmtRange(b)}`);
-      }
-      return this.tickRooms();
-    }
-
-    const b = this.bookings.find((x) => x.id === m.id);
-    if (!b) return fail('no such booking');
-    const room = roomById(b.room);
-    if (m.op === 'admit') {
-      // Anyone already holding the room can let a knocker in.
-      if (!isHolder(b, p) || !(b.start <= now && now < b.end)) return fail('only people in the meeting can let others in');
-      const q = this.peers.get(m.to);
-      if (!q?.ready) return fail('they left');
-      if (!b.admitted.includes(keyOf(q))) b.admitted.push(keyOf(q));
-      this.note(q, b, 'admit', `🔓 ${p.name} let you into ${room.name}`);
-      return done(b);
-    }
-    if (b.owner !== key) return fail('only the person who booked it can change it');
-    if (m.op === 'cancel' || (m.op === 'end' && b.start > now)) {
-      this.bookings = this.bookings.filter((x) => x !== b);
-      for (const q of this.peers.values()) {
-        if (q !== p && q.ready && isHolder(b, q) && b.end > now) this.note(q, b, 'cancel', `📅 “${b.title}” in ${room.name} was cancelled`);
-      }
-      return done({ ...b, cancelled: true });
-    }
-    if (m.op === 'end') {
-      b.end = Math.max(b.start, now);
-      b.sent.ended = true;
-      return done(b);
-    }
-    if (m.op === 'extend') {
-      const slot = checkSlot(this.bookings, { room: b.room, start: b.start, end: b.end + num(m.minutes, 5, 120, 15) * MIN, owner: key, id: b.id }, now);
-      if (slot.error) return fail(slot.error);
-      b.end = slot.end;
-      b.sent.ending = false;
-      return done(b);
-    }
-    if (m.op === 'update') {
-      if (m.title !== undefined) b.title = clip(m.title, 80) || b.title;
-      if (m.invitees !== undefined) b.invitees = parseInvitees(m.invitees);
-      if (m.lock !== undefined) b.lock = !!m.lock;
-      if (m.start !== undefined || m.end !== undefined) {
-        const start = m.start !== undefined ? toTime(m.start, now) : b.start;
-        const end = m.end !== undefined ? toTime(m.end, now) : start + (b.end - b.start);
-        const slot = checkSlot(this.bookings, { room: b.room, start, end, owner: key, id: b.id }, now);
-        if (slot.error) return fail(slot.error);
-        Object.assign(b, { start: slot.start, end: slot.end, sent: {} });
-        this.bookings.sort((a, c) => a.start - c.start);
-      }
-      return done(b);
-    }
-    fail('unknown booking op');
+    if (m.op === 'create' && !p.did && p.kind !== 'agent') return fail('sign in to book a room');
+    const room = m.op === 'create' ? roomById(m.room)?.id : this.bookings.find((b) => b.id === m.id)?.room;
+    if (!room) return fail(m.op === 'create' ? 'no such room' : 'no such booking');
+    const r = await this.ref(`room:${room}`).book(this.who(p), m, { all: this.bookings, presence: this.presence() });
+    if (r.error) return fail(r.error);
+    this.sendTo(p, { t: 'booked', ref, booking: r.booking });
   }
 
-  note(q, b, kind, text) {
-    this.sendTo(q, { t: 'roomnote', kind, room: b.room, id: b.id, text });
-  }
-
-  roomsChanged() {
-    this.onChange();
-    this.broadcast({ t: 'bookings', bookings: this.bookings });
-  }
-
-  // Reminders, start/end announcements, locking people out, and releasing
-  // rooms nobody turned up to. Safe to call as often as you like.
+  // Rooms keep their own alarms; this nudges them all now (tests, catch-up).
   tickRooms() {
-    const now = this.now();
-    this.lastTick = now;
-    let changed = false;
-    const here = (id) => [...this.peers.values()].filter((q) => q.ready && zoneAt(q.x, q.y)?.id === id);
-    for (const b of [...this.bookings]) {
-      const room = roomById(b.room);
-      const sent = (b.sent ||= {});
-      const inside = here(b.room);
-      if (b.end <= now) {
-        if (!sent.ended) {
-          sent.ended = true; changed = true;
-          for (const q of inside) this.note(q, b, 'ended', `📅 “${b.title}” has ended. ${room.name} is free unless it's booked next.`);
-        }
-        continue;
-      }
-      if (!sent.soon && b.start > now && b.start - now <= RULES.remind) {
-        sent.soon = true; changed = true;
-        for (const q of this.peers.values()) {
-          if (q.ready && isHolder(b, q) && !inside.includes(q)) this.note(q, b, 'soon', `📅 “${b.title}” in ${room.name} starts at ${fmtTime(b.start)}`);
-        }
-      }
-      if (b.start > now) continue;
-      if (!b.seen && inside.some((q) => isHolder(b, q))) { b.seen = true; changed = true; }
-      if (!sent.start) {
-        sent.start = true; changed = true;
-        for (const q of this.peers.values()) {
-          if (!q.ready) continue;
-          if (isHolder(b, q)) {
-            if (!inside.includes(q)) this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`);
-          } else if (inside.includes(q)) {
-            if (b.lock) this.showOut(q, room, `🔒 ${room.name} is booked now for “${b.title}” (${b.name}), so you've been shown out.`);
-            else this.note(q, b, 'taken', `📅 ${room.name} is booked now for “${b.title}” (${b.name}) until ${fmtTime(b.end)}`);
-          }
-        }
-      }
-      if (b.autoRelease && !b.seen && now - b.start >= RULES.grace) {
-        this.bookings = this.bookings.filter((x) => x !== b);
-        changed = true;
-        for (const q of this.peers.values()) {
-          if (q.ready && keyOf(q) === b.owner) this.note(q, b, 'released', `📅 Nobody turned up to “${b.title}”, so ${room.name} was released`);
-        }
-        continue;
-      }
-      if (!sent.ending && b.end - now <= RULES.remind) {
-        sent.ending = true; changed = true;
-        const next = this.bookings.find((x) => x.room === b.room && x.start >= b.end && x.start - b.end < RULES.soon);
-        for (const q of inside) this.note(q, b, 'ending', `⏳ ${Math.ceil((b.end - now) / MIN)} minutes left in ${room.name}${next ? `. Next up: “${next.title}” (${next.name})` : ''}`);
-      }
-    }
-    // Keep a day of history so "earlier today" still shows on the schedule.
-    const keep = this.bookings.filter((b) => now - b.end < 24 * 60 * MIN);
-    if (keep.length !== this.bookings.length) { this.bookings = keep; changed = true; }
-    if (changed) this.roomsChanged();
+    const presence = this.presence();
+    return Promise.all(ROOMS.map((r) => this.ref(`room:${r.id}`).tick({ presence })));
   }
 
-  // When tickRooms next has something to do, for a Durable Object alarm.
-  nextRoomEvent() {
-    const now = this.now();
-    let t = Infinity;
-    for (const b of this.bookings) {
-      const s = b.sent || {};
-      for (const [due, when] of [[!s.soon, b.start - RULES.remind], [!s.start, b.start], [b.autoRelease && !b.seen, b.start + RULES.grace], [!s.ending, b.end - RULES.remind], [!s.ended, b.end], [true, b.end + 24 * 60 * MIN]]) {
-        if (due && when > now && when < t) t = when;
-      }
-      if (b.start <= now && now < b.end && !b.seen) t = Math.min(t, now + 30000);
-    }
-    return Number.isFinite(t) ? t : null;
-  }
+  nextRoomEvent() { return nextRoomEvent(this.bookings, this.now()); }
 
   showOut(q, room, text) {
     q.x = room.door.x; q.y = room.door.y; q.seat = null; q.moving = false;
