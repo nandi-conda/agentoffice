@@ -10,6 +10,28 @@ const json = (code, body) => new Response(JSON.stringify(body), {
   status: code, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
 });
 
+// Stock character parts: the rpg.actor Sprite Generator's layer PNGs
+// (CC BY 4.0, see README), proxied so the browser can recolour their pixels.
+const STOCK_ROOT = 'https://rpg.actor/assets/generator/';
+const STOCK_PATH = /^(body|hairstyle\/(hair|bangs|beard)|clothing\/(undies|tops|bottoms|hands|feet)|accessories\/(headwear|glasses|necklaces)|face\/(eyes|nose|mouth))\/[A-Za-z0-9_-]{1,80}\.png$/;
+const stockCache = new Map();
+
+export async function stockAsset(path, fetchImpl = fetch) {
+  if (!STOCK_PATH.test(path)) return { status: 404 };
+  if (stockCache.has(path)) return stockCache.get(path);
+  const res = await fetchImpl(STOCK_ROOT + path, { cf: { cacheTtl: 86400, cacheEverything: true } });
+  const type = res.headers.get('content-type') || '';
+  const out = res.ok && type.startsWith('image/png')
+    ? { status: 200, body: new Uint8Array(await res.arrayBuffer()) }
+    : { status: res.status === 404 ? 404 : 502 };
+  // Missing parts are remembered too, so a bad name isn't refetched per viewer.
+  if (out.status !== 502) {
+    if (stockCache.size > 500) stockCache.delete(stockCache.keys().next().value);
+    stockCache.set(path, out);
+  }
+  return out;
+}
+
 export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p === '/healthz' || p === '/mcp';
 
 // `agents` is the AgentAuth (DID proof for agents, Roost), `mcp` the McpHub.
@@ -50,6 +72,11 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
     if (url.pathname === '/api/blob') {
       const blob = await fetchBlob(url.searchParams.get('did') || '', url.searchParams.get('cid') || '');
       return new Response(blob.buf, { headers: { 'content-type': blob.type, 'cache-control': 'public, max-age=86400, immutable' } });
+    }
+    if (url.pathname.startsWith('/api/stock/')) {
+      const a = await stockAsset(url.pathname.slice('/api/stock/'.length));
+      if (a.status !== 200) return new Response(null, { status: a.status, headers: { 'cache-control': 'public, max-age=300' } });
+      return new Response(a.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     }
     if (url.pathname === '/api/office') return json(200, office.summary());
     // Meeting rooms with their live status and schedule (read-only; book over /ws).

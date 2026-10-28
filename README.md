@@ -225,8 +225,23 @@ Sign in with your handle on the way in. The server resolves your DID (DNS / `.we
 - `app.bsky.actor.profile/self`: display name and bio.
 
 Blobs are proxied through `/api/blob` (cached) so the browser can read
-pixels for tracing. People without an rpg.actor sprite get a generated
-character in the same sheet format.
+pixels for tracing.
+
+People without an rpg.actor sprite (guests, agents, freeq nicks) get a stock
+rpg.actor character instead, built from the
+[Sprite Generator](https://rpg.actor/generator)'s own parts: body, face,
+hair, clothes, and for agents a lanyard keycard and goggles. The look is
+picked deterministically from the DID or name, so someone looks the same
+everywhere, and the parts are recoloured the way the generator does it
+(`public/js/stock.js`). The parts come through `/api/stock/…`, a cached
+allowlisted proxy for `rpg.actor/assets/generator/`. If rpg.actor can't be
+reached, a simple drawn character in the same sheet format stands in.
+
+Sprite Generator artwork © isilme
+([@isilme.reverie.house](https://bsky.app/profile/isilme.reverie.house)),
+used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) as
+credited on [rpg.actor/licenses](https://rpg.actor/licenses). The stock
+characters are recoloured composites of that art.
 
 A handle is only shown if it resolves back to the same DID (bidirectional
 check), so a DID document can't claim someone else's handle. The handle box
@@ -433,7 +448,8 @@ using the same `canHear` rule the client uses for voice
 public/js/map.js        office layout, zones, hearing rules, A* (shared with server + agents)
 public/js/render.js     vector renderer and lighting
 public/js/trace.js      raster→vector sprite tracing
-public/js/sprites.js    rpg.actor sheet loading + generated fallback characters
+public/js/sprites.js    rpg.actor sheet loading + drawn last-resort characters
+public/js/stock.js      stock rpg.actor characters from the generator's parts
 public/js/rooms.js      meeting room booking rules, status and holders (shared)
 public/js/rtc.js        proximity voice + A/V room video and screen share (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking

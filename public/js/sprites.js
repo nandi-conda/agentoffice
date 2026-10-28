@@ -1,7 +1,11 @@
 // Character sprites. rpg.actor sheets follow a 3x4 grid of 48px frames:
 // rows are down, left, right, up; columns are step, idle, step.
-// Players without an rpg.actor sprite get a generated sheet in the same
-// format, so the renderer only ever deals with one layout.
+// Players without an rpg.actor sprite get a stock rpg.actor character built
+// from the generator's parts (stock.js); if that art can't be reached they
+// get a drawn sheet in the same format, so the renderer only ever deals with
+// one layout.
+
+import { stockSheet } from './stock.js';
 
 export const FRAME = 48;
 export const WALK = [0, 1, 2, 1];
@@ -125,7 +129,11 @@ export function shade(hex, amt) {
 // with images (or canvases) ready to draw.
 export async function sheetsFor(peer) {
   const s = peer.actor?.sprite;
-  const fallback = () => ({ base: generateSheet(peer.did || peer.name, peer.kind), emotes: {}, frame: FRAME, cols: 3, rpg: false });
+  const fallback = async () => {
+    const seed = peer.did || peer.name;
+    const base = await stockSheet(seed, peer.kind) || generateSheet(seed, peer.kind);
+    return { base, emotes: {}, frame: FRAME, cols: 3, rpg: false };
+  };
   if (!s?.sheet) return fallback();
   const base = await loadImage(s.sheet);
   if (!base) return fallback();

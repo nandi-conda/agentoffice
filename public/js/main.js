@@ -1,6 +1,6 @@
 import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
 import { createRenderer, EMOJI } from './render.js';
-import { sheetsFor, generateSheet } from './sprites.js';
+import { sheetsFor } from './sprites.js';
 import { tracedFrame, drawTraced } from './trace.js';
 import { STATUS, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
@@ -122,14 +122,14 @@ async function previewFor(handle) {
       const emotes = Object.keys(a.sprite?.emotes || {}).length;
       text.innerHTML = a.sprite
         ? `<b>${esc(a.displayName || a.handle)}</b><br>rpg.actor character found${emotes ? ` with ${emotes} emotes` : ''}${a.stats?.length ? ` · ${a.stats.length} stat sheet${a.stats.length > 1 ? 's' : ''}` : ''}.`
-        : `<b>${esc(a.displayName || a.handle)}</b><br>No rpg.actor sprite yet, so you'll get a generated one. <a href="https://rpg.actor/generator" target="_blank" rel="noopener">Make one</a>`;
+        : `<b>${esc(a.displayName || a.handle)}</b><br>No rpg.actor sprite yet, so you'll get a stock rpg.actor character. <a href="https://rpg.actor/generator" target="_blank" rel="noopener">Make one</a>`;
     } catch (e) {
       text.textContent = `Couldn't load @${handle}: ${e.message}. You can still walk in as a guest.`;
     }
   } else {
     text.innerHTML = 'Enter a handle to load your <a href="https://rpg.actor" target="_blank" rel="noopener">rpg.actor</a> character, sprite, emotes and stats.';
   }
-  if (!sheets) sheets = { base: generateSheet(nameIn.value || 'guest'), frame: 48 };
+  if (!sheets) sheets = await sheetsFor({ name: nameIn.value || 'guest' });
   drawPortrait(g, sheets, 96);
 }
 
@@ -471,7 +471,8 @@ function openHelp() {
     <h3>Meeting rooms</h3>
     <p class="small">Book the Boardroom, Huddle Room or a phone booth from the 📅 button or the panel by each door. The Boardroom and Huddle Room are <b>A/V rooms</b>: inside, turn on your camera or share your screen with everyone in the room. A <b>locked</b> booking keeps everyone but invitees out (knock to be let in); bookings nobody turns up to are released after 10 minutes.</p>
     <h3>Agents</h3>
-    <p class="small">AI agents can work here too. They connect over the same WebSocket protocol, claim desks and answer @mentions. See <code>scripts/agent.mjs</code>.</p>`);
+    <p class="small">AI agents can work here too. They connect over the same WebSocket protocol, claim desks and answer @mentions. See <code>scripts/agent.mjs</code>.</p>
+    <p class="small" style="margin-top:12px">People without their own sprite wear stock <a href="https://rpg.actor/generator" target="_blank" rel="noopener">rpg.actor</a> characters. Generator art by <a href="https://bsky.app/profile/isilme.reverie.house" target="_blank" rel="noopener">isilme</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.</p>`);
 }
 
 // ---- people list & minimap ---------------------------------------------------
