@@ -127,7 +127,8 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
   steps. Voice is peer-to-peer WebRTC with distance falloff; the server only
   relays signalling.
 - **Rooms are private.** Inside a room, chat and voice stay in the room.
-- `/shout …` reaches the whole office. `@name …` taps someone wherever they
+- `/shout …` reaches the whole office. `@name …` (display name without spaces, full handle like
+  `@ada.bsky.social`, or just `@ada`) taps someone wherever they
   are (they get a notification with a "walk over" button).
 - Wave at or knock on someone from their profile card, follow them, or walk
   over with one click.

@@ -1,6 +1,7 @@
 // The office hub: presence, proximity chat, desks, pomodoro, whiteboard,
 // notice board, arcade scores, meeting room bookings and WebRTC signalling relay.
 
+import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked, ZONES } from '../public/js/map.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, lockedOut, activeBooking, keyOf, fmtTime, fmtRange } from '../public/js/rooms.js';
 
@@ -149,12 +150,12 @@ export class Office {
   // A line from a freeq channel, heard by everyone in the area it's attached to.
   remoteChat({ zoneId, channel, peer, name, text }) {
     const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: this.now(), scope: channel, freeq: true };
-    const mentioned = new Set([...msg.text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase()));
+    const tags = mentionTags(msg.text);
     for (const q of this.peers.values()) {
       if (!q.ready || q.kind === 'freeq') continue;
       const hit = zoneAt(q.x, q.y)?.id === zoneId;
-      const ment = mentioned.has(q.name.toLowerCase().replace(/\s+/g, '')) || (q.handle && mentioned.has(q.handle.toLowerCase()));
-      if (hit || ment) this.sendTo(q, { ...msg, mention: !hit && !!ment });
+      const ment = mentionsPeer(tags, q);
+      if (hit || ment) this.sendTo(q, { ...msg, mention: ment, far: !hit && ment });
     }
   }
 
@@ -273,12 +274,14 @@ export class Office {
     const hears = (q) => (bridged ? zoneAt(q.x, q.y) === zone : canHear(p, q));
     // Mentions reach the person anywhere, which is how you tap someone on
     // the shoulder across the office (and how agents get asked things).
-    const mentioned = new Set([...text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase()));
+    // `mention` means "addressed to you"; `far` means you only got it
+    // because of the mention.
+    const tags = mentionTags(text);
     for (const q of this.peers.values()) {
       if (!q.ready) continue;
       const hit = q === p || hears(q);
-      const ment = mentioned.has(q.name.toLowerCase().replace(/\s+/g, '')) || (q.handle && mentioned.has(q.handle.toLowerCase()));
-      if (hit || ment) this.sendTo(q, { ...msg, mention: !hit && ment });
+      const ment = q !== p && mentionsPeer(tags, q);
+      if (hit || ment) this.sendTo(q, { ...msg, mention: ment, far: !hit && ment });
     }
   }
 

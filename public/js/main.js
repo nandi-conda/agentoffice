@@ -264,7 +264,7 @@ function onMessage(m) {
       logChat(m);
       if (m.mention && m.id !== me.id) {
         chime();
-        toast(`<b>${esc(m.name)}</b> mentioned you: ${esc(m.text)}`, [['Walk over', () => walkTo(p?.x, p?.y)]]);
+        toast(`<b>${esc(m.name)}</b> mentioned you: ${esc(m.text)}`, m.far && p ? [['Walk over', () => walkTo(p.x, p.y)]] : []);
       }
       break;
     }

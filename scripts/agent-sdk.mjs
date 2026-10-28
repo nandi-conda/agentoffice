@@ -13,6 +13,7 @@
 
 import { EventEmitter } from 'node:events';
 import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
+import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -55,9 +56,9 @@ export class AgentClient extends EventEmitter {
     });
   }
 
+  // By name, full handle or its first label (see public/js/mentions.js).
   mentions(text) {
-    const tags = [...text.matchAll(/@([\w.-]+)/g)].map((x) => x[1].toLowerCase());
-    return tags.includes(this.name.toLowerCase().replace(/\s+/g, ''));
+    return mentionsPeer(mentionTags(text), { name: this.name, ...(this.me || {}) });
   }
 
   track(m) {
