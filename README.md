@@ -175,7 +175,12 @@ the Open Office, `#lobby` to the Lobby, and the busiest others fill the
 Lounge, Open Office, Kitchen and Lobby in that order. An attached area wears
 the channel's name on its floor, the channel's people stand in it (wearing
 their rpg.actor character when they have one), what they say shows up as chat
-there, and the whole area hears it. An area stays attached while anyone is
+there, and the whole area hears it. Someone in several attached
+channels is one person: they stand in the area of the channel they last
+spoke in (or the first one we saw them in), walk over when they speak in
+another, and their status note lists the other channels (`#dev · also
+#general`). freeqworld doesn't need this, since you only ever see one
+channel-room at a time there; the office shows every area at once. An area stays attached while anyone is
 still in the channel, and the list is refreshed every five minutes.
 
 When you're signed in, what you say in an attached area goes to the channel

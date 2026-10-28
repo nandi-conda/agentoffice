@@ -274,7 +274,7 @@ export class FreeqBridge {
     this.fixed = parseRooms(rooms);
     this.bindings = new Map(); // zoneId -> { channel, members, topic }
     this.listener = null;
-    this.people = new Map(); // `${channel} ${lower(nick)}` -> office peer
+    this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
     this.users = new Map(); // office DID -> { irc, ready, used }
     this.timers = [];
     office.freeq = this;
@@ -398,7 +398,7 @@ export class FreeqBridge {
     if (!b) return;
     this.bindings.delete(zoneId);
     this.listener?.part(b.channel);
-    for (const [key, p] of [...this.people]) if (key.startsWith(lower(b.channel) + ' ')) this.removePerson(key, p);
+    for (const f of [...this.people.values()]) this.dropChannel(f.nick, b.channel);
     for (const u of this.users.values()) u.irc.part(b.channel);
   }
 
@@ -424,24 +424,67 @@ export class FreeqBridge {
     return false;
   }
 
+  // One avatar per freeq person, however many attached channels they're in.
+  // They stand in the area of the channel they last spoke in (or the first
+  // one we saw them in), walk over when they speak somewhere else, and their
+  // status note lists the other channels.
   person(channel, nick, account) {
     const zoneId = this.zoneFor(channel);
     if (!zoneId || !nick || this.isOurs(nick, account)) return null;
-    const key = `${lower(channel)} ${lower(nick)}`;
-    let p = this.people.get(key);
-    if (!p) {
-      const here = [...this.people.values()].filter((q) => q.freeqZone === zoneId);
-      if (here.length >= MAX_PEOPLE) return null;
-      p = this.office.addRemote({ name: nick, kind: 'freeq', ...spotIn(zoneById[zoneId], here), note: channel, freeqZone: zoneId, freeqChannel: channel });
-      this.people.set(key, p);
-    }
-    if (account && account.startsWith('did:') && !p.did) this.office.identifyRemote(p, account);
-    return p;
+    let f = this.people.get(lower(nick));
+    if (!f) this.people.set(lower(nick), f = { nick, channels: new Map(), active: null, peer: null });
+    f.channels.set(lower(channel), channel);
+    if (!f.peer) this.place(f, channel);
+    else this.describe(f);
+    if (f.peer && account && account.startsWith('did:') && !f.peer.did) this.office.identifyRemote(f.peer, account);
+    return f.peer;
   }
 
-  removePerson(key, p) {
-    this.people.delete(key);
-    this.office.removeRemote(p);
+  // Put (or move) someone in a channel's area; falls back to their other
+  // channels when that area is full.
+  place(f, channel) {
+    const order = [channel, ...[...f.channels.values()].filter((c) => c !== channel)];
+    for (const ch of order) {
+      const zoneId = this.zoneFor(ch);
+      if (!zoneId) continue;
+      if (f.peer?.freeqZone === zoneId) { f.active = ch; return this.describe(f); }
+      const here = [...this.people.values()].filter((g) => g.peer && g !== f && g.peer.freeqZone === zoneId).map((g) => g.peer);
+      if (here.length >= MAX_PEOPLE) continue;
+      const at = spotIn(zoneById[zoneId], here);
+      f.active = ch;
+      if (f.peer) {
+        f.peer.freeqZone = zoneId;
+        this.office.moveRemote(f.peer, at.x, at.y);
+      } else {
+        f.peer = this.office.addRemote({ name: f.nick, kind: 'freeq', ...at, freeqZone: zoneId });
+      }
+      return this.describe(f);
+    }
+    // Nowhere to stand: don't leave them in an area that's no longer theirs.
+    if (f.peer && ![...f.channels.values()].some((ch) => this.zoneFor(ch) === f.peer.freeqZone)) {
+      this.office.removeRemote(f.peer);
+      f.peer = null;
+    }
+  }
+
+  describe(f) {
+    if (!f.peer) return;
+    const others = [...f.channels.values()].filter((c) => c !== f.active);
+    const note = `${f.active}${others.length ? ` · also ${others.join(', ')}` : ''}`.slice(0, 80);
+    if (note !== f.peer.note) this.office.noteRemote(f.peer, note);
+  }
+
+  // They left a channel (or it was detached from the office).
+  dropChannel(nick, channel) {
+    const f = this.people.get(lower(nick));
+    if (!f || !f.channels.delete(lower(channel))) return;
+    if (!f.channels.size) {
+      this.people.delete(lower(nick));
+      if (f.peer) this.office.removeRemote(f.peer);
+      return;
+    }
+    if (!f.peer || lower(f.active) === lower(channel)) this.place(f, [...f.channels.values()].pop());
+    else this.describe(f);
   }
 
   onListenerLine(m) {
@@ -453,29 +496,22 @@ export class FreeqBridge {
         return;
       }
       case 'JOIN': return void this.person(m.params[0], m.nick, account || (m.params[1] && m.params[1] !== '*' ? m.params[1] : null));
-      case 'PART': {
-        const key = `${lower(m.params[0])} ${lower(m.nick)}`;
-        const p = this.people.get(key);
-        if (p) this.removePerson(key, p);
+      case 'PART': return this.dropChannel(m.nick, m.params[0]);
+      case 'KICK': return this.dropChannel(m.params[1], m.params[0]);
+      case 'QUIT': {
+        const f = this.people.get(lower(m.nick));
+        if (f) { this.people.delete(lower(m.nick)); if (f.peer) this.office.removeRemote(f.peer); }
         return;
       }
-      case 'KICK': {
-        const key = `${lower(m.params[0])} ${lower(m.params[1])}`;
-        const p = this.people.get(key);
-        if (p) this.removePerson(key, p);
+      case 'NICK': {
+        const f = this.people.get(lower(m.nick));
+        if (!f) return;
+        this.people.delete(lower(m.nick));
+        f.nick = m.params[0];
+        this.people.set(lower(f.nick), f);
+        if (f.peer) this.office.renameRemote(f.peer, f.nick);
         return;
       }
-      case 'QUIT':
-        for (const [key, p] of [...this.people]) if (key.endsWith(' ' + lower(m.nick))) this.removePerson(key, p);
-        return;
-      case 'NICK':
-        for (const [key, p] of [...this.people]) {
-          if (!key.endsWith(' ' + lower(m.nick))) continue;
-          this.people.delete(key);
-          this.people.set(`${key.split(' ')[0]} ${lower(m.params[0])}`, p);
-          this.office.renameRemote(p, m.params[0]);
-        }
-        return;
       case 'TOPIC': {
         const b = this.bindings.get(this.zoneFor(m.params[0]));
         if (b) { b.topic = m.params[1] || null; this.announce(); }
@@ -484,12 +520,15 @@ export class FreeqBridge {
       case 'PRIVMSG': {
         const [channel, text] = m.params;
         if (!channel?.startsWith('#') || this.isOurs(m.nick, account)) return;
-        const p = this.person(channel, m.nick, account);
         const zoneId = this.zoneFor(channel);
         if (!zoneId || !text) return;
+        this.person(channel, m.nick, account);
+        // Speaking somewhere makes it where they are.
+        const f = this.people.get(lower(m.nick));
+        if (f && lower(f.active) !== lower(channel)) this.place(f, channel);
         const action = text.match(/^\u0001ACTION (.*)\u0001$/);
         if (/^\u0001/.test(text) && !action) return; // other CTCP
-        this.office.remoteChat({ zoneId, channel, peer: p, name: m.nick, text: action ? `* ${m.nick} ${action[1]}` : text });
+        this.office.remoteChat({ zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: m.nick, text: action ? `* ${m.nick} ${action[1]}` : text });
         return;
       }
     }

@@ -203,6 +203,46 @@ test('populated channels attach to areas, and talk flows both ways', async () =>
   assert.ok(![...office.peers.values()].some((p) => p.kind === 'freeq'));
 });
 
+test('someone in several channels is one person, standing where they last spoke', async () => {
+  const server = fakeFreeq({ verify: async () => true });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async () => new Response(JSON.stringify([{ name: '#general', members: 3 }, { name: '#dev', members: 3 }])),
+  });
+  const bob = server.outsider('bob', 'did:plc:bob');
+  bob.join('#general'); bob.join('#dev');
+  const said = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  await bridge.start();
+  await tick();
+  const bobs = () => [...office.peers.values()].filter((p) => p.kind === 'freeq' && p.name === 'bob');
+  assert.equal(bobs().length, 1);
+  const p = bobs()[0];
+  const first = p.freeqZone;
+  assert.match(p.note, /also #/);
+
+  // Speaking in the other channel walks bob over there.
+  const other = first === 'lounge' ? '#dev' : '#general';
+  bob.say(other, 'over here now');
+  await tick();
+  assert.equal(p.freeqZone, bridge.zoneFor(other));
+  assert.equal(p.note.split(' ')[0], other);
+  assert.ok(said.some((m) => m.t === 'move' && m.id === p.id));
+
+  // Leaving that channel sends him back to the one he's still in.
+  bridge.onListenerLine(parseLine(`:bob!b@h PART ${other}`));
+  assert.equal(p.freeqZone, first);
+  assert.ok(!/also/.test(p.note));
+  bridge.onListenerLine(parseLine(`:bob!b@h QUIT :bye`));
+  assert.equal(bobs().length, 0);
+  bridge.stop();
+});
+
 test('fixed area mapping and nick cleanup', () => {
   assert.deepEqual([...parseRooms('lounge=#general, open=dev, nowhere=#x')], [['lounge', '#general'], ['open', '#dev']]);
   assert.equal(ircNick('alice.bsky.social'), 'alice');

@@ -116,6 +116,16 @@ export class Office {
 
   removeRemote(p) { this.leave(p); }
 
+  moveRemote(p, x, y) {
+    p.x = x; p.y = y; p.moving = false; p.seat = null;
+    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: false, seat: null });
+  }
+
+  noteRemote(p, note) {
+    p.note = clip(note, 80);
+    this.broadcast({ t: 'peer', id: p.id, note: p.note });
+  }
+
   renameRemote(p, name) {
     p.name = clip(name, 32);
     this.broadcast({ t: 'leave', id: p.id });
