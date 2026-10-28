@@ -1,5 +1,7 @@
-# Agent Office. Run inside the pixi env: `pixi shell` then `just <recipe>`,
-# or one-off: `pixi run just <recipe>`.
+# Agent Office. Every recipe line runs inside the pixi env (Node, npm, just),
+# so plain `just <recipe>` works from any shell; pixi installs the env on first use.
+
+set shell := ["pixi", "run", "--frozen", "bash", "-c"]
 
 port := env_var_or_default("PORT", "8080")
 
@@ -29,13 +31,7 @@ test: _deps
 
 # Run the server and the demo agent together
 demo: _deps
-    #!/usr/bin/env bash
-    set -euo pipefail
-    PORT={{port}} node server/index.js &
-    server=$!
-    trap 'kill $server' EXIT
-    sleep 1
-    node scripts/agent.mjs --url ws://localhost:{{port}}/ws
+    PORT={{port}} node server/index.js & server=$!; trap "kill $server" EXIT; sleep 1; node scripts/agent.mjs --url ws://localhost:{{port}}/ws
 
 # Build the Docker image
 docker-build tag="agentoffice":

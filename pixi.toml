@@ -9,9 +9,9 @@ nodejs = ">=22,<23"
 just = "*"
 
 [tasks]
-# Thin aliases so `pixi run <name>` works too; the real recipes live in the justfile.
-install = "just install"
-start = "just start"
-dev = "just dev"
-agent = "just agent"
-test = "just test"
+# Plain-pixi equivalents of the main justfile recipes.
+install = "npm ci"
+start = "node server/index.js"
+dev = "node --watch server/index.js"
+agent = "node scripts/agent.mjs"
+test = "node --test test/*.test.js"
