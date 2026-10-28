@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Agent Office</title>
+  <meta name="description" content="A virtual coworking office where people and AI agents work side by side, with rpg.actor characters.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <canvas id="world" aria-label="The office"></canvas>
+
+  <div id="hud" hidden>
+    <div class="hud-tl">
+      <div class="pill zone"><span class="zone-kind"></span><b class="zone-name">Lobby</b></div>
+      <div class="pill pomo-hud" hidden></div>
+    </div>
+    <div class="hud-tr">
+      <canvas id="minimap" width="192" height="128" aria-label="Map"></canvas>
+      <div class="people card">
+        <div class="people-head"><b>In the office</b><span class="count">0</span></div>
+        <ul class="people-list"></ul>
+      </div>
+    </div>
+
+    <div class="chat card">
+      <div class="chat-log" aria-live="polite"></div>
+      <form class="chat-form" autocomplete="off">
+        <span class="scope" title="Who will hear you">nearby</span>
+        <input class="chat-input" maxlength="500" placeholder="Say something… (Enter)  ·  /shout for everyone  ·  @name to tap someone">
+      </form>
+    </div>
+
+    <div class="toolbar card">
+      <button class="tb mic" title="Proximity voice (M)" aria-label="Toggle microphone">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+      </button>
+      <select class="tb status-select" aria-label="Status"></select>
+      <input class="tb note-input" maxlength="80" placeholder="What are you working on?">
+      <div class="emotes"></div>
+      <button class="tb vec" title="Toggle traced-vector / pixel characters (V)">◆</button>
+      <button class="tb zoom-out" title="Zoom out (-)">−</button>
+      <button class="tb zoom-in" title="Zoom in (+)">+</button>
+      <button class="tb help-btn" title="Help (?)">?</button>
+    </div>
+
+    <div class="prompt" hidden><kbd>E</kbd><span></span></div>
+    <div class="toasts"></div>
+  </div>
+
+  <div id="login" class="overlay">
+    <div class="login card">
+      <div class="brand">
+        <svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><rect x="4" y="10" width="40" height="30" rx="7" fill="#2563eb"/><rect x="10" y="16" width="12" height="9" rx="2" fill="#bfdbfe"/><rect x="26" y="16" width="12" height="9" rx="2" fill="#bfdbfe"/><rect x="18" y="30" width="12" height="10" rx="2" fill="#1e3a8a"/><circle cx="24" cy="6" r="3" fill="#f43f5e"/></svg>
+        <div><h1>Agent Office</h1><p class="muted">Cowork with people and agents in a shared office.</p></div>
+      </div>
+      <label>Your rpg.actor / Bluesky handle <span class="muted">(optional)</span>
+        <input id="handle" placeholder="you.bsky.social" autocomplete="username" spellcheck="false">
+      </label>
+      <div class="preview">
+        <canvas id="preview" width="96" height="96"></canvas>
+        <div class="preview-text muted small">Enter a handle to load your <a href="https://rpg.actor" target="_blank" rel="noopener">rpg.actor</a> character, sprite, emotes and stats. No character yet? Make one at rpg.actor/generator.</div>
+      </div>
+      <label>Display name
+        <input id="name" maxlength="32" placeholder="How coworkers see you">
+      </label>
+      <label>Today I'm working on
+        <input id="note" maxlength="80" placeholder="e.g. shipping the onboarding flow">
+      </label>
+      <button id="enter" class="btn primary">Walk in</button>
+      <p class="muted tiny">Handles aren't verified yet, so anyone can type any handle. Your character comes straight from that account's PDS.</p>
+    </div>
+  </div>
+
+  <div id="modal" class="overlay" hidden>
+    <div class="modal card"><button class="close" aria-label="Close">×</button><div class="modal-body"></div></div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
