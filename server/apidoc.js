@@ -36,8 +36,8 @@ export function parseWrangler(text) {
   return out;
 }
 
-// plugins: [{ object, binding, name, doc, api, prompt }], what each plugin
-// Worker's describe() returns plus the item it is bound to.
+// plugins: [{ name, doc, prompt, api, binding, service, entrypoint, source,
+// objects }], what each plugin Worker's describe() returns plus where it's bound.
 export function describeApi({ kinds = KINDS, wrangler = null, plugins = [] } = {}) {
   const entities = Object.entries(kinds).map(([kind, Kind]) => {
     const d = describeKind(kind, Kind);
@@ -162,11 +162,15 @@ function sections(api) {
     api: Object.fromEntries(Object.entries(BUILTIN_API).filter(([m, spec]) => shared(m, spec))),
   };
   return [entity(api.world), { ...entity(builtins), id: 'entity', title: 'Every entity (built-ins)' }, ...api.entities.map(entity), ...api.plugins.map((p) => ({
-    id: `plugin-${p.object || p.name}`,
-    title: `plugin ${p.name}${p.object ? ` on ${p.object}` : ''}`,
-    doc: p.doc || '',
-    where: [p.binding && `service binding \`${p.binding}\` (WorkerEntrypoint)`, p.object && `item \`${p.object}\``].filter(Boolean),
-    methods: Object.entries(p.api || {}).map(([m, spec]) => ({ name: m, sig: signature(m, spec), doc: spec.doc || '', flags: flags(spec), rows: paramRows(spec), returns: spec.returns ? typeOf(spec.returns) : null, tool: null })),
+    id: `plugin-${p.binding.toLowerCase().replace(/^plugin_/, '').replace(/_/g, '-')}`,
+    title: `plugin: ${p.name}`,
+    doc: `${p.doc}${p.prompt ? ` People see it as “${p.prompt}”.` : ''}`,
+    where: [
+      `service binding \`${p.binding}\` → Worker \`${p.service}\`, WorkerEntrypoint \`${p.entrypoint}\` (source \`${p.source}\`)`,
+      p.objects.length && `on the map as ${p.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${p.objects.map((o) => `\`${o}\``).join(', ')})`,
+      'every call goes through the office (server/plugins.js), which clips and shape-checks the answer and falls back to the built-in copy when the binding is missing',
+    ].filter(Boolean),
+    methods: Object.entries(p.api || {}).map(([m, spec]) => ({ name: m, sig: `${m}(${paramList(spec).map(([k]) => k).join(', ')})`, doc: spec.doc || '', flags: flags(spec), rows: paramRows(spec), returns: spec.returns ? typeOf(spec.returns) : null, tool: null })),
     events: [],
   }))];
 }

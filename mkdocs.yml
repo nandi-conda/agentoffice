@@ -47,3 +47,7 @@ nav:
       - "coffee (CoffeeMachine)": api/coffee.md
       - "pomodoro (Pomodoro)": api/pomodoro.md
       - "plugin (PluginObject)": api/plugin.md
+      - "plugin: Jukebox": api/plugin-jukebox.md
+      - "plugin: Vending machine": api/plugin-vending.md
+      - "plugin: Magic 8-ball": api/plugin-eightball.md
+      - "plugin: Help kiosk": api/plugin-kiosk.md

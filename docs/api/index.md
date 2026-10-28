@@ -16,6 +16,10 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [coffee (CoffeeMachine)](coffee.md) | The kitchen coffee machine; counts cups. |
 | [pomodoro (Pomodoro)](pomodoro.md) | A shared pomodoro timer, one per quiet zone. |
 | [plugin (PluginObject)](plugin.md) | An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback. |
+| [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
+| [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
+| [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
+| [plugin: Help kiosk](plugin-kiosk.md) | Answers questions about the office, with Workers AI when bound and a canned help desk otherwise. |
 
 ## Bindings
 
