@@ -268,7 +268,8 @@ export class FreeqBridge {
   // fixed "zone=#channel,…" mapping instead of picking populated channels.
   constructor({ office, auth, openSocket, keyStore, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log }) {
     Object.assign(this, { office, auth, openSocket, keyStore, url, minMembers, log });
-    this.fetch = fetchImpl;
+    // Wrapped: calling a stored fetch as this.fetch() throws "Illegal invocation" on Workers.
+    this.fetch = (...a) => fetchImpl(...a);
     this.api = url.replace(/^ws/, 'http').replace(/\/irc\/?$/, '');
     this.fixed = parseRooms(rooms);
     this.bindings = new Map(); // zoneId -> { channel, members, topic }
