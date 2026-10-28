@@ -217,3 +217,37 @@ test('agents book, list and cancel meeting rooms over MCP', async () => {
   assert.equal(office.bookings.length, 0);
   await c.close();
 });
+
+// Workers' fetch throws "Illegal invocation" unless called with `this` =
+// globalThis (or nothing); Node doesn't care, so emulate the rule here.
+test('verify works under the Workers fetch `this` rule', async (t) => {
+  const at = fakeAtproto();
+  const real = globalThis.fetch;
+  globalThis.fetch = function (...a) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation: function called with incorrect `this` reference.');
+    return at.fetch(...a);
+  };
+  t.after(() => { globalThis.fetch = real; });
+  const auth = new AgentAuth({ resolve: at.resolve }); // default fetch, as in worker/index.js
+  const office = new Office({});
+  const hub = new McpHub({ office, auth, token: 'op-token' });
+  const client = new Client({ name: 'test', version: '1' });
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://office.test/mcp'), {
+    fetch: (url, init) => hub.fetch(new Request(url, init)),
+    requestInit: { headers: OP },
+  }));
+  const ch = await call(client, 'atproto_challenge');
+  await assert.rejects(call(client, 'atproto_verify', { handle: 'bot.roost.test', nonce: 'nope' }), /unknown or expired nonce/);
+  at.repo.set(`did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/${ch.collection}/${ch.rkey}`, ch.record);
+  const v = await call(client, 'atproto_verify', { handle: 'bot.roost.test', nonce: ch.nonce });
+  assert.equal(v.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
+  await assert.rejects(call(client, 'atproto_verify', { handle: 'bot.roost.test', nonce: ch.nonce }), /unknown or expired nonce/);
+  const j = await call(client, 'join_office', { name: 'bodhi' });
+  assert.equal(j.signedIn, true);
+  const me = office.summary().online.find((p) => p.name === 'bodhi');
+  assert.equal(me.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
+  // roost_sign_in goes through the same fetch
+  const r = await call(client, 'roost_sign_in', { token: 'rmcp_good', pds: 'https://roost.test' });
+  assert.equal(r.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
+  await client.close();
+});

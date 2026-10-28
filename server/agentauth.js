@@ -28,8 +28,11 @@ const TTL = 10 * 60 * 1000;
 const token = (n) => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(n)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 export class AgentAuth {
-  constructor({ now = () => Date.now(), fetch: f = globalThis.fetch, resolve = defaultResolve, office = 'agent office' } = {}) {
-    Object.assign(this, { now, fetch: f, resolve, office });
+  constructor({ now = () => Date.now(), fetch: f, resolve = defaultResolve, office = 'agent office' } = {}) {
+    // Never keep fetch itself as a method: `this.fetch(...)` would call it
+    // with `this` = AgentAuth, which Workers rejects ("Illegal invocation").
+    const fetchImpl = f || ((...a) => globalThis.fetch(...a));
+    Object.assign(this, { now, fetch: (...a) => fetchImpl(...a), resolve, office });
     this.nonces = new Map(); // nonce -> expiresAt
     this.grants = new Map(); // grant -> { did, handle, expiresAt }
   }
