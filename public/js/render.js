@@ -97,7 +97,9 @@ export function createRenderer(canvas) {
       // An area attached to a freeq channel wears the channel's name.
       const fq = freeq[z.id];
       if (fq) {
-        const tag = `${fq.channel} · freeq${fq.members ? ` · ${fq.members}` : ''}`;
+        // The count is who's drawn here, so it always matches the avatars.
+        const n = fq.here ?? fq.members;
+        const tag = `${fq.channel} · freeq${n ? ` · ${n}` : ''}`;
         const w = ctx.measureText(tag).width + S(0.5);
         ctx.fillStyle = 'rgba(109,40,217,0.82)';
         roundRect(ctx, S(z.x1 + 0.65) - w, S(z.y1 + 0.42), w, S(0.6), S(0.3)); ctx.fill();

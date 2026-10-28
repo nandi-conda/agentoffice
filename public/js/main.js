@@ -365,7 +365,9 @@ function logChat(m) {
   const d = document.createElement('div');
   d.className = `m ${m.scope === 'office' ? 'office' : ''} ${m.mention ? 'mention' : ''}`;
   const scope = m.scope === 'nearby' ? '' : `<span class="sc">${esc(m.scope === 'office' ? '📣 office' : m.scope)}</span>`;
-  d.innerHTML = `${scope}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
+  // Said on freeq while the office wasn't listening, caught up after a restart.
+  const when = m.backfill ? `<span class="missed" title="Said on freeq while the office was away">${esc(new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> ` : '';
+  d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
   pushLog(d);
 }
 function sys(text) {
@@ -659,7 +661,7 @@ function refreshChannels() {
     const sub = [c.zone.name, c.last ? ago(c.last) : c.topic].filter(Boolean).join(' · ');
     return `<li class="${c.zone.id === here ? 'here' : ''}"><button type="button" data-zone="${c.zone.id}" title="${esc(c.topic ? `${c.channel}: ${c.topic}` : c.channel)}. Walk to the ${esc(c.zone.name)}">`
       + `<span class="hash" aria-hidden="true">#</span><span class="who"><b>${live ? '<span class="live" title="Active in the last 5 minutes"></span>' : ''}${esc(c.channel.replace(/^#/, ''))}</b><span>${esc(sub)}</span></span>`
-      + `<span class="members" title="People in the channel">${c.members} 👤</span></button></li>`;
+      + `<span class="members" title="${c.members} in the channel${c.here !== undefined && c.here !== c.members ? `, ${c.here} standing in the ${esc(c.zone.name)} (the rest are drawn in another area they're in)` : ''}">${c.members} 👤</span></button></li>`;
   }).join('');
   $('.channel-list').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => walkToZone(ZONES.find((z) => z.id === b.dataset.zone))));
 }

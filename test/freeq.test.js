@@ -11,8 +11,10 @@ const enc = new TextEncoder();
 function fakeFreeq({ verify }) {
   const conns = new Set();
   const members = new Map(); // channel -> Set(conn)
+  const history = new Map(); // channel -> [{ id, sender, text, timestamp, msgid, tags }]
+  let n = 0;
   const server = {
-    conns, members, sent: [],
+    conns, members, history, sent: [],
     open() {
       const listeners = {};
       const c = { nick: null, buf: '', readyState: 1, account: null };
@@ -59,13 +61,33 @@ function fakeFreeq({ verify }) {
           if (!members.has(ch)) members.set(ch, new Set());
           members.get(ch).add(c);
           for (const o of members.get(ch)) o.out(`:${c.nick}!u@h JOIN ${ch} ${c.account || '*'} :x`);
-          return out(`:irc.freeq.at 353 ${c.nick} = ${ch} :${[...members.get(ch)].map((o) => o.nick).join(' ')}`);
+          out(`:irc.freeq.at 353 ${c.nick} = ${ch} :${[...members.get(ch)].map((o) => o.nick).join(' ')}`);
+          return out(`:irc.freeq.at 366 ${c.nick} ${ch} :End of /NAMES list`);
+        }
+        if (m.command === 'NAMES') {
+          const ch = m.params[0];
+          out(`:irc.freeq.at 353 ${c.nick} = ${ch} :${[...(members.get(ch) || [])].map((o) => o.nick).join(' ')}`);
+          return out(`:irc.freeq.at 366 ${c.nick} ${ch} :End of /NAMES list`);
+        }
+        if (m.command === 'PART') {
+          for (const o of members.get(m.params[0]) || []) o.out(`:${c.nick}!u@h PART ${m.params[0]}`);
+          members.get(m.params[0])?.delete(c);
+          return;
         }
         if (m.command === 'PRIVMSG') {
-          for (const o of members.get(m.params[0]) || []) if (o !== c) o.out(`@account=${c.account} :${c.nick}!u@h PRIVMSG ${m.params[0]} :${m.params[1]}`);
+          const ch = m.params[0], at = new Date(), msgid = `m${++n}`;
+          if (!history.has(ch)) history.set(ch, []);
+          history.get(ch).push({ id: n, sender: c.nick, text: m.params[1], timestamp: Math.floor(at / 1000), msgid, tags: { account: c.account } });
+          for (const o of members.get(ch) || []) if (o !== c) o.out(`@account=${c.account};msgid=${msgid};time=${at.toISOString()} :${c.nick}!u@h PRIVMSG ${ch} :${m.params[1]}`);
         }
       }
       return c;
+    },
+    // freeq's REST API: the channel list and per-channel history.
+    fetch: (list) => async (url) => {
+      const h = String(url).match(/\/channels\/([^/]+)\/history/);
+      if (h) return new Response(JSON.stringify([...(history.get(decodeURIComponent(h[1])) || [])].reverse()));
+      return new Response(JSON.stringify(list));
     },
     // Someone on freeq (not the office) talks.
     outsider(nick, did) {
@@ -73,6 +95,7 @@ function fakeFreeq({ verify }) {
       c.nick = nick; c.account = did;
       return {
         join: (ch) => c.socket.send(`JOIN ${ch}`),
+        part: (ch) => c.socket.send(`PART ${ch}`),
         say: (ch, text) => c.socket.send(`PRIVMSG ${ch} :${text}`),
       };
     },
@@ -312,4 +335,120 @@ test('a listener sign-in that never finishes gives up, says why, and retries', a
   bridge.presence();
   assert.equal(opened, 1);
   bridge.stop();
+});
+
+test('after a restart, only real comings and goings show, and missed messages are caught up', async () => {
+  const server = fakeFreeq({ verify: async () => true });
+  const list = [{ name: '#general', members: 3 }];
+  let jwk = null, snap = null;
+  const keyStore = { get: async () => jwk, set: async (j) => { jwk = j; } };
+  const stateStore = { get: async () => snap && JSON.parse(JSON.stringify(snap)), set: async (s) => { snap = s; } };
+  const bob = server.outsider('bob', 'did:plc:bob');
+  const carol = server.outsider('carol', 'did:plc:carol');
+  bob.join('#general'); carol.join('#general');
+
+  // Before: Alice is in the Lounge with bob and carol.
+  const office1 = new Office({}, { loadActor: null });
+  const bridge1 = new FreeqBridge({ office: office1, log: () => {}, keyStore, stateStore, openSocket: async () => server.open().socket, fetch: server.fetch(list) });
+  const a1 = office1.open({ readyState: 1, send() {} });
+  await office1.handle(a1, { t: 'hello', name: 'Alice' });
+  await bridge1.start();
+  await tick();
+  assert.equal(bridge1.bindings.get('lounge')?.channel, '#general');
+  bob.say('#general', 'before the restart');
+  await tick();
+  const before = Object.fromEntries([...office1.peers.values()].filter((p) => p.kind === 'freeq').map((p) => [p.name, { x: p.x, y: p.y }]));
+  assert.deepEqual(Object.keys(before).sort(), ['bob', 'carol']);
+  await bridge1.saver.now();
+
+  // The process dies (no goodbye), and while it's down carol leaves, dave comes, bob talks.
+  bridge1.saver.cancel(); clearInterval(bridge1.refreshTimer);
+  bridge1.listener.onClose = () => {}; bridge1.listener.ws.close();
+  carol.part('#general');
+  const dave = server.outsider('dave', 'did:plc:dave');
+  dave.join('#general');
+  bob.say('#general', 'said while you were away');
+
+  // After: a fresh office, Alice back in the Lounge.
+  const office2 = new Office({}, { loadActor: null });
+  const said = [];
+  const a2 = office2.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) });
+  await office2.handle(a2, { t: 'hello', name: 'Alice' });
+  a2.x = 36; a2.y = 25; // Lounge
+  const bridge2 = new FreeqBridge({ office: office2, log: () => {}, keyStore, stateStore, openSocket: async () => server.open().socket, fetch: server.fetch(list) });
+  await bridge2.restored;
+  // bob and carol are back where they stood, before freeq has said anything.
+  const drawn = () => [...office2.peers.values()].filter((p) => p.kind === 'freeq');
+  assert.deepEqual(drawn().map((p) => p.name).sort(), ['bob', 'carol']);
+  const bobPeer = drawn().find((p) => p.name === 'bob');
+  assert.deepEqual({ x: bobPeer.x, y: bobPeer.y }, before.bob);
+
+  said.length = 0;
+  await bridge2.start();
+  for (let i = 0; i < 20 && !said.some((m) => m.t === 'chat'); i++) await tick();
+  const names = (t) => said.filter((m) => m.t === t).map((m) => (t === 'join' ? m.peer.name : office2.peers.get(m.id)?.name ?? m.id));
+  assert.deepEqual(names('join'), ['dave']); // only the real arrival
+  assert.equal(said.filter((m) => m.t === 'leave').length, 1); // only carol
+  assert.ok(!office2.peers.has(drawn().find((p) => p.name === 'carol')?.id));
+  assert.deepEqual(drawn().map((p) => p.name).sort(), ['bob', 'dave']);
+  assert.ok(office2.peers.has(bobPeer.id), 'bob is the same avatar, never redrawn');
+
+  // The message said during the gap is caught up once; the earlier one isn't replayed.
+  const chats = said.filter((m) => m.t === 'chat');
+  assert.deepEqual(chats.map((m) => m.text), ['said while you were away']);
+  assert.equal(chats[0].backfill, true);
+  assert.equal(chats[0].id, bobPeer.id);
+
+  // The area's count is who's drawn there.
+  await new Promise((r) => setTimeout(r, 300));
+  const rooms = said.filter((m) => m.t === 'freeq').pop().rooms;
+  assert.equal(rooms.lounge.members, 2);
+  assert.equal(rooms.lounge.here, 2);
+
+  // Someone who vanished without a PART we heard is gone after the next NAMES.
+  const room = server.members.get('#general');
+  room.delete([...room].find((c) => c.nick === 'dave'));
+  await bridge2.refresh();
+  await tick();
+  assert.deepEqual(drawn().map((p) => p.name), ['bob']);
+  bridge2.stop();
+});
+
+test('the office works the same when freeq is unreachable', async () => {
+  const snap = {
+    v: 1, at: Date.now(),
+    bindings: { lounge: { channel: '#general', topic: null, members: 2 } },
+    people: [{ nick: 'bob', channels: ['#general'], active: '#general', zone: 'lounge', x: 35, y: 25 }],
+    seen: { '#general': { ts: 1, ids: [] } },
+  };
+  const office = new Office({}, { loadActor: null });
+  const logs = [];
+  const bridge = new FreeqBridge({
+    office, log: (l) => logs.push(l), graceMs: 40, signInMs: 20,
+    keyStore: { get: async () => null, set: async () => {} },
+    stateStore: { get: async () => snap, set: async () => { throw new Error('disk full'); } },
+    openSocket: async () => { throw new Error('getaddrinfo ENOTFOUND irc.freeq.at'); },
+    fetch: async () => { throw new Error('fetch failed'); },
+  });
+  await bridge.restored;
+  const said = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) });
+  // Joining doesn't wait on freeq.
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  assert.ok(said.some((m) => m.t === 'welcome'));
+  // Talking outside the freeq areas is untouched.
+  await office.handle(me, { t: 'chat', text: 'still here' });
+  assert.ok(said.some((m) => m.t === 'chat' && m.text === 'still here'));
+  await tick();
+  const st = bridge.status();
+  assert.equal(st.listening, false);
+  assert.match(st.lastError, /ENOTFOUND/);
+  // Nobody is left standing around from before once the grace period ends.
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(![...office.peers.values()].some((p) => p.kind === 'freeq'));
+  assert.deepEqual(said.filter((m) => m.t === 'freeq').pop().rooms, {});
+  bridge.stop();
+  // A snapshot that can't be written is logged, not thrown.
+  await bridge.saver.now();
+  assert.ok(logs.some((l) => /couldn't save the snapshot: disk full/.test(l)));
 });

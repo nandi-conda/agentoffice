@@ -81,6 +81,12 @@ export class OfficeRoom extends DurableObject {
           get: async () => { const row = this.sql.exec("SELECT v FROM meta WHERE k = 'freeq-key'").toArray()[0]; return row && JSON.parse(row.v); },
           set: async (jwk) => { this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('freeq-key', ?)", JSON.stringify(jwk)); },
         },
+        // Who was in which channel and the last message heard, so a restart
+        // doesn't redraw everyone and missed messages get caught up.
+        stateStore: {
+          get: async () => { const row = this.sql.exec("SELECT v FROM meta WHERE k = 'freeq-state'").toArray()[0]; return row && JSON.parse(row.v); },
+          set: async (snap) => { this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('freeq-state', ?)", JSON.stringify(snap)); },
+        },
       });
     }
 

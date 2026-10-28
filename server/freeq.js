@@ -17,6 +17,7 @@
 // fetch upgrade inside the Durable Object).
 
 import { ZONES, isBlocked } from '../public/js/map.js';
+import { Seen, Saver, missedSince, tagSeconds, usable, SNAPSHOT_VERSION } from './freeq-sync.js';
 
 export const FREEQ_URL = 'wss://irc.freeq.at/irc';
 // Open areas a channel can be attached to, in the order they fill up.
@@ -28,6 +29,9 @@ const REFRESH_MS = 5 * 60 * 1000;
 const IDLE_CLOSE_MS = 2 * 60 * 1000; // listener hangs up this long after the office empties
 const USER_IDLE_MS = 30 * 60 * 1000;
 const SIGN_IN_MS = 20 * 1000; // give up on a listener sign-in freeq doesn't finish
+// After a restart or a dropped listener, people stay drawn this long while
+// freeq is asked who's really still there; then whoever wasn't confirmed goes.
+const STALE_MS = 3 * 60 * 1000;
 
 // A promise that rejects with `why` if `p` takes longer than `ms`.
 const within = (p, ms, why) => {
@@ -271,10 +275,15 @@ function spotIn(zone, taken) {
 
 export class FreeqBridge {
   // office: the Office. auth: has freeqCredentials(did) (see auth.js).
-  // keyStore: { get(), set(jwk) } for the listener's key. rooms: optional
-  // fixed "zone=#channel,…" mapping instead of picking populated channels.
-  constructor({ office, auth, openSocket, keyStore, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS }) {
-    Object.assign(this, { office, auth, openSocket, keyStore, url, minMembers, log, signInMs });
+  // keyStore: { get(), set(jwk) } for the listener's key. stateStore:
+  // optional { get(), set(obj) } for the snapshot that survives restarts (see
+  // freeq-sync.js). rooms: optional fixed "zone=#channel,…" mapping instead of
+  // picking populated channels.
+  //
+  // The office never waits on freeq: nothing here is awaited by joins, chat
+  // or sign-in, and when freeq is unreachable the areas just stay plain.
+  constructor({ office, auth, openSocket, keyStore, stateStore = null, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS, graceMs = STALE_MS }) {
+    Object.assign(this, { office, auth, openSocket, keyStore, stateStore, url, minMembers, log, signInMs, graceMs });
     // Wrapped: calling a stored fetch as this.fetch() throws "Illegal invocation" on Workers.
     this.fetch = (...a) => fetchImpl(...a);
     this.api = url.replace(/^ws/, 'http').replace(/\/irc\/?$/, '');
@@ -283,8 +292,10 @@ export class FreeqBridge {
     this.listener = null;
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
     this.users = new Map(); // office DID -> { irc, ready, used }
-    this.timers = [];
+    this.seen = new Seen();
+    this.saver = new Saver(stateStore, () => this.snapshot(), { log });
     office.freeq = this;
+    this.restored = this.restore();
   }
 
   // ---- lifecycle: the listener only runs while somebody is in the office ----
@@ -306,6 +317,7 @@ export class FreeqBridge {
     this.starting = true;
     let irc = null;
     try {
+      await this.restored;
       const identity = await loadIdentity(this.keyStore);
       irc = new IrcClient({
         url: this.url, openSocket: this.openSocket, nick: 'agentoffice', respond: cryptoResponder(identity),
@@ -364,18 +376,114 @@ export class FreeqBridge {
     l?.close('office closed for the night');
     for (const u of this.users.values()) u.irc.close();
     this.users.clear();
-    for (const zoneId of [...this.bindings.keys()]) this.unbind(zoneId);
+    this.unbindAll();
+    this.saver.now();
   }
 
+  unbindAll() {
+    clearTimeout(this.staleTimer); this.staleTimer = null;
+    for (const zoneId of [...this.bindings.keys()]) this.unbind(zoneId);
+    this.announce();
+  }
+
+  // Lost freeq for a moment (a dropped connection): keep everyone where they
+  // stand and ask again once the listener is back, rather than emptying the
+  // areas and filling them up again.
   onListenerClosed(irc, why) {
     if (this.listener !== irc) return;
     this.log(`freeq: listener disconnected (${why})`);
     this.listener = null;
     this.lastError = `listener disconnected: ${why}`;
     clearInterval(this.refreshTimer); this.refreshTimer = null;
-    for (const zoneId of [...this.bindings.keys()]) this.unbind(zoneId);
+    this.markStale();
     // Come back if people are still here.
     this.retry();
+  }
+
+  // ---- surviving restarts (see freeq-sync.js) ------------------------------
+
+  snapshot() {
+    return {
+      v: SNAPSHOT_VERSION, at: Date.now(),
+      bindings: Object.fromEntries([...this.bindings].map(([z, b]) => [z, { channel: b.channel, topic: b.topic, members: b.members, last: b.last || null }])),
+      people: [...this.people.values()].filter((f) => f.peer).map((f) => ({
+        nick: f.nick, channels: [...f.channels.values()], active: f.active, zone: f.peer.freeqZone, x: f.peer.x, y: f.peer.y,
+        did: f.peer.did || null, handle: f.peer.handle || null, actor: f.peer.actor || null,
+      })),
+      seen: this.seen.toJSON(),
+    };
+  }
+
+  // Put back what the office looked like before a restart: the areas'
+  // channels and the people standing in them, all unconfirmed until freeq
+  // says who's still there.
+  async restore() {
+    if (!this.stateStore) return;
+    let snap = null;
+    try { snap = await this.stateStore.get(); } catch (e) { return this.failed(e); }
+    if (!snap) return;
+    this.seen = new Seen(snap.seen);
+    if (!usable(snap) || this.bindings.size || this.people.size) return;
+    for (const [zoneId, b] of Object.entries(snap.bindings || {})) {
+      if (zoneById[zoneId] && b?.channel) this.bindings.set(zoneId, { channel: b.channel, topic: b.topic || null, members: b.members || 0, last: b.last || null });
+    }
+    for (const r of snap.people || []) {
+      const channels = (r.channels || []).filter((ch) => this.zoneFor(ch));
+      if (!r.nick || !channels.length || !zoneById[r.zone] || this.people.has(lower(r.nick))) continue;
+      const f = { nick: r.nick, channels: new Map(channels.map((c) => [lower(c), c])), active: channels.includes(r.active) ? r.active : channels[0], peer: null };
+      f.peer = this.office.addRemote({ name: r.nick, kind: 'freeq', x: r.x, y: r.y, freeqZone: r.zone, did: r.did || null, handle: r.handle || null, actor: r.actor || null });
+      this.people.set(lower(r.nick), f);
+      this.describe(f);
+    }
+    if (this.bindings.size) this.log(`freeq: restored ${this.bindings.size} channel(s) and ${this.people.size} people from before the restart`);
+    this.markStale();
+    this.announce();
+  }
+
+  // Everyone drawn is unconfirmed until freeq's NAMES lists them again.
+  markStale() {
+    for (const f of this.people.values()) f.stale = new Set(f.channels.keys());
+    for (const b of this.bindings.values()) b.named = false;
+    clearTimeout(this.staleTimer);
+    this.staleTimer = this.people.size || this.bindings.size ? setTimeout(() => this.expireStale(), this.graceMs) : null;
+  }
+
+  // The grace period ran out. Without a listener the areas go plain;
+  // otherwise only the people freeq never confirmed leave.
+  expireStale() {
+    this.staleTimer = null;
+    if (!this.listener?.registered) return this.unbindAll();
+    for (const f of [...this.people.values()]) for (const key of [...(f.stale || [])]) { f.stale.delete(key); this.dropChannel(f.nick, f.channels.get(key) || key); }
+    this.announce();
+  }
+
+  // End of NAMES for a channel: whoever we still had down as there but
+  // freeq didn't list has left. Then catch up on what was said meanwhile.
+  settle(channel) {
+    const key = lower(channel);
+    for (const f of [...this.people.values()]) {
+      if (f.stale?.delete(key)) this.dropChannel(f.nick, channel);
+    }
+    const b = this.bindings.get(this.zoneFor(channel));
+    if (b) b.named = true;
+    this.announce();
+    this.saver.soon();
+    if (this.listener && !this.listener.caughtUp?.has(key)) {
+      (this.listener.caughtUp ||= new Set()).add(key);
+      this.backfill(channel).catch((e) => this.failed(e));
+    }
+  }
+
+  // Messages said in a channel while the office wasn't listening, from
+  // freeq's public REST history, played into the area as catch-up.
+  async backfill(channel) {
+    const seen = this.seen.get(channel);
+    if (!seen) return;
+    const r = await this.fetch(`${this.api}/api/v1/channels/${encodeURIComponent(channel)}/history?limit=100`, { headers: { accept: 'application/json' } });
+    if (!r.ok) throw new Error(`freeq history for ${channel}: HTTP ${r.status}`);
+    const missed = missedSince(await r.json(), seen, { recent: this.seen.recent });
+    for (const m of missed) this.heard(channel, m.sender, m.tags?.account || null, m.text, { ts: Number(m.timestamp), msgid: m.msgid || null, backfill: true });
+    if (missed.length) this.log(`freeq: caught up on ${missed.length} message(s) in ${channel}`);
   }
 
   // ---- which channels go where ---------------------------------------------
@@ -391,8 +499,14 @@ export class FreeqBridge {
     const list = await this.channels();
     this.apply(this.plan(list));
     // Ask who's there rather than counting on the reply to JOIN; it also
-    // brings back anyone missed, e.g. after a restart.
-    for (const b of this.bindings.values()) this.listener?.send(`NAMES ${b.channel}`);
+    // brings back anyone missed, e.g. after a restart. Whoever we have down
+    // as in the channel but the reply doesn't list has left (see settle()).
+    for (const b of this.bindings.values()) {
+      const key = lower(b.channel);
+      for (const f of this.people.values()) if (f.channels.has(key)) (f.stale ||= new Set()).add(key);
+      this.listener?.send(`NAMES ${b.channel}`);
+    }
+    this.saver.soon(); // keeps the snapshot fresh enough to restore from
   }
 
   // Pick channels for areas. Our own connections don't count as people.
@@ -429,9 +543,11 @@ export class FreeqBridge {
     }
     for (const [zoneId, c] of plan) {
       const cur = this.bindings.get(zoneId);
+      // (Re)joining is a no-op when already in it; after a restart it's how
+      // restored areas get their NAMES.
+      this.listener?.join(c.channel);
       if (cur) { cur.members = c.members; cur.topic = c.topic; continue; }
       this.bindings.set(zoneId, { ...c });
-      this.listener?.join(c.channel);
       this.log(`freeq: ${c.channel} → ${zoneById[zoneId].name}`);
     }
     this.announce();
@@ -451,15 +567,30 @@ export class FreeqBridge {
     return null;
   }
 
-  // What clients see: area -> channel.
+  // What clients see: area -> channel. `members` counts the freeq people we
+  // know are in the channel (from NAMES, so it matches who's drawn; freeq's
+  // channel list count until NAMES arrives), `here` the ones standing in the area.
   state() {
-    return Object.fromEntries([...this.bindings].map(([z, b]) => [z, { channel: b.channel, members: b.members, topic: b.topic, last: b.last || null }]));
+    const people = [...this.people.values()];
+    return Object.fromEntries([...this.bindings].map(([z, b]) => {
+      const known = people.filter((f) => f.channels.has(lower(b.channel))).length;
+      const here = people.filter((f) => f.peer?.freeqZone === z).length;
+      return [z, { channel: b.channel, members: b.named || known ? known : b.members, here, topic: b.topic, last: b.last || null }];
+    }));
+  }
+
+  // People came, went or moved between areas: tell clients (once per burst).
+  changed() {
+    this.saver.soon();
+    if (this.announceTimer) return;
+    this.announceTimer = setTimeout(() => { this.announceTimer = null; this.announce(); }, 250);
   }
 
   // Someone spoke in a channel. Clients show "active 2m ago", so a fresh
   // timestamp only needs to go out when the shown value would change.
-  touch(b) {
-    const now = Date.now(), stale = !b.last || now - b.last > 30000;
+  touch(b, at = Date.now()) {
+    if (b.last && at <= b.last) return;
+    const now = at, stale = !b.last || now - b.last > 30000;
     b.last = now;
     if (stale) this.announce();
   }
@@ -485,9 +616,12 @@ export class FreeqBridge {
     if (!zoneId || !nick || this.isOurs(nick, account)) return null;
     let f = this.people.get(lower(nick));
     if (!f) this.people.set(lower(nick), f = { nick, channels: new Map(), active: null, peer: null });
+    const added = !f.channels.has(lower(channel));
     f.channels.set(lower(channel), channel);
+    f.stale?.delete(lower(channel));
     if (!f.peer) this.place(f, channel);
     else this.describe(f);
+    if (added) this.changed();
     if (f.peer && account && account.startsWith('did:') && !f.peer.did) this.office.identifyRemote(f.peer, account);
     return f.peer;
   }
@@ -510,6 +644,7 @@ export class FreeqBridge {
       } else {
         f.peer = this.office.addRemote({ name: f.nick, kind: 'freeq', ...at, freeqZone: zoneId });
       }
+      this.changed();
       return this.describe(f);
     }
     // Nowhere to stand: don't leave them in an area that's no longer theirs.
@@ -530,6 +665,8 @@ export class FreeqBridge {
   dropChannel(nick, channel) {
     const f = this.people.get(lower(nick));
     if (!f || !f.channels.delete(lower(channel))) return;
+    f.stale?.delete(lower(channel));
+    this.changed();
     if (!f.channels.size) {
       this.people.delete(lower(nick));
       if (f.peer) this.office.removeRemote(f.peer);
@@ -547,12 +684,13 @@ export class FreeqBridge {
         for (const n of (m.params[3] || '').split(' ')) if (n) this.person(channel, n.replace(/^[~&@%+]+/, ''), null);
         return;
       }
+      case '366': return this.settle(m.params[1]); // end of NAMES
       case 'JOIN': return void this.person(m.params[0], m.nick, account || (m.params[1] && m.params[1] !== '*' ? m.params[1] : null));
       case 'PART': return this.dropChannel(m.nick, m.params[0]);
       case 'KICK': return this.dropChannel(m.params[1], m.params[0]);
       case 'QUIT': {
         const f = this.people.get(lower(m.nick));
-        if (f) { this.people.delete(lower(m.nick)); if (f.peer) this.office.removeRemote(f.peer); }
+        if (f) { this.people.delete(lower(m.nick)); if (f.peer) this.office.removeRemote(f.peer); this.changed(); }
         return;
       }
       case 'NICK': {
@@ -571,20 +709,34 @@ export class FreeqBridge {
       }
       case 'PRIVMSG': {
         const [channel, text] = m.params;
-        if (!channel?.startsWith('#') || this.isOurs(m.nick, account)) return;
-        const zoneId = this.zoneFor(channel);
-        if (!zoneId || !text) return;
-        this.person(channel, m.nick, account);
-        // Speaking somewhere makes it where they are.
-        const f = this.people.get(lower(m.nick));
-        if (f && lower(f.active) !== lower(channel)) this.place(f, channel);
-        const action = text.match(/^\u0001ACTION (.*)\u0001$/);
-        if (/^\u0001/.test(text) && !action) return; // other CTCP
-        this.touch(this.bindings.get(zoneId));
-        this.office.remoteChat({ zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: m.nick, text: action ? `* ${m.nick} ${action[1]}` : text });
-        return;
+        if (!channel?.startsWith('#') || !text) return;
+        return this.heard(channel, m.nick, account, text, { ts: tagSeconds(m.tags.time), msgid: m.tags.msgid || null });
       }
     }
+  }
+
+  // A channel message, live or (backfill) from history after a restart.
+  heard(channel, nick, account, text, { ts, msgid = null, backfill = false }) {
+    // Remember it even when it's ours, so catch-up never replays it.
+    if (!this.seen.hear(channel, ts, msgid)) return;
+    this.saver.soon();
+    if (!nick || this.isOurs(nick, account)) return;
+    const zoneId = this.zoneFor(channel);
+    if (!zoneId) return;
+    const action = text.match(/^\u0001ACTION (.*)\u0001$/);
+    if (/^\u0001/.test(text) && !action) return; // other CTCP
+    let f = this.people.get(lower(nick));
+    if (!backfill) {
+      this.person(channel, nick, account);
+      // Speaking somewhere makes it where they are.
+      f = this.people.get(lower(nick));
+      if (f && lower(f.active) !== lower(channel)) this.place(f, channel);
+    }
+    this.touch(this.bindings.get(zoneId), backfill ? ts * 1000 : Date.now());
+    this.office.remoteChat({
+      zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: nick,
+      text: action ? `* ${nick} ${action[1]}` : text, ...(backfill ? { ts: ts * 1000, backfill: true } : {}),
+    });
   }
 
   // ---- office people talking on freeq --------------------------------------

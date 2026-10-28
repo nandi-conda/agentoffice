@@ -300,8 +300,9 @@ export class Office {
   }
 
   // A line from a freeq channel, heard by everyone in the area it's attached to.
-  remoteChat({ zoneId, channel, peer, name, text }) {
-    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: this.now(), scope: channel, freeq: true };
+  // `backfill` lines were said while the office wasn't listening (`ts` is when).
+  remoteChat({ zoneId, channel, peer, name, text, ts = null, backfill = false }) {
+    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(backfill ? { backfill: true } : {}) };
     const tags = mentionTags(msg.text);
     for (const q of this.peers.values()) {
       if (!q.ready || q.kind === 'freeq') continue;

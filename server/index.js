@@ -121,6 +121,7 @@ const mcp = new McpHub({ office, auth: agents });
 // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
 if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
   const keyFile = path.join(DATA_DIR, 'freeq-key.json');
+  const stateFile = path.join(DATA_DIR, 'freeq-state.json');
   new FreeqBridge({
     office, auth,
     url: process.env.FREEQ_URL || FREEQ_URL,
@@ -130,6 +131,12 @@ if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
     keyStore: {
       get: async () => { try { return JSON.parse(await readFile(keyFile, 'utf8')); } catch { return null; } },
       set: async (jwk) => { await mkdir(DATA_DIR, { recursive: true }); await writeFile(keyFile, JSON.stringify(jwk), { mode: 0o600 }); },
+    },
+    // Who was in which channel and the last message heard, so a restart
+    // doesn't redraw everyone and missed messages get caught up.
+    stateStore: {
+      get: async () => { try { return JSON.parse(await readFile(stateFile, 'utf8')); } catch { return null; } },
+      set: async (snap) => { await mkdir(DATA_DIR, { recursive: true }); await writeFile(stateFile, JSON.stringify(snap)); },
     },
   });
 }
