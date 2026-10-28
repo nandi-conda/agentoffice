@@ -192,12 +192,17 @@ async function loadAccount() {
   // lasts 30 days, so a refresh walks straight back in.
   if (account) enter();
 }
-$('.signout').addEventListener('click', async () => {
+async function signOut() {
   await fetch('/oauth/logout', { method: 'POST' }).catch(() => {});
   account = null;
   store.set('handle', '');
   location.reload();
-});
+}
+$('.signout').addEventListener('click', signOut);
+// Fresh OAuth round trip for the same handle (or DID), e.g. when freeq needs a new session.
+function signInAgain() {
+  location.href = `/oauth/login?handle=${encodeURIComponent(me?.handle || account?.handle || me?.did || '')}`;
+}
 updateEnter();
 const accountReady = loadAccount();
 
@@ -351,7 +356,12 @@ function onMessage(m) {
     }
     case 'toast': toast(esc(m.text)); break;
     // How the freeq bridge is doing for you: a line in the chat log, and a toast when something failed.
-    case 'freeq-note': sys(`${m.ok ? '💬' : '⚠️'} ${m.text}`); if (!m.ok) toast(`⚠️ ${esc(m.text)}`); break;
+    case 'freeq-note': {
+      sys(`${m.ok ? '💬' : '⚠️'} ${m.text}`);
+      // A lost or expired sign-in: one click goes back through your PDS and returns here.
+      if (!m.ok) toast(`⚠️ ${esc(m.text)}`, /sign in again/i.test(m.text) && me?.did ? [['Sign in again', signInAgain]] : [], 10000);
+      break;
+    }
     case 'rtc': voice.onSignal(m.from, m.data); break;
     case 'error': toast(`⚠️ ${esc(m.message)}`); break;
     case 'replaced': toast(esc(m.text)); break;
@@ -723,6 +733,10 @@ function openProfile(p) {
         ${desk ? `<p class="small">🪑 Desk: ${esc(desk[0])}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
         ${p.actor?.description ? `<p class="bio small muted${isTextArt(p.actor.description) ? ' art' : ''}">${esc(p.actor.description)}</p>` : ''}
         ${systems ? `<p class="small"><b>Character sheets:</b> ${systems}</p><div class="stats">${stats.join('')}</div>` : ''}
+        ${p === me ? `<div class="row">
+          ${me.did ? `<button class="btn act-relogin" title="Go through your PDS again, e.g. if freeq says to">Sign in again</button>
+          <button class="btn ghost act-signout">Sign out</button>` : `<button class="btn primary act-signout">Sign in…</button>`}
+        </div>` : ''}
         ${p !== me ? `<div class="row">
           <button class="btn primary act-wave">👋 Wave</button>
           <button class="btn act-walk">Walk over</button>
@@ -738,6 +752,8 @@ function openProfile(p) {
     net.send({ t: 'wave', to: p.id, kind: z?.kind === 'room' && zoneAt(me.x, me.y) !== z ? 'knock' : 'wave' });
     modal.close();
   });
+  modal.body.querySelector('.act-relogin')?.addEventListener('click', signInAgain);
+  modal.body.querySelector('.act-signout')?.addEventListener('click', signOut);
   modal.body.querySelector('.act-walk')?.addEventListener('click', () => { walkTo(p.x, p.y); modal.close(); });
   modal.body.querySelector('.act-follow')?.addEventListener('click', () => { follow = follow === p.id ? null : p.id; modal.close(); });
   modal.body.querySelector('.act-mention')?.addEventListener('click', () => {

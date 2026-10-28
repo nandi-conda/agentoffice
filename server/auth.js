@@ -182,7 +182,10 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
     // `nonce` is the PDS's DPoP nonce when freeq has relayed one.
     async freeqCredentials(did, nonce = null) {
       let session;
-      try { session = await client.restore(did); } catch { throw new Error('sign in again to talk on freeq'); }
+      try { session = await client.restore(did); } catch (e) {
+        // Usually: no stored session (signed in before sessions were kept), or the refresh token expired.
+        throw new Error(`sign in again to talk on freeq (${reason(e) || 'no saved sign-in'})`);
+      }
       const pds = (await session.getTokenInfo()).aud.replace(/\/$/, '');
       const url = `${pds}/xrpc/com.atproto.server.getSession`;
       if (!nonce) {
