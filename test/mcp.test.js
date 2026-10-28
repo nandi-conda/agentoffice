@@ -46,17 +46,21 @@ async function setup() {
   const at = fakeAtproto();
   const auth = new AgentAuth({ fetch: at.fetch, resolve: at.resolve });
   const office = new Office({});
-  const hub = new McpHub({ office, auth, token: '' });
-  const connect = async () => {
+  const hub = new McpHub({ office, auth, token: 'op-token' });
+  // headers: e.g. { authorization: 'Bearer rmcp_good' }; none = read-only.
+  const connect = async (headers = {}) => {
     const client = new Client({ name: 'test', version: '1' });
     const transport = new StreamableHTTPClientTransport(new URL('http://office.test/mcp'), {
       fetch: (url, init) => hub.fetch(new Request(url, init)),
+      requestInit: { headers },
     });
     await client.connect(transport);
     return client;
   };
   return { at, auth, office, hub, connect };
 }
+
+const OP = { authorization: 'Bearer op-token' };
 
 const call = async (client, name, args = {}) => {
   const r = await client.callTool({ name, arguments: args });
@@ -69,7 +73,7 @@ test('tools cover the whole client protocol', async () => {
   const { connect } = await setup();
   const c = await connect();
   const names = (await c.listTools()).tools.map((t) => t.name);
-  for (const t of ['join_office', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'send', 'read_events', 'walk_to', 'look', 'roost_signup', 'roost_sign_in', 'atproto_challenge', 'atproto_verify']) {
+  for (const t of ['join_office', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'send', 'whoami', 'read_events', 'walk_to', 'look', 'roost_signup', 'roost_sign_in', 'atproto_challenge', 'atproto_verify']) {
     assert.ok(names.includes(t), `missing ${t}`);
   }
   await c.close();
@@ -82,7 +86,7 @@ test('an MCP agent joins, chats and hears people', async () => {
   human.msg({ t: 'hello', name: 'ada' });
   await tick();
 
-  const c = await connect();
+  const c = await connect(OP);
   const logs = [];
   c.setNotificationHandler(LoggingMessageNotificationSchema, (n) => logs.push(n.params.data));
   const j = await call(c, 'join_office', { name: 'Helper Bot', note: 'helping' });
@@ -108,7 +112,7 @@ test('an MCP agent joins, chats and hears people', async () => {
 
 test('read_events long-polls until something happens', async () => {
   const { office, connect } = await setup();
-  const c = await connect();
+  const c = await connect(OP);
   await call(c, 'join_office', { name: 'waiter' });
   const first = await call(c, 'read_events', { wait_seconds: 0 });
   const human = new FakeWs();
@@ -156,15 +160,48 @@ test('places resolve to coordinates', () => {
   assert.equal(resolvePlace('narnia'), null);
 });
 
-test('MCP_TOKEN guards the endpoint', async () => {
-  const hub = new McpHub({ office: new Office(), auth: new AgentAuth(), token: 's3cret' });
-  const r = await hub.fetch(new Request('http://x/mcp', { method: 'POST', body: '{}' }));
+test('without credentials a session is a read-only observer', async () => {
+  const { office, connect } = await setup();
+  const c = await connect();
+  const who = await call(c, 'whoami');
+  assert.equal(who.canAct, false);
+  await assert.rejects(call(c, 'join_office', { name: 'sneaky' }), /Read-only until you sign in/);
+  await assert.rejects(call(c, 'chat', { text: 'hi' }), /join_office first/);
+  const { next } = await call(c, 'read_events', { wait_seconds: 0 });
+  const human = new FakeWs();
+  office.connect(human);
+  human.msg({ t: 'hello', name: 'grace' });
+  const r = await call(c, 'read_events', { since: next, wait_seconds: 2 });
+  assert.ok(r.events.some((e) => e.type === 'join' && e.name === 'grace'));
+  const look = await call(c, 'look');
+  assert.equal(look.you.observer, true);
+  assert.equal(look.people[0].name, 'grace');
+  human.emit('close');
+  const r2 = await call(c, 'read_events', { since: r.next, wait_seconds: 2 });
+  assert.ok(r2.events.some((e) => e.type === 'leave' && e.name === 'grace'));
+  await c.close();
+});
+
+test('a Roost token in the Authorization header signs the session in', async () => {
+  const { connect, office } = await setup();
+  const c = await connect({ authorization: 'Bearer rmcp_good', 'x-atproto-pds': 'https://roost.test' });
+  assert.equal((await call(c, 'whoami')).identity.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
+  await call(c, 'join_office', { name: 'headerbot' });
+  assert.equal(office.summary().online.find((p) => p.name === 'headerbot').did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa');
+  await c.close();
+  await assert.rejects(connect({ authorization: 'Bearer rmcp_bad', 'x-atproto-pds': 'https://roost.test' }));
+});
+
+test('a wrong bearer is refused at initialize', async () => {
+  const hub = new McpHub({ office: new Office(), auth: new AgentAuth({ fetch: async () => new Response('no', { status: 401 }) }), token: 's3cret' });
+  const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } };
+  const r = await hub.fetch(new Request('http://x/mcp', { method: 'POST', headers: { authorization: 'Bearer nope', 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify(init) }));
   assert.equal(r.status, 401);
 });
 
 test('agents book, list and cancel meeting rooms over MCP', async () => {
   const { office, connect } = await setup();
-  const c = await connect();
+  const c = await connect(OP);
   await call(c, 'join_office', { name: 'Sched Bot' });
   const start = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const { booked } = await call(c, 'book_room', { room: 'huddle', title: 'Retro', start, minutes: 45, invitees: ['ada.bsky.social'], lock: true });

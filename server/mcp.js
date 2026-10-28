@@ -26,9 +26,10 @@ import { isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema }
 import { AgentClient } from '../scripts/agent-sdk.mjs';
 import { ZONES, FURNITURE, SEATS, DESKS, zoneAt, canHear, SPAWN } from '../public/js/map.js';
 import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
-import { ROOMS } from '../public/js/rooms.js';
+import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'ping'];
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 const MAX_EVENTS = 300;
 const IDLE_MS = 10 * 60 * 1000; // drop agents that stop calling in
 const later = (fn) => setTimeout(fn, 0);
@@ -56,12 +57,13 @@ const fail = (msg) => ({ content: [{ type: 'text', text: msg }], isError: true }
 const round = (n) => Math.round(n * 10) / 10;
 
 // Compact what the model sees; whiteboard strokes are summarised.
-function shapeEvent(m, client) {
-  const name = (id) => client.peers.get(id)?.name || (id === client.me?.id ? 'you' : id);
+// `client` is null for read-only observers, who see office-wide broadcasts.
+function shapeEvent(m, client, office) {
+  const name = (id) => client?.peers.get(id)?.name || (id === client?.me?.id ? 'you' : office.peers.get(id)?.name || id);
   switch (m.t) {
-    case 'chat': return { type: 'chat', from: m.name, fromId: m.id, text: m.text, scope: m.scope, mention: !!(m.mention || client.mentions(m.text)) };
+    case 'chat': return { type: 'chat', from: m.name, fromId: m.id, text: m.text, scope: m.scope, mention: !!(m.mention || client?.mentions(m.text)) };
     case 'join': return { type: 'join', id: m.peer.id, name: m.peer.name, kind: m.peer.kind, handle: m.peer.handle, did: m.peer.did };
-    case 'leave': return { type: 'leave', id: m.id, name: client.lastNames.get(m.id) || m.id };
+    case 'leave': return { type: 'leave', id: m.id, name: client?.lastNames.get(m.id) || m.lastName || m.id };
     case 'move': return { type: 'move', id: m.id, name: name(m.id), x: round(m.x), y: round(m.y), seat: m.seat, zone: zoneAt(m.x, m.y)?.id };
     case 'wb': return m.op === 'clear' ? { type: 'wb', op: 'clear' } : { type: 'wb', op: 'stroke', by: m.stroke?.by, color: m.stroke?.color, points: m.stroke?.points?.length };
     case 'wave': return { type: 'wave', from: m.name, fromId: m.from, kind: m.kind };
@@ -78,7 +80,8 @@ class AgentSession {
     this.seq = 0;
     this.waiters = new Set();
     this.client = null;
-    this.identity = null; // { did, handle, grant } after AT Protocol sign-in
+    this.identity = null; // { did, handle } after AT Protocol sign-in
+    this.operator = false; // connected with MCP_TOKEN
     this.subscribed = false;
     this.verbose = false; // stream move events too
     this.touch();
@@ -87,7 +90,7 @@ class AgentSession {
   touch() { this.lastSeen = Date.now(); }
 
   push(m) {
-    const ev = { seq: ++this.seq, ts: Date.now(), ...shapeEvent(m, this.client) };
+    const ev = { seq: ++this.seq, ts: Date.now(), ...shapeEvent(m, this.client, this.hub.office) };
     this.events.push(ev);
     if (this.events.length > MAX_EVENTS) this.events.shift();
     for (const w of this.waiters) w();
@@ -99,7 +102,12 @@ class AgentSession {
 
   get joined() { return !!this.client?.me && this.client.ws?.readyState === 1; }
 
+  // Acting in the office needs a proven identity (Roost / AT Protocol) or
+  // the operator token; without either, a session is a read-only observer.
+  get canAct() { return !!this.identity?.did || this.operator; }
+
   async join({ name, note = '', status }) {
+    if (!this.canAct) throw new Error(SIGN_IN_HELP);
     if (this.client) this.client.close();
     const { server, client } = socketPair();
     // Same rule as browsers: the DID comes only from a completed sign-in.
@@ -149,6 +157,17 @@ export class McpHub {
   constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '' }) {
     Object.assign(this, { office, auth, token });
     this.sessions = new Map(); // mcp session id -> { transport, agent }
+    // Observers (sessions that haven't joined) get the office-wide
+    // broadcasts: joins, leaves, shouts, desks, notes, bookings, pomodoro…
+    const broadcast = office.broadcast.bind(office);
+    office.broadcast = (msg, except) => {
+      broadcast(msg, except);
+      if (!this.sessions.size) return;
+      if (msg.t === 'leave') msg = { ...msg, lastName: this.lastNames?.get(msg.id) };
+      for (const { agent } of this.sessions.values()) if (!agent.joined) agent.push(msg);
+    };
+    const leave = office.leave.bind(office);
+    office.leave = (p) => { (this.lastNames ||= new Map()).set(p.id, p.name); if (this.lastNames.size > 500) this.lastNames.clear(); leave(p); };
   }
 
   sweep() {
@@ -165,9 +184,6 @@ export class McpHub {
   // fetch-style handler for POST/GET/DELETE /mcp.
   async fetch(request) {
     this.sweep(); // lazily, so an idle Durable Object has no timers to keep it up
-    if (this.token && request.headers.get('authorization') !== `Bearer ${this.token}`) {
-      return Response.json({ error: 'send Authorization: Bearer <MCP_TOKEN>' }, { status: 401, headers: { 'www-authenticate': 'Bearer realm="agent office"' } });
-    }
     let body;
     if (request.method === 'POST') {
       try { body = await request.json(); } catch { return rpcError(400, -32700, 'parse error'); }
@@ -178,6 +194,24 @@ export class McpHub {
       if (sid) return rpcError(404, -32001, 'unknown session; initialize again');
       if (request.method !== 'POST' || !isInitializeRequest(body)) return rpcError(400, -32000, 'first request must be initialize');
       const agent = new AgentSession(this);
+      // Optional credentials, checked once when the session starts:
+      //   Authorization: Bearer <Roost token rmcp_… or PDS access token>
+      //   X-Atproto-Pds: <PDS URL>   (only for non-Roost tokens)
+      //   Authorization: Bearer <MCP_TOKEN>  (operator: may act, as a guest)
+      // No header: read-only.
+      const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+      if (bearer && this.token && bearer === this.token) agent.operator = true;
+      else if (bearer) {
+        try {
+          const v = await this.auth.roostSignIn({ token: bearer, pds: request.headers.get('x-atproto-pds') || undefined });
+          this.auth.redeem(v.grant);
+          agent.identity = { did: v.did, handle: v.handle };
+        } catch (e) {
+          return Response.json(
+            { jsonrpc: '2.0', error: { code: -32001, message: `sign-in failed: ${e.message}. Send a Roost token as Authorization: Bearer rmcp_…, or no Authorization header for read-only access.` }, id: body?.id ?? null },
+            { status: 401, headers: { 'www-authenticate': 'Bearer realm="agent office"' } });
+        }
+      }
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
         onsessioninitialized: (id) => this.sessions.set(id, s),
@@ -200,7 +234,7 @@ export class McpHub {
       },
     );
     const office = this.office, auth = this.auth;
-    const tool = (name, description, schema, fn) => mcp.registerTool(name, { description, inputSchema: schema }, async (args, extra) => {
+    const tool = (name, description, schema, fn, annotations) => mcp.registerTool(name, { description, inputSchema: schema, ...(annotations ? { annotations } : {}) }, async (args, extra) => {
       agent.touch();
       try { return await fn(args, extra); } catch (e) { return fail(e.message); }
     });
@@ -227,29 +261,38 @@ export class McpHub {
     tool('leave_office', 'Leave the office (closes your connection).', {}, async () => { agent.close(); return json({ ok: true }); });
 
     tool('look',
-      'Describe the office from where you stand: you, everyone present (distance, whether they can hear you), desks, notice board, pomodoro, counters and named places.',
+      'Describe the office: everyone present (zone, status, note; plus distance and whether they can hear you once you have joined), desks, notice board, pomodoro, counters and named places. Read-only, no sign-in needed.',
       {},
       async () => {
-        const c = agent.need(), me = c.me;
-        const people = [...c.peers.values()].map((p) => ({
+        const c = agent.joined ? agent.client : null, me = c?.me;
+        const online = office.summary().online.filter((p) => p.id !== me?.id);
+        const people = online.map((p) => ({
           id: p.id, name: p.name, kind: p.kind, handle: p.handle, did: p.did, status: p.status, note: p.note,
           zone: zoneAt(p.x, p.y)?.id, x: round(p.x), y: round(p.y), seat: p.seat,
-          distance: round(Math.hypot(p.x - me.x, p.y - me.y)), canHearYou: canHear(me, p),
-        })).sort((a, b) => a.distance - b.distance);
-        const key = me.did || `agent:${me.name}`;
-        const mine = Object.entries(c.desks).find(([, v]) => v.owner === key)?.[0] || null;
+          ...(me ? { distance: round(Math.hypot(p.x - me.x, p.y - me.y)), canHearYou: canHear(me, p) } : {}),
+        })).sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+        const key = me && (me.did || `agent:${me.name}`);
+        const mine = key && Object.entries(office.desks).find(([, v]) => v.owner === key)?.[0] || null;
         return json({
-          you: { id: me.id, name: me.name, handle: me.handle, did: me.did, x: round(me.x), y: round(me.y), zone: zoneAt(me.x, me.y)?.id, seat: me.seat, status: me.status, note: me.note, desk: mine },
+          you: me
+            ? { id: me.id, name: me.name, handle: me.handle, did: me.did, x: round(me.x), y: round(me.y), zone: zoneAt(me.x, me.y)?.id, seat: me.seat, status: me.status, note: me.note, desk: mine }
+            : { observer: true, signedInAs: agent.identity?.handle || agent.identity?.did || null, canJoin: agent.canAct },
           people,
-          desks: { claimed: c.desks, free: DESKS.filter((d) => !c.desks[d.id]).map((d) => d.id) },
-          notices: (c.notes || []).map((n) => ({ id: n.id, text: n.text, by: n.by })),
-          pomodoro: c.pomo, counters: c.counters,
+          desks: { claimed: office.desks, free: DESKS.filter((d) => !office.desks[d.id]).map((d) => d.id) },
+          notices: office.notes.map((n) => ({ id: n.id, text: n.text, by: n.by })),
+          pomodoro: office.pomoState(), counters: office.counters,
           places: PLACES,
         });
-      });
+      }, READ_ONLY);
+
+    tool('whoami', 'Your sign-in state: observer (read-only) or signed in as an AT Protocol identity, and how to sign in.', {},
+      async () => json({
+        identity: agent.identity, operator: agent.operator, canAct: agent.canAct, inOffice: agent.joined,
+        ...(agent.canAct ? {} : { howToSignIn: SIGN_IN_HELP }),
+      }), READ_ONLY);
 
     tool('read_events',
-      'Everything that happened since `since` (chat you could hear, @mentions, joins/leaves, desks, notes, waves, toasts, pomodoro, scores, whiteboard, errors). Waits up to wait_seconds for something new, so loop on it to stay responsive. Pass the returned `next` back as `since`.',
+      'Everything that happened since `since`. Before you join (read-only observers): office-wide events (joins, leaves, shouts, desks, notes, bookings, pomodoro, scores). After joining: also chat you could hear, @mentions, joins/leaves, desks, notes, waves, toasts, pomodoro, scores, whiteboard, errors). Waits up to wait_seconds for something new, so loop on it to stay responsive. Pass the returned `next` back as `since`.',
       {
         since: z.number().int().min(0).optional().describe('Last seq you saw; default returns recent events'),
         wait_seconds: z.number().min(0).max(55).optional().describe('Long-poll this long if nothing new (default 20)'),
@@ -257,7 +300,6 @@ export class McpHub {
         include_moves: z.boolean().optional().describe('Include move events (noisy)'),
       },
       async ({ since, wait_seconds = 20, types, include_moves = false }) => {
-        agent.need();
         if (include_moves) agent.verbose = true;
         const from = since ?? Math.max(0, agent.seq - 30);
         await agent.wait(from, wait_seconds * 1000);
@@ -265,7 +307,7 @@ export class McpHub {
         if (types?.length) evs = evs.filter((e) => types.includes(e.type));
         agent.verbose = false;
         return json({ events: evs, next: agent.seq });
-      });
+      }, READ_ONLY);
 
     // ---- the protocol, one tool per client message ------------------------
 
@@ -407,13 +449,15 @@ export class McpHub {
       'Meeting rooms and their schedule: each bookable room (Boardroom and Huddle Room are A/V: video + screen share; booths are voice only) with its state now (free, soon, busy), the current and next booking, and every upcoming booking.',
       {},
       async () => {
-        const c = agent.need(), now = Date.now();
+        // Straight from the office, so observers can read the schedule too.
+        const now = Date.now(), bookings = office.bookings;
         return json({
           now: new Date(now).toISOString(),
-          rooms: c.rooms(now).map((r) => ({ id: r.id, name: r.name, av: r.av, seats: r.seats, state: r.state, current: shapeBooking(r.current), next: shapeBooking(r.next) })),
-          bookings: c.bookings.filter((b) => b.end > now).map(shapeBooking),
+          rooms: ROOMS.map((r) => ({ id: r.id, name: r.name, av: r.av, seats: r.seats, ...roomStatus(bookings, r.id, now) }))
+            .map((r) => ({ id: r.id, name: r.name, av: r.av, seats: r.seats, state: r.state, current: shapeBooking(r.current), next: shapeBooking(r.next) })),
+          bookings: bookings.filter((b) => b.end > now).map(shapeBooking),
         });
-      });
+      }, READ_ONLY);
 
     tool('book_room',
       'Book a meeting room (protocol `book` op create). Times are ISO 8601 with a timezone (or "now"); give minutes or end. 15 min to 4 h, up to 14 days ahead, no overlaps. invitees are handles, DIDs or agent names; lock=true keeps everyone else out while it runs. Unless autoRelease=false, the room is freed if no invitee (or you) is in it 10 minutes after the start.',
@@ -465,7 +509,7 @@ export class McpHub {
     tool('atproto_challenge',
       `Start AT Protocol sign-in. Returns a nonce and a record: write it with com.atproto.repo.putRecord to your repo at ${PROOF_COLLECTION}/self, then call atproto_verify. With a Roost token, roost_sign_in does all of this for you.`,
       {},
-      async () => json(auth.challenge()));
+      async () => json(auth.challenge()), READ_ONLY);
 
     tool('atproto_verify', 'Finish AT Protocol sign-in: the office reads the proof record from the PDS in your DID document. Then call join_office to enter verified.',
       { handle: z.string().describe('Your handle or DID'), nonce: z.string() },
@@ -478,7 +522,7 @@ export class McpHub {
 
     tool('roost_terms', `Read the terms of Roost (${ROOST_URL}), a PDS that gives agents their own AT Protocol identity. Read before roost_signup.`,
       {},
-      async () => ({ content: [{ type: 'text', text: await auth.roostTerms() }] }));
+      async () => ({ content: [{ type: 'text', text: await auth.roostTerms() }] }), { readOnlyHint: true, openWorldHint: true });
 
     tool('roost_signup',
       `Create an AT Protocol identity for yourself on Roost (${ROOST_URL}): handle becomes <handle>.roost.latha.org. Returns your DID and a bearer token (rmcp_…). Save the token: it is your only credential and cannot be recovered. The office does not keep it.`,
@@ -544,8 +588,11 @@ export function resolvePlace(place, c) {
   return null;
 }
 
+const SIGN_IN_HELP = `Read-only until you sign in with an AT Protocol identity. Easiest: connect with the header "Authorization: Bearer <Roost token>" (get one from roost_signup or https://roost.latha.org). Or, in this session: roost_sign_in { token }, or atproto_challenge + putRecord + atproto_verify. Then call join_office.`;
+
 const INSTRUCTIONS = `You are an agent in Agent Office, a 2D virtual coworking office shared with people.
-Start with join_office (optionally sign in first: roost_signup + roost_sign_in, or atproto_challenge + atproto_verify, to appear with a verified AT Protocol identity).
+Without sign-in you are a read-only observer: look, rooms, read_events, whoami and the office:// resources work.
+To act (join, move, chat…) sign in with AT Protocol, ideally Roost: connect with "Authorization: Bearer <Roost token>", or call roost_signup then roost_sign_in (or atproto_challenge + atproto_verify). Then join_office.
 Then look around with look, and keep up with the office through read_events (long-poll; pass next back as since) or the office://events resource and log notifications.
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
