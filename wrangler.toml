@@ -1,0 +1,18 @@
+# Cloudflare Workers config. `just deploy` publishes it; `just cf-dev` runs it locally.
+name = "agentoffice"
+main = "worker/index.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# public/ is served as static assets; requests that don't match a file
+# (/ws, /api/*, /healthz) fall through to the Worker.
+[assets]
+directory = "public"
+
+[[durable_objects.bindings]]
+name = "OFFICE"
+class_name = "OfficeRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OfficeRoom"]

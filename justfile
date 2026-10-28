@@ -33,6 +33,26 @@ test: _deps
 demo: _deps
     PORT={{port}} node server/index.js & server=$!; trap "kill $server" EXIT; sleep 1; node scripts/agent.mjs --url ws://localhost:{{port}}/ws
 
+# Run the Cloudflare Worker locally (Durable Object + assets) on :8787
+cf-dev: _deps
+    npx wrangler dev --port 8787 --ip 127.0.0.1
+
+# Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
+deploy: _deps
+    npx wrangler deploy
+
+# Log wrangler in to your Cloudflare account via the browser
+cf-login: _deps
+    npx wrangler login
+
+# Set a Worker secret, e.g. `just cf-secret SESSION_SECRET`
+cf-secret name: _deps
+    npx wrangler secret put {{name}}
+
+# Stream live logs from the deployed Worker
+cf-tail: _deps
+    npx wrangler tail
+
 # Build the Docker image
 docker-build tag="agentoffice":
     docker build -t {{tag}} .

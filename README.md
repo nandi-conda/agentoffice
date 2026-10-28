@@ -55,11 +55,51 @@ without hosted metadata. The redirect must go to `127.0.0.1`, so open
 you over).
 
 `server/auth.js` only uses `fetch`, `Request`/`Response` and Web Crypto, so it
-runs unchanged on Cloudflare Workers: call `createAuth({ publicUrl, secret,
-stateStore })` and route `/oauth/*` to `auth.handle(request)`. On Workers pass
-a KV or Durable Object backed `stateStore` (async `get`/`set`/`del` of JSON),
-since login and callback can hit different isolates. Handles are resolved
+runs unchanged on Cloudflare Workers, where the Durable Object passes it
+SQLite-backed state and session stores (see *Hosting on Cloudflare Workers*). Handles are resolved
 over DNS-over-HTTPS (Cloudflare) plus `/.well-known/atproto-did`.
+
+## Hosting on Cloudflare Workers
+
+The same office runs as a Cloudflare Worker (`wrangler.toml`,
+`worker/index.js`). `public/` is served as Workers static assets, and
+everything else (`/ws`, `/api/*`, `/oauth/*`, `/healthz`) goes to a single
+Durable Object, `OfficeRoom`, that holds the office. It uses the WebSocket
+Hibernation API, so an idle office with people connected isn't billed for
+wall-clock time: each socket carries its peer in its attachment and the room
+rebuilds itself when it wakes. Desks, notes, scores, counters and whiteboard
+strokes live in the object's SQLite storage (one row per stroke), as do the
+OAuth login state and the cookie-signing key.
+
+```sh
+just cf-dev                    # local Worker + Durable Object on http://127.0.0.1:8787
+just cf-login                  # once: log wrangler in through the browser
+just deploy                    # wrangler deploy -> https://agentoffice.<you>.workers.dev
+just cf-tail                   # live logs
+```
+
+From CI or a headless box, skip `cf-login` and export:
+
+| env var | what it is |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | API token from dash.cloudflare.com → My Profile → API Tokens, using the **Edit Cloudflare Workers** template (covers Workers Scripts: Edit, which includes Durable Objects, plus Account Settings: Read). |
+| `CLOUDFLARE_ACCOUNT_ID` | Your account ID, shown on the Workers & Pages overview page. |
+
+Durable Objects with SQLite storage work on the Workers Free plan. Sign-in
+works out of the box: with no `PUBLIC_URL` the Worker uses the origin it is
+reached on (e.g. `https://agentoffice.<you>.workers.dev`) for its OAuth client
+metadata, and generates and stores its own session secret. On a custom
+domain, pin both:
+
+```sh
+npx wrangler deploy --var PUBLIC_URL:https://office.example.com   # or add [vars] PUBLIC_URL to wrangler.toml
+just cf-secret SESSION_SECRET                                      # paste `openssl rand -hex 32`
+```
+
+Request handling is shared: `server/app.js` holds the HTTP routes as
+`Request -> Response` functions, called by both `server/index.js` (Node) and
+the Durable Object. Add new endpoints there, using only web-standard APIs
+(`fetch`, Web Crypto, no `node:*` imports), and they work in both places.
 
 ## What's in the office
 

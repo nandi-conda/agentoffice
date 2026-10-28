@@ -4,7 +4,8 @@
 // are the identity resolvers and the player's own PDS, and we only read the
 // records we need: actor.rpg.sprite, actor.rpg.stats and the profile.
 
-import { promises as dns } from 'node:dns';
+// Only web-standard APIs (fetch, Uint8Array) so this runs on Node and on
+// Cloudflare Workers alike.
 
 const TTL = 10 * 60 * 1000;
 const cache = new Map();
@@ -23,10 +24,16 @@ const DID_RE = /^did:(plc:[a-z2-7]{24}|web:[a-z0-9.:%-]+)$/i;
 export const isHandle = (s) => HANDLE_RE.test(s);
 export const isDid = (s) => DID_RE.test(s);
 
-async function getJson(url, timeout = 6000) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeout), headers: { accept: 'application/json' } });
+async function getJson(url, timeout = 6000, accept = 'application/json') {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeout), headers: { accept } });
   if (!res.ok) throw new Error(`${res.status} from ${new URL(url).host}`);
   return res.json();
+}
+
+// DNS TXT lookup over DNS-over-HTTPS, since Workers have no resolver API.
+async function resolveTxt(name) {
+  const j = await getJson(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=TXT`, 4000, 'application/dns-json');
+  return (j.Answer || []).filter((a) => a.type === 16).map((a) => a.data.replace(/^"|"$/g, '').replace(/" "/g, ''));
 }
 
 export async function resolveHandle(handle) {
@@ -34,9 +41,7 @@ export async function resolveHandle(handle) {
   if (!isHandle(handle)) throw new Error('not a valid handle');
   return cached(`h:${handle}`, async () => {
     try {
-      const txt = await dns.resolveTxt(`_atproto.${handle}`);
-      for (const rec of txt) {
-        const v = rec.join('');
+      for (const v of await resolveTxt(`_atproto.${handle}`)) {
         if (v.startsWith('did=') && isDid(v.slice(4))) return v.slice(4);
       }
     } catch { /* fall through to HTTPS */ }
@@ -165,7 +170,7 @@ export async function fetchBlob(did, cid) {
   if (!res.ok) throw new Error(`blob ${res.status}`);
   const type = res.headers.get('content-type') || 'application/octet-stream';
   if (!type.startsWith('image/')) throw new Error('blob is not an image');
-  const buf = Buffer.from(await res.arrayBuffer());
+  const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.length > 2 * 1024 * 1024) throw new Error('blob too large');
   if (blobCache.size >= BLOB_CACHE_MAX) blobCache.delete(blobCache.keys().next().value);
   const entry = { type, buf };

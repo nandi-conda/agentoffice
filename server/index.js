@@ -5,9 +5,10 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { loadActor, fetchBlob } from './atproto.js';
+import { loadActor } from './atproto.js';
 import { Office } from './office.js';
 import { createAuth } from './auth.js';
+import { handleApi, isApiPath } from './app.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -53,18 +54,6 @@ async function sessionSecret() {
 
 const auth = createAuth({ publicUrl: process.env.PUBLIC_URL, port: PORT, secret: await sessionSecret() });
 
-// auth.js speaks fetch-style Request/Response so it also runs on Workers.
-async function authRoute(req, res, url) {
-  if (!url.pathname.startsWith('/oauth/')) return false;
-  const ac = new AbortController();
-  res.on('close', () => ac.abort());
-  const out = await auth.handle(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, signal: ac.signal }));
-  if (!out) return false;
-  res.writeHead(out.status, Object.fromEntries(out.headers));
-  res.end(Buffer.from(await out.arrayBuffer()));
-  return true;
-}
-
 const office = new Office(await loadState(), {
   onChange: () => scheduleSave(office),
   loadActor: process.env.OFFLINE ? null : loadActor,
@@ -78,31 +67,17 @@ function send(res, code, body, type = 'application/json') {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    if (await authRoute(req, res, url)) return;
-    if (url.pathname === '/api/me') {
-      const did = await auth.didFromCookie(req.headers.cookie);
-      if (!did) return send(res, 200, { did: null });
-      try {
-        const { pds, ...pub } = await loadActor(did);
-        return send(res, 200, pub);
-      } catch {
-        return send(res, 200, { did, handle: null });
-      }
+    // API and OAuth routes live in app.js, written against fetch-style
+    // Request/Response so they also run on Cloudflare Workers.
+    if (isApiPath(url.pathname)) {
+      const ac = new AbortController();
+      res.on('close', () => ac.abort());
+      const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : req;
+      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth });
+      if (!out) return send(res, 404, { error: 'not found' });
+      res.writeHead(out.status, Object.fromEntries(out.headers));
+      return res.end(Buffer.from(await out.arrayBuffer()));
     }
-    if (url.pathname === '/api/actor') {
-      const id = url.searchParams.get('id') || '';
-      if (!id || id.length > 253) return send(res, 400, { error: 'missing id' });
-      const actor = await loadActor(id);
-      const { pds, ...pub } = actor;
-      return send(res, 200, pub);
-    }
-    if (url.pathname === '/api/blob') {
-      const blob = await fetchBlob(url.searchParams.get('did') || '', url.searchParams.get('cid') || '');
-      res.writeHead(200, { 'content-type': blob.type, 'cache-control': 'public, max-age=86400, immutable' });
-      return res.end(blob.buf);
-    }
-    if (url.pathname === '/api/office') return send(res, 200, office.summary());
-    if (url.pathname === '/healthz') return send(res, 200, 'ok', 'text/plain');
 
     let p = decodeURIComponent(url.pathname);
     if (p === '/') p = '/index.html';

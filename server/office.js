@@ -1,7 +1,6 @@
 // The office hub: presence, proximity chat, desks, pomodoro, whiteboard,
 // notice board, arcade scores and WebRTC signalling relay.
 
-import { randomUUID } from 'node:crypto';
 import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked, ZONES } from '../public/js/map.js';
 
 const POMO_ZONES = ZONES.filter((z) => z.kind === 'quiet').map((z) => z.id);
@@ -48,21 +47,38 @@ export class Office {
     };
   }
 
+  // Transport-neutral entry points: open() a peer for a socket, feed it
+  // message() and close(). connect() wires them to a Node `ws` socket; the
+  // Cloudflare Durable Object calls them from its hibernation handlers.
   // `did` is only ever a DID the visitor proved via OAuth (see auth.js).
-  connect(ws, { did = null } = {}) {
+  open(ws, { did = null, restored = null } = {}) {
     const p = {
-      id: randomUUID().slice(0, 8), ws, ready: false, name: 'guest', handle: null, did: null, authDid: did,
+      id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
       status: 'available', note: '', seat: null, emote: null, audio: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
+      ...restored, ws,
     };
     this.peers.set(p.id, p);
-    ws.on('message', (raw) => {
-      let msg;
-      try { msg = JSON.parse(raw); } catch { return; }
-      if (!msg || typeof msg.t !== 'string') return;
-      Promise.resolve(this.handle(p, msg)).catch((e) => this.sendTo(p, { t: 'error', message: e.message }));
-    });
+    return p;
+  }
+
+  message(p, raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return Promise.resolve(); }
+    if (!msg || typeof msg.t !== 'string') return Promise.resolve();
+    return Promise.resolve(this.handle(p, msg)).catch((e) => this.sendTo(p, { t: 'error', message: e.message }));
+  }
+
+  // The parts of a peer worth keeping across a Durable Object hibernation.
+  snapshot(p) {
+    const { ws, cupTimer, ...rest } = p;
+    return rest;
+  }
+
+  connect(ws, { did = null } = {}) {
+    const p = this.open(ws, { did });
+    ws.on('message', (raw) => this.message(p, raw));
     ws.on('close', () => this.leave(p));
     ws.on('error', () => this.leave(p));
     return p;
@@ -298,7 +314,7 @@ export class Office {
       const text = clip(m.text, 200);
       if (!text) return;
       const colors = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
-      this.notes.unshift({ id: randomUUID().slice(0, 8), text, by: p.name, owner: this.ownerKey(p), ts: this.now(), color: colors[(Math.random() * colors.length) | 0] });
+      this.notes.unshift({ id: crypto.randomUUID().slice(0, 8), text, by: p.name, owner: this.ownerKey(p), ts: this.now(), color: colors[(Math.random() * colors.length) | 0] });
       this.notes = this.notes.slice(0, MAX_NOTES);
     } else if (m.op === 'remove') {
       const n = this.notes.find((x) => x.id === m.id);
