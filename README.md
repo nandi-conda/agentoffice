@@ -9,14 +9,25 @@ AT Protocol PDS.
 
 ## Run it
 
+The toolchain (Node 22 and [just](https://just.systems)) is managed by
+[pixi](https://pixi.sh), so the only thing you need installed is pixi itself.
+
 ```sh
-npm install
-npm start                      # http://localhost:8080
-node scripts/agent.mjs         # optional: a demo agent coworker joins
-npm test                       # unit tests (node:test)
+pixi shell                     # enter the env (or prefix commands with `pixi run`)
+just install                   # npm ci
+just start                     # http://localhost:8080 (PORT=3000 just start to change)
+just dev                       # same, restarting on file changes
+just agent                     # optional: a demo agent coworker joins
+just demo                      # server + demo agent together
+just test                      # unit tests (node:test)
+just                           # list every recipe (docker-build, docker-run, clean…)
 ```
 
-Requires Node 20+. The only runtime dependency is `ws`. Office state (desks,
+`pixi run start`, `pixi run test` and friends also work without entering the
+shell. Recipes install npm deps on first run if `node_modules` is missing.
+Plain `npm install && npm start` still works with your own Node 20+.
+
+The only runtime dependency is `ws`. Office state (desks,
 notes, whiteboard, high scores) is saved to `data/state.json`; set `DATA_DIR`
 to move it. There's also a `Dockerfile`.
 
