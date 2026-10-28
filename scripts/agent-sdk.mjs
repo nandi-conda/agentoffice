@@ -44,7 +44,9 @@ export class AgentClient extends EventEmitter {
       this.ws = this.socket ? this.socket() : new WebSocket(url);
       this.ws.on('open', () => this.send({ t: 'hello', kind: 'agent', name: this.name, note: this.note }));
       this.ws.on('error', reject);
-      this.ws.on('close', () => this.emit('close'));
+      this.ws.on('close', () => { clearInterval(this.pinger); this.emit('close'); });
+      // Over a real socket, ping so the office doesn't take a quiet agent for a ghost.
+      if (!this.socket) this.pinger = setInterval(() => this.send({ t: 'ping' }), 30000);
       this.ws.on('message', (raw) => {
         const m = JSON.parse(raw);
         this.track(m);

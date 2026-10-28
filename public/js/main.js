@@ -224,7 +224,7 @@ async function enter() {
 const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended) });
 
 function start(hello) {
-  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), () => sys('Connection lost, reconnecting…'));
+  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ replaced }) => sys(replaced ? 'You opened the office in another tab or device, so this one left. Reload to come back here.' : 'Connection lost, reconnecting…'));
   requestAnimationFrame(loop);
 }
 
@@ -354,6 +354,7 @@ function onMessage(m) {
     case 'freeq-note': sys(`${m.ok ? '💬' : '⚠️'} ${m.text}`); if (!m.ok) toast(`⚠️ ${esc(m.text)}`); break;
     case 'rtc': voice.onSignal(m.from, m.data); break;
     case 'error': toast(`⚠️ ${esc(m.message)}`); break;
+    case 'replaced': toast(esc(m.text)); break;
   }
 }
 let welcomeShown = false;

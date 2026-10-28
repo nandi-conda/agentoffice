@@ -390,6 +390,9 @@ export class FreeqBridge {
     if (!this.listener) return;
     const list = await this.channels();
     this.apply(this.plan(list));
+    // Ask who's there rather than counting on the reply to JOIN; it also
+    // brings back anyone missed, e.g. after a restart.
+    for (const b of this.bindings.values()) this.listener?.send(`NAMES ${b.channel}`);
   }
 
   // Pick channels for areas. Our own connections don't count as people.

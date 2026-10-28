@@ -15,6 +15,9 @@ import { KINDS, MIRRORED, POMO_ZONES, nextRoomEvent } from './entities/kinds.js'
 
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
 const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
+// Close code for a connection replaced by a newer one for the same identity
+// (public/js/net.js doesn't reconnect after it).
+export const REPLACED = 4001;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
 
@@ -363,6 +366,7 @@ export class Office {
     else if (STATUSES.has(arrival?.status)) p.status = arrival.status;
     p.note = clip(m.note ?? arrival?.note ?? '', 80);
     p.ready = true;
+    this.replaceOlder(p);
     this.sendTo(p, {
       t: 'welcome', id: p.id, now: this.now(), you: this.publicPeer(p),
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
@@ -377,6 +381,19 @@ export class Office {
     if (zone) this.publish(`zone:${zone.id}`, { type: 'enter', who: this.who(p) });
     this.publish('office', { type: 'join', who: this.who(p) });
     this.freeq?.presence();
+  }
+
+  // One avatar per identity: a newer connection for the same DID (another
+  // tab, a phone, a reconnect whose old socket never closed) replaces the
+  // older ones. They're told why and their client doesn't reconnect.
+  replaceOlder(p) {
+    if (!p.did) return;
+    for (const q of [...this.peers.values()]) {
+      if (q === p || q.did !== p.did || q.kind === 'freeq') continue;
+      this.sendTo(q, { t: 'replaced', text: 'You opened the office somewhere else, so this window was signed out of it.' });
+      try { q.ws.close(REPLACED, 'opened elsewhere'); } catch { /* already gone */ }
+      this.leave(q);
+    }
   }
 
   move(p, m) {

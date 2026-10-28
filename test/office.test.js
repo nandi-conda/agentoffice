@@ -139,3 +139,19 @@ test('the signed-in DID wins over whatever hello claims', async () => {
   assert.equal(a.ws.last('welcome').you.did, 'did:plc:abc');
   assert.equal(a.ws.last('welcome').you.handle, 'ada.test');
 });
+
+test('a newer connection for the same identity replaces the older one', async () => {
+  const o = new Office({}, { loadActor: async (id) => ({ did: id, handle: 'ada.test', sprite: null, stats: [] }) });
+  const watcher = await join(o, 'grace');
+  const tab1 = await join(o, 'ada', {}, { did: 'did:plc:ada' });
+  tab1.ws.close = (code) => { tab1.closedWith = code; };
+  const tab2 = await join(o, 'ada', {}, { did: 'did:plc:ada' });
+  assert.equal(tab1.closedWith, 4001);
+  assert.ok(tab1.ws.last('replaced'));
+  assert.equal([...o.peers.values()].filter((p) => p.did === 'did:plc:ada').length, 1);
+  assert.equal(watcher.ws.last('leave').id, tab1.id);
+  assert.equal(tab2.ws.last('welcome').peers.length, 1); // just grace
+  // Guests have no identity to match on, so two of them are two people.
+  await join(o, 'guest'); await join(o, 'guest');
+  assert.equal(o.summary().online.filter((p) => p.name === 'guest').length, 2);
+});

@@ -18,6 +18,7 @@ import { DORuntime } from './entities.js';
 export { ActorDO, RoomDO, ItemDO, TopicDO } from './entities.js';
 
 const HEARTBEAT_MS = 60 * 1000;
+const GHOST_MS = 10 * 60 * 1000; // a socket silent this long (browsers ping every 30 s) is a ghost
 const MCP_SESSION_TTL_MS = 10 * 60 * 1000; // matches the hub's idle drop
 
 export default {
@@ -86,7 +87,9 @@ export class OfficeRoom extends DurableObject {
     // Waking from hibernation or a restart (deploys, evictions): rebuild
     // peers from the sockets that stayed open, and if anyone is here, bring
     // the freeq listener back now rather than on their next message.
-    for (const ws of ctx.getWebSockets()) this.peerFor(ws);
+    for (const ws of ctx.getWebSockets()) this.peerFor(ws, { rebuild: true });
+    // Browsers ping to show they're alive; answered without waking the object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
     this.freeq?.presence();
     this.arm();
   }
@@ -114,6 +117,7 @@ export class OfficeRoom extends DurableObject {
 
   async alarm() {
     this.alarmAt = null;
+    this.reapGhosts();
     this.freeq?.presence();
     this.arm();
   }
@@ -202,13 +206,31 @@ export class OfficeRoom extends DurableObject {
     };
   }
 
+  // Sockets whose other end is gone without a close (a laptop lid, a dead
+  // network) would otherwise stand in the office for good.
+  reapGhosts() {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const p = this.peerFor(ws);
+      if (!p) continue;
+      const last = Math.max(p.lastSeen || p.joinedAt || 0, this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0);
+      if (now - last < GHOST_MS) continue;
+      try { ws.close(1001, 'gone quiet'); } catch { /* already closed */ }
+      this.office.leave(p);
+    }
+  }
+
   // Each socket's attachment carries its peer, keyed by id, so the peer can
-  // be found again (or rebuilt after hibernation) from the socket alone.
-  peerFor(ws) {
+  // be found again from the socket alone. Only on wake-up (`rebuild`) is a
+  // missing peer rebuilt from it; later, a missing peer means the office
+  // already let it go (replaced by a newer connection, or reaped), and it
+  // mustn't come back as a ghost.
+  peerFor(ws, { rebuild = false } = {}) {
     const snap = ws.deserializeAttachment();
     if (!snap) return null;
     let p = this.office.peers.get(snap.id);
     if (!p) {
+      if (!rebuild) return null;
       const row = snap.did && this.sql.exec('SELECT v FROM actors WHERE did = ?', snap.did).toArray()[0];
       p = this.office.open(ws, { did: snap.authDid, restored: { ...snap, actor: row ? JSON.parse(row.v) : null } });
     }
@@ -230,7 +252,8 @@ export class OfficeRoom extends DurableObject {
   async webSocketMessage(ws, raw) {
     if (typeof raw !== 'string' || raw.length > 256 * 1024) return;
     const p = this.peerFor(ws);
-    if (!p) return;
+    if (!p) { try { ws.close(1008, 'not in the office'); } catch { /* already closed */ } return; }
+    p.lastSeen = Date.now();
     await this.office.message(p, raw);
     this.persistPeer(p);
     // After hibernation the freeq listener is gone; the next message brings it back.
