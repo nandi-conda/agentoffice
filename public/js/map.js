@@ -10,18 +10,22 @@ export const H = 32;
 //   open  - proximity: you hear people within HEAR_RADIUS tiles
 //   room  - private: everyone inside hears everyone inside, nobody outside
 //   quiet - focus den: text only, shared pomodoro, no voice
+//
+// Bookable rooms take reservations (see rooms.js). `av` rooms add video and
+// screen share to the voice call; `door` is the spot just outside, where
+// people are shown out when a locked booking starts.
 export const HEAR_RADIUS = 6;
 
 export const ZONES = [
   { id: 'focus', name: 'Deep Work Den', kind: 'quiet', x0: 1, y0: 1, x1: 12, y1: 12, floor: 'carpetBlue' },
   { id: 'booths', name: 'Phone Booths', kind: 'open', x0: 1, y0: 14, x1: 12, y1: 18, floor: 'wood' },
-  { id: 'booth1', name: 'Booth 1', kind: 'room', x0: 1, y0: 14, x1: 3, y1: 16, floor: 'carpetPlum' },
-  { id: 'booth2', name: 'Booth 2', kind: 'room', x0: 5, y0: 14, x1: 7, y1: 16, floor: 'carpetPlum' },
-  { id: 'booth3', name: 'Booth 3', kind: 'room', x0: 9, y0: 14, x1: 11, y1: 16, floor: 'carpetPlum' },
+  { id: 'booth1', name: 'Booth 1', kind: 'room', x0: 1, y0: 14, x1: 3, y1: 16, floor: 'carpetPlum', bookable: true, av: false, seats: 1, door: { x: 2.5, y: 18.5 } },
+  { id: 'booth2', name: 'Booth 2', kind: 'room', x0: 5, y0: 14, x1: 7, y1: 16, floor: 'carpetPlum', bookable: true, av: false, seats: 1, door: { x: 6.5, y: 18.5 } },
+  { id: 'booth3', name: 'Booth 3', kind: 'room', x0: 9, y0: 14, x1: 11, y1: 16, floor: 'carpetPlum', bookable: true, av: false, seats: 1, door: { x: 10.5, y: 18.5 } },
   { id: 'lobby', name: 'Lobby', kind: 'open', x0: 1, y0: 20, x1: 12, y1: 30, floor: 'stone' },
   { id: 'open', name: 'Open Office', kind: 'open', x0: 14, y0: 1, x1: 33, y1: 19, floor: 'wood' },
-  { id: 'board', name: 'Boardroom', kind: 'room', x0: 35, y0: 1, x1: 46, y1: 10, floor: 'carpetGreen' },
-  { id: 'huddle', name: 'Huddle Room', kind: 'room', x0: 35, y0: 12, x1: 46, y1: 19, floor: 'carpetGreen' },
+  { id: 'board', name: 'Boardroom', kind: 'room', x0: 35, y0: 1, x1: 46, y1: 10, floor: 'carpetGreen', bookable: true, av: true, seats: 8, door: { x: 33.5, y: 6.5 } },
+  { id: 'huddle', name: 'Huddle Room', kind: 'room', x0: 35, y0: 12, x1: 46, y1: 19, floor: 'carpetGreen', bookable: true, av: true, seats: 4, door: { x: 33.5, y: 16.5 } },
   { id: 'kitchen', name: 'Kitchen', kind: 'open', x0: 14, y0: 21, x1: 26, y1: 30, floor: 'tile' },
   { id: 'lounge', name: 'Lounge', kind: 'open', x0: 28, y0: 21, x1: 46, y1: 30, floor: 'rug' },
 ];
@@ -76,6 +80,7 @@ for (let i = 0; i < 4; i++) {
   }
 }
 add({ type: 'whiteboard', id: 'whiteboard', x: 38, y: 1, w: 6, h: 1, solid: true, interact: 'whiteboard' });
+add({ type: 'screen', id: 'board-screen', x: 44, y: 1, w: 2, h: 1, solid: true, zone: 'board' });
 add({ type: 'plant', id: 'p-board', x: 46, y: 10, w: 1, h: 1, solid: true });
 
 // Huddle room
@@ -85,7 +90,13 @@ for (const [x, y, f] of [[38, 15, 'right'], [42, 15, 'left'], [40, 13, 'down'], 
   add({ type: 'chair', id, x, y, w: 1, h: 1, seat: true, facing: f });
   SEATS.push({ id, x: x + 0.5, y: y + 0.5, facing: f });
 }
-add({ type: 'screen', id: 'huddle-screen', x: 44, y: 12, w: 2, h: 1, solid: true });
+add({ type: 'screen', id: 'huddle-screen', x: 44, y: 12, w: 2, h: 1, solid: true, zone: 'huddle' });
+
+// Booking panels: wall tablets beside each bookable room's door, showing
+// whether the room is free. They hang on the wall, so they don't block.
+for (const [zone, x, y] of [['board', 34, 5], ['huddle', 34, 15], ['booth1', 3, 17], ['booth2', 7, 17], ['booth3', 11, 17]]) {
+  add({ type: 'panel', id: `panel-${zone}`, x, y, w: 1, h: 1, zone, interact: 'room' });
+}
 add({ type: 'plant', id: 'p-hud', x: 35, y: 19, w: 1, h: 1, solid: true });
 
 // Phone booths: a stool each.

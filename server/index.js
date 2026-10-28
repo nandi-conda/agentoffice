@@ -63,6 +63,9 @@ const office = new Office(await loadState(), {
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
 const mcp = new McpHub({ office, auth: agents });
 
+// Booking reminders and announcements (the Worker uses a Durable Object alarm).
+setInterval(() => office.tickRooms(), 15000).unref();
+
 function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));

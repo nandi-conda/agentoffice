@@ -1,7 +1,8 @@
 // The office hub: presence, proximity chat, desks, pomodoro, whiteboard,
-// notice board, arcade scores and WebRTC signalling relay.
+// notice board, arcade scores, meeting room bookings and WebRTC signalling relay.
 
 import { SPAWN, DESKS, SEATS, zoneAt, canHear, isBlocked, ZONES } from '../public/js/map.js';
+import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, lockedOut, activeBooking, keyOf, fmtTime, fmtRange } from '../public/js/rooms.js';
 
 const POMO_ZONES = ZONES.filter((z) => z.kind === 'quiet').map((z) => z.id);
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
@@ -24,10 +25,12 @@ export class Office {
     this.pomo = {};
     for (const z of POMO_ZONES) this.pomo[z] = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
     this.shouts = [];
+    this.bookings = saved.bookings || [];
+    this.lastTick = 0;
   }
 
   persisted() {
-    return { desks: this.desks, strokes: this.strokes, notes: this.notes, scores: this.scores, counters: this.counters };
+    return { desks: this.desks, strokes: this.strokes, notes: this.notes, scores: this.scores, counters: this.counters, bookings: this.bookings };
   }
 
   summary() {
@@ -35,6 +38,7 @@ export class Office {
       online: [...this.peers.values()].filter((p) => p.ready).map((p) => this.publicPeer(p)),
       desks: this.desks,
       counters: this.counters,
+      bookings: this.bookings,
     };
   }
 
@@ -43,7 +47,7 @@ export class Office {
       id: p.id, name: p.name, handle: p.handle, did: p.did, kind: p.kind,
       actor: p.actor, x: p.x, y: p.y, dir: p.dir, moving: p.moving,
       status: p.status, note: p.note, seat: p.seat, emote: p.emote, audio: p.audio,
-      cup: p.cup, joinedAt: p.joinedAt,
+      video: p.video, screen: p.screen, cup: p.cup, joinedAt: p.joinedAt,
     };
   }
 
@@ -55,7 +59,7 @@ export class Office {
     const p = {
       id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
-      status: 'available', note: '', seat: null, emote: null, audio: false, cup: false,
+      status: 'available', note: '', seat: null, emote: null, audio: false, video: false, screen: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
       ...restored, ws,
     };
@@ -104,6 +108,9 @@ export class Office {
   async handle(p, m) {
     if (m.t === 'hello') return this.hello(p, m);
     if (!p.ready) return;
+    // Room timers also run from setInterval / a Durable Object alarm; this
+    // catches up whenever anyone is active.
+    if (this.now() - this.lastTick > 5000) this.tickRooms();
     switch (m.t) {
       case 'move': return this.move(p, m);
       case 'chat': return this.chat(p, m);
@@ -118,6 +125,8 @@ export class Office {
       case 'score': return this.score(p, m);
       case 'wave': return this.wave(p, m);
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
+      case 'av': return this.av(p, m);
+      case 'book': return this.book(p, m);
       case 'rtc': return this.rtc(p, m);
       case 'ping': return this.sendTo(p, { t: 'pong', ts: m.ts });
     }
@@ -152,6 +161,7 @@ export class Office {
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
+      bookings: this.bookings,
     });
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
     this.touchDesk(p);
@@ -162,6 +172,16 @@ export class Office {
     if (isBlocked(Math.floor(x), Math.floor(y)) && !p.seat) return;
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
+    // A locked booking keeps everyone but its holders out of the room.
+    const to = zoneAt(x, y);
+    if (to?.bookable && to !== zoneAt(p.x, p.y) && lockedOut(this.bookings, to.id, p, this.now())) {
+      const b = activeBooking(this.bookings, to.id, this.now());
+      return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${fmtTime(b.end)}. Knock to be let in.` });
+    }
+    if (to?.bookable && to !== zoneAt(p.x, p.y)) {
+      const b = activeBooking(this.bookings, to.id, this.now());
+      if (b && !b.seen && isHolder(b, p)) { b.seen = true; this.onChange(); }
+    }
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (p.seat && m.moving) p.seat = null;
     this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving, seat: p.seat }, p);
@@ -362,5 +382,186 @@ export class Office {
     const q = this.peers.get(m.to);
     if (!q || !q.ready) return;
     this.sendTo(q, { t: 'rtc', from: p.id, data: m.data });
+  }
+
+  // ---- A/V rooms ----------------------------------------------------------
+  // Camera and screen share flags. The media itself is peer to peer; these
+  // just let everyone draw who's on camera. Only meaningful in an A/V room.
+  av(p, m) {
+    const ok = !!zoneAt(p.x, p.y)?.av;
+    p.video = ok && !!m.video;
+    p.screen = ok && !!m.screen;
+    this.broadcast({ t: 'peer', id: p.id, video: p.video, screen: p.screen });
+  }
+
+  // ---- meeting room bookings -------------------------------------------------
+  // { t: 'book', op: 'create' | 'cancel' | 'extend' | 'end' | 'update' | 'admit', ref? }
+  // Replies { t: 'booked', ref, booking } or { t: 'error', ref, message }.
+  book(p, m) {
+    const now = this.now();
+    const ref = typeof m.ref === 'string' || typeof m.ref === 'number' ? m.ref : undefined;
+    const fail = (message) => this.sendTo(p, { t: 'error', message, ref });
+    const done = (b) => { this.roomsChanged(); this.sendTo(p, { t: 'booked', ref, booking: b }); };
+    const key = this.ownerKey(p);
+
+    if (m.op === 'create') {
+      if (!p.did && p.kind !== 'agent') return fail('sign in to book a room');
+      const room = roomById(m.room);
+      if (!room) return fail('no such room');
+      const start = m.start === undefined || m.start === 'now' ? now : toTime(m.start, now);
+      const end = m.end !== undefined ? toTime(m.end, now) : start + num(m.minutes, 15, 240, 30) * MIN;
+      const slot = checkSlot(this.bookings, { room: room.id, start, end, owner: key }, now);
+      if (slot.error) return fail(slot.error);
+      const b = {
+        id: crypto.randomUUID().slice(0, 8), room: room.id, title: clip(m.title, 80) || `${p.name}'s meeting`,
+        start: slot.start, end: slot.end, owner: key, name: p.name, handle: p.handle,
+        invitees: parseInvitees(m.invitees), lock: !!m.lock, autoRelease: m.autoRelease !== false,
+        seen: false, admitted: [], sent: {}, created: now,
+      };
+      this.bookings.push(b);
+      this.bookings.sort((a, c) => a.start - c.start);
+      done(b);
+      for (const q of this.peers.values()) {
+        if (q !== p && q.ready && isHolder(b, q)) this.note(q, b, 'invite', `📅 ${p.name} invited you to “${b.title}” in ${room.name}, ${fmtRange(b)}`);
+      }
+      return this.tickRooms();
+    }
+
+    const b = this.bookings.find((x) => x.id === m.id);
+    if (!b) return fail('no such booking');
+    const room = roomById(b.room);
+    if (m.op === 'admit') {
+      // Anyone already holding the room can let a knocker in.
+      if (!isHolder(b, p) || !(b.start <= now && now < b.end)) return fail('only people in the meeting can let others in');
+      const q = this.peers.get(m.to);
+      if (!q?.ready) return fail('they left');
+      if (!b.admitted.includes(keyOf(q))) b.admitted.push(keyOf(q));
+      this.note(q, b, 'admit', `🔓 ${p.name} let you into ${room.name}`);
+      return done(b);
+    }
+    if (b.owner !== key) return fail('only the person who booked it can change it');
+    if (m.op === 'cancel' || (m.op === 'end' && b.start > now)) {
+      this.bookings = this.bookings.filter((x) => x !== b);
+      for (const q of this.peers.values()) {
+        if (q !== p && q.ready && isHolder(b, q) && b.end > now) this.note(q, b, 'cancel', `📅 “${b.title}” in ${room.name} was cancelled`);
+      }
+      return done({ ...b, cancelled: true });
+    }
+    if (m.op === 'end') {
+      b.end = Math.max(b.start, now);
+      b.sent.ended = true;
+      return done(b);
+    }
+    if (m.op === 'extend') {
+      const slot = checkSlot(this.bookings, { room: b.room, start: b.start, end: b.end + num(m.minutes, 5, 120, 15) * MIN, owner: key, id: b.id }, now);
+      if (slot.error) return fail(slot.error);
+      b.end = slot.end;
+      b.sent.ending = false;
+      return done(b);
+    }
+    if (m.op === 'update') {
+      if (m.title !== undefined) b.title = clip(m.title, 80) || b.title;
+      if (m.invitees !== undefined) b.invitees = parseInvitees(m.invitees);
+      if (m.lock !== undefined) b.lock = !!m.lock;
+      if (m.start !== undefined || m.end !== undefined) {
+        const start = m.start !== undefined ? toTime(m.start, now) : b.start;
+        const end = m.end !== undefined ? toTime(m.end, now) : start + (b.end - b.start);
+        const slot = checkSlot(this.bookings, { room: b.room, start, end, owner: key, id: b.id }, now);
+        if (slot.error) return fail(slot.error);
+        Object.assign(b, { start: slot.start, end: slot.end, sent: {} });
+        this.bookings.sort((a, c) => a.start - c.start);
+      }
+      return done(b);
+    }
+    fail('unknown booking op');
+  }
+
+  note(q, b, kind, text) {
+    this.sendTo(q, { t: 'roomnote', kind, room: b.room, id: b.id, text });
+  }
+
+  roomsChanged() {
+    this.onChange();
+    this.broadcast({ t: 'bookings', bookings: this.bookings });
+  }
+
+  // Reminders, start/end announcements, locking people out, and releasing
+  // rooms nobody turned up to. Safe to call as often as you like.
+  tickRooms() {
+    const now = this.now();
+    this.lastTick = now;
+    let changed = false;
+    const here = (id) => [...this.peers.values()].filter((q) => q.ready && zoneAt(q.x, q.y)?.id === id);
+    for (const b of [...this.bookings]) {
+      const room = roomById(b.room);
+      const sent = (b.sent ||= {});
+      const inside = here(b.room);
+      if (b.end <= now) {
+        if (!sent.ended) {
+          sent.ended = true; changed = true;
+          for (const q of inside) this.note(q, b, 'ended', `📅 “${b.title}” has ended. ${room.name} is free unless it's booked next.`);
+        }
+        continue;
+      }
+      if (!sent.soon && b.start > now && b.start - now <= RULES.remind) {
+        sent.soon = true; changed = true;
+        for (const q of this.peers.values()) {
+          if (q.ready && isHolder(b, q) && !inside.includes(q)) this.note(q, b, 'soon', `📅 “${b.title}” in ${room.name} starts at ${fmtTime(b.start)}`);
+        }
+      }
+      if (b.start > now) continue;
+      if (!b.seen && inside.some((q) => isHolder(b, q))) { b.seen = true; changed = true; }
+      if (!sent.start) {
+        sent.start = true; changed = true;
+        for (const q of this.peers.values()) {
+          if (!q.ready) continue;
+          if (isHolder(b, q)) {
+            if (!inside.includes(q)) this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`);
+          } else if (inside.includes(q)) {
+            if (b.lock) this.showOut(q, room, `🔒 ${room.name} is booked now for “${b.title}” (${b.name}), so you've been shown out.`);
+            else this.note(q, b, 'taken', `📅 ${room.name} is booked now for “${b.title}” (${b.name}) until ${fmtTime(b.end)}`);
+          }
+        }
+      }
+      if (b.autoRelease && !b.seen && now - b.start >= RULES.grace) {
+        this.bookings = this.bookings.filter((x) => x !== b);
+        changed = true;
+        for (const q of this.peers.values()) {
+          if (q.ready && keyOf(q) === b.owner) this.note(q, b, 'released', `📅 Nobody turned up to “${b.title}”, so ${room.name} was released`);
+        }
+        continue;
+      }
+      if (!sent.ending && b.end - now <= RULES.remind) {
+        sent.ending = true; changed = true;
+        const next = this.bookings.find((x) => x.room === b.room && x.start >= b.end && x.start - b.end < RULES.soon);
+        for (const q of inside) this.note(q, b, 'ending', `⏳ ${Math.ceil((b.end - now) / MIN)} minutes left in ${room.name}${next ? `. Next up: “${next.title}” (${next.name})` : ''}`);
+      }
+    }
+    // Keep a day of history so "earlier today" still shows on the schedule.
+    const keep = this.bookings.filter((b) => now - b.end < 24 * 60 * MIN);
+    if (keep.length !== this.bookings.length) { this.bookings = keep; changed = true; }
+    if (changed) this.roomsChanged();
+  }
+
+  // When tickRooms next has something to do, for a Durable Object alarm.
+  nextRoomEvent() {
+    const now = this.now();
+    let t = Infinity;
+    for (const b of this.bookings) {
+      const s = b.sent || {};
+      for (const [due, when] of [[!s.soon, b.start - RULES.remind], [!s.start, b.start], [b.autoRelease && !b.seen, b.start + RULES.grace], [!s.ending, b.end - RULES.remind], [!s.ended, b.end], [true, b.end + 24 * 60 * MIN]]) {
+        if (due && when > now && when < t) t = when;
+      }
+      if (b.start <= now && now < b.end && !b.seen) t = Math.min(t, now + 30000);
+    }
+    return Number.isFinite(t) ? t : null;
+  }
+
+  showOut(q, room, text) {
+    q.x = room.door.x; q.y = room.door.y; q.seat = null; q.moving = false;
+    q.video = false; q.screen = false;
+    this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: room.id, text });
+    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+    this.broadcast({ t: 'peer', id: q.id, video: false, screen: false });
   }
 }

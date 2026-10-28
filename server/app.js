@@ -4,6 +4,7 @@
 // New endpoints belong here, written against fetch/Request/Response only.
 
 import { loadActor, fetchBlob } from './atproto.js';
+import { ROOMS, roomStatus } from '../public/js/rooms.js';
 
 const json = (code, body) => new Response(JSON.stringify(body), {
   status: code, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -51,6 +52,18 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
       return new Response(blob.buf, { headers: { 'content-type': blob.type, 'cache-control': 'public, max-age=86400, immutable' } });
     }
     if (url.pathname === '/api/office') return json(200, office.summary());
+    // Meeting rooms with their live status and schedule (read-only; book over /ws).
+    if (url.pathname === '/api/rooms') {
+      const now = office.now();
+      return json(200, {
+        now,
+        rooms: ROOMS.map((r) => {
+          const { state, current, next } = roomStatus(office.bookings, r.id, now);
+          return { id: r.id, name: r.name, av: r.av, seats: r.seats, state, current: current?.id || null, next: next?.id || null };
+        }),
+        bookings: office.bookings.filter((b) => b.end > now).map(({ sent, ...b }) => b),
+      });
+    }
     if (url.pathname === '/healthz') return new Response('ok', { headers: { 'content-type': 'text/plain' } });
   } catch (e) {
     return json(502, { error: e.message });

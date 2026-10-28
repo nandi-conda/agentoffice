@@ -49,6 +49,20 @@ export class OfficeRoom extends DurableObject {
 
     // Waking from hibernation: rebuild peers from the sockets that stayed open.
     for (const ws of ctx.getWebSockets()) this.peerFor(ws);
+    this.armRooms();
+  }
+
+  // Room bookings need a wake-up for reminders and start/end announcements
+  // even while the object hibernates, so the next one is kept as an alarm.
+  armRooms() {
+    const t = this.office.nextRoomEvent();
+    if (t && t !== this.alarmAt) { this.alarmAt = t; this.ctx.storage.setAlarm(t); }
+  }
+
+  async alarm() {
+    this.alarmAt = null;
+    this.office.tickRooms();
+    this.armRooms();
   }
 
   async fetch(request) {
@@ -139,6 +153,7 @@ export class OfficeRoom extends DurableObject {
     if (!p) return;
     await this.office.message(p, raw);
     this.persistPeer(p);
+    this.armRooms();
   }
 
   webSocketClose(ws) {
