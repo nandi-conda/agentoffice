@@ -258,12 +258,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .modal.wide { width: min(1240px, 100%); }
 .modal h2 { margin: 0 0 10px; font-size: 18px; }
 .modal h3 { margin: 0 0 8px; font-size: 14px; }
-.modal .close { position: absolute; top: 10px; right: 12px; border: 0; background: transparent; font-size: 24px; cursor: pointer; color: var(--muted); }
+/* The close button floats in the top-right corner so headings and toolbars
+   wrap around it instead of sliding underneath, and sticks while the panel scrolls. */
+.modal > .close { position: sticky; top: -12px; float: right; z-index: 2; width: 32px; height: 32px; margin: -12px -12px 6px 10px; display: grid; place-items: center; border: 0; border-radius: 8px; background: var(--card); font-size: 24px; line-height: 1; cursor: pointer; color: var(--muted); }
+.modal > .close:hover { color: var(--ink); background: var(--line); }
 .modal input, .modal textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: #fff; }
 .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
 .wb-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-.wb-tools { display: flex; gap: 6px; align-items: center; }
+.wb-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
 .swatch.on { box-shadow: 0 0 0 2px var(--accent); }
 .wb-size { height: 30px; border-radius: 8px; border: 1px solid var(--line); }
@@ -378,7 +381,7 @@ input, select, textarea { font: inherit; color: inherit; }
   .tb.mic-more { min-width: 26px; width: 26px; }
   .prompt { min-height: 40px; }
   .day-nav button { width: 40px; height: 40px; }
-  .modal .close { width: 44px; height: 44px; top: 4px; right: 4px; }
+  .modal > .close { width: 44px; height: 44px; margin: -14px -12px 4px 8px; }
   .tile .grow-btn { width: 36px; height: 36px; }
   .zoom-in, .zoom-out, .emotes kbd { display: none; }
 }
