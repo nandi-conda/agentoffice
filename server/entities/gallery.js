@@ -174,6 +174,7 @@ export class UploadedObject extends PluginObject {
   async install(item, code) {
     this.code = code;
     await this.host.storage.put('code', code);
+    await this.feedClear();
     this.state = { setupDone: true, meta: item, data: null, display: null, via: null };
     await this.save();
     return true;
@@ -182,6 +183,7 @@ export class UploadedObject extends PluginObject {
   async uninstall() {
     this.code = null;
     await this.host.storage.delete('code');
+    await this.feedClear();
     this.state = { setupDone: true, removed: this.now() };
     await this.save();
     await this.mirror(null);

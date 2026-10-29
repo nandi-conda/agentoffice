@@ -38,9 +38,9 @@ test('generated tools: names, read-only split, no internal methods', () => {
   const tools = generatedTools(describeApi());
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
   assert.ok(by.desk_claim && !by.desk_claim.readOnly);
-  assert.ok(by.whiteboard_view.readOnly && by.plugin_view.readOnly);
-  // Retired kinds (the notice board, coffee machine and pomodoro are plugin objects now) have none.
-  for (const n of ['noticeboard_view', 'noticeboard_add', 'coffee_brew', 'pomodoro_start']) assert.ok(!by[n], `${n} is retired`);
+  assert.ok(by.desk_view.readOnly && by.plugin_view.readOnly);
+  // Retired kinds (the whiteboard, notice board, coffee machine and pomodoro are plugin objects now) have none.
+  for (const n of ['whiteboard_view', 'whiteboard_clear', 'noticeboard_view', 'noticeboard_add', 'coffee_brew', 'pomodoro_start']) assert.ok(!by[n], `${n} is retired`);
   assert.ok(by.room_book.input.properties.op && by.room_book.input.required.includes('name'));
   for (const n of ['desk_touch', 'room_tick', 'actor_sessionGet', 'actor_view', 'topic_publish', 'desk_inspect', 'desk_seed']) assert.ok(!by[n], `${n} should not be a tool`);
 });
@@ -66,12 +66,12 @@ test('MCP: observers read through generated tools but cannot act', async () => {
   const { connect } = await setup();
   const c = await connect();
   const names = (await c.listTools()).tools.map((t) => t.name);
-  for (const n of ['whiteboard_view', 'plugin_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
+  for (const n of ['plugin_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
   // Tools they can't use aren't listed (and can't be called).
-  for (const n of ['desk_claim', 'plugin_interact', 'room_book', 'whiteboard_clear', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
-  assert.deepEqual(await call(c, 'whiteboard_view'), []);
+  for (const n of ['desk_claim', 'plugin_interact', 'room_book', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
+  assert.equal((await call(c, 'plugin_view', { name: 'whiteboard' })).feed, undefined, 'nothing drawn yet');
   assert.equal(await call(c, 'desk_view', { name: 'desk-1' }), null);
-  await assert.rejects(call(c, 'whiteboard_clear', {}), /disabled/i);
+  await assert.rejects(call(c, 'desk_claim', { name: 'desk-1', goal: 'x' }), /disabled/i);
   await assert.rejects(call(c, 'desk_view', { name: 'desk-999' }));
   await c.close();
 });

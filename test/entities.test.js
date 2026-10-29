@@ -60,9 +60,9 @@ test('the old single-object state moves into the entities on first start', async
   const o = new Office(legacy, { plugins: wasmPlugins() });
   await o.ready;
   assert.equal(o.desks['desk-3'].goal, 'parser');
-  // The notice board, arcade, coffee machine and pomodoro are WASM plugins now:
-  // they take over what their old entities were seeded with as soon as they wake.
-  await until(() => o.notes.length && o.scores.length && o.counters.pomodoros && o.counters.coffees);
+  // The notice board, arcade, coffee machine, pomodoro and whiteboard are WASM
+  // plugins now: they take over what their old entities were seeded with as soon as they wake.
+  await until(() => o.notes.length && o.scores.length && o.counters.pomodoros && o.counters.coffees && o.strokes.length);
   assert.equal(o.notes[0].text, 'hi');
   assert.equal(o.strokes.length, 1);
   assert.equal(o.scores[0].score, 50);
@@ -84,13 +84,17 @@ test('the plugin objects take over what the core entities kept, a running timer 
     'noticeboard:main': { state: { notes: [{ id: 'n1', text: 'old note', by: 'ada', owner: 'did:plc:ada', ts: 1, color: '#fde68a' }] } },
     'coffee:main': { state: { count: 41 } },
     'arcade:main': { state: { scores: [{ name: 'ada', score: 300, ts: 1 }, { name: 'grace', score: 120, ts: 2 }] } },
+    // The whiteboard kept its strokes one key each.
+    'whiteboard:main': { state: { seq: 2, first: 1 }, 's:0000000001': { points: [[0, 0], [1, 1]], color: '#000000', size: 3, by: 'ada' }, 's:0000000002': { points: [[0.5, 0], [0.5, 1]], color: '#ef4444', size: 6, by: 'grace' } },
     'pomodoro:focus': { state: { phase: 'focus', endsAt: now + MIN, round: 3, focusMin: 25, breakMin: 5, startedBy: 'ada', count: 7 } },
   });
   const o = new Office({ migrated: true }, { now: () => now, runtime });
   await o.ready;
-  await until(() => o.notes.length && o.scores.length && o.counters.coffees && o.pomoState().focus.phase === 'focus');
+  await until(() => o.notes.length && o.scores.length && o.counters.coffees && o.pomoState().focus.phase === 'focus' && o.strokes.length);
   assert.equal(o.notes[0].text, 'old note');
   assert.deepEqual(o.scores.map((s) => s.score), [300, 120]);
+  assert.deepEqual(o.strokes.map((s) => s.by), ['ada', 'grace']);
+  assert.equal((await runtime.ref('plugin:whiteboard').view()).feed.length, 2, 'the strokes are the plugin object\'s feed now');
   assert.deepEqual(o.counters, { coffees: 41, pomodoros: 7, waves: 0 });
   assert.equal(o.pomoState().focus.round, 3);
   // Its phase turns over on the plugin's own wake-up.

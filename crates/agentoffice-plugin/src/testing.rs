@@ -50,6 +50,11 @@ pub mod limits {
     pub const STACK: u32 = 20;
     pub const WATCH: usize = 12;
     pub const DATA_BYTES: usize = 16 * 1024;
+    /// `data` sent with an action.
+    pub const REQUEST_DATA_BYTES: usize = 16 * 1024;
+    pub const APPEND: usize = 20;
+    pub const FEED_ENTRY_BYTES: usize = 8 * 1024;
+    pub const FEED: usize = 3000;
 }
 
 thread_local! {
@@ -97,6 +102,8 @@ pub struct TestOffice<P> {
     granted: Vec<String>,
     rooms: Vec<Room>,
     unlocked: Vec<(String, String)>,
+    feed: Vec<Value>,
+    data_now: Option<Value>,
     plugin: std::marker::PhantomData<P>,
 }
 
@@ -128,6 +135,8 @@ impl<P: Plugin> TestOffice<P> {
             rooms: [("booth1", "Booth 1"), ("booth2", "Booth 2"), ("booth3", "Booth 3"), ("board", "Boardroom"), ("huddle", "Huddle Room")]
                 .into_iter().map(|(id, name)| Room { id: id.into(), name: name.into(), booking: None }).collect(),
             unlocked: Vec::new(),
+            feed: Vec::new(),
+            data_now: None,
             plugin: std::marker::PhantomData,
         }
     }
@@ -215,6 +224,17 @@ impl<P: Plugin> TestOffice<P> {
         self.call(name, action, Some(text))
     }
 
+    /// `name` sends `action` with JSON `data`, the way an office-drawn panel
+    /// (the whiteboard) or an agent does.
+    pub fn send(&mut self, name: &str, action: &str, data: impl serde::Serialize) -> Response {
+        assert!(valid_action(action), "the office only sends action ids like [\\w:.-]{{1,64}}, not {action:?}");
+        let data = serde_json::to_value(data).expect("data is JSON");
+        assert!(data.to_string().len() <= limits::REQUEST_DATA_BYTES, "the office sends at most {} bytes of data", limits::REQUEST_DATA_BYTES);
+        let who = self.actor(name);
+        self.data_now = Some(data);
+        self.run(who, action, None)
+    }
+
     /// Jump the clock to the `wake_at` you asked for and make the office's
     /// `tick` call. Panics if nothing asked to be woken.
     pub fn tick(&mut self) -> Response {
@@ -253,6 +273,7 @@ impl<P: Plugin> TestOffice<P> {
         let seed = self.seed;
         self.seed = self.seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         let event = self.event_now.take();
+        let data = self.data_now.take();
         let nearby: Vec<Person> = self.people.values().map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone() }).collect();
         let inventory = if who.is_system() { Vec::new() } else { self.inventory(&who.name).to_vec() };
         // Like the office: rooms only for plugins that may unlock, each
@@ -266,7 +287,7 @@ impl<P: Plugin> TestOffice<P> {
             }).collect()
         } else { Vec::new() };
         let req = json!({
-            "object": self.object, "actor": who, "action": action, "input": input,
+            "object": self.object, "actor": who, "action": action, "input": input, "data": data,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
             "event": event, "seed": seed, "permissions": self.granted, "rooms": rooms,
         });
@@ -305,6 +326,18 @@ impl<P: Plugin> TestOffice<P> {
                 }
             };
             if let Some(t) = why { r.unlock = None; r.toast = Some(t); }
+        }
+        // The feed: only with the permission, like the office.
+        if (r.clear_feed || !r.append.is_empty()) && !self.granted.iter().any(|g| g == "feed") {
+            self.warn("the answer changes the feed without the feed permission and the office ignores it: add Permission::Feed to MANIFEST (moderators upload those)".into());
+        } else {
+            if r.clear_feed { self.feed.clear(); }
+            for e in r.append.iter().take(limits::APPEND) {
+                if e.to_string().len() > limits::FEED_ENTRY_BYTES { continue; }
+                self.feed.push(e.clone());
+            }
+            let over = self.feed.len().saturating_sub(limits::FEED);
+            self.feed.drain(..over);
         }
         if let Some(state) = raw.get("state") { self.save_state(state); }
         if let Some(s) = &r.say { self.said.push(s.clone()); }
@@ -376,6 +409,8 @@ impl<P: Plugin> TestOffice<P> {
             if d.data.as_ref().is_some_and(|v| v.to_string().len() > limits::DATA_BYTES) { w.push(format!("display.data is over {} bytes and is dropped", limits::DATA_BYTES)); }
         }
         assert!(r.take.len() <= limits::GIVE, "take uses up {} kinds of things; the office takes {} at most", r.take.len(), limits::GIVE);
+        if r.append.len() > limits::APPEND { w.push(format!("append adds {} entries; the office takes {} per answer", r.append.len(), limits::APPEND)); }
+        if r.append.iter().any(|e| e.to_string().len() > limits::FEED_ENTRY_BYTES) { w.push(format!("a feed entry is over {} bytes and is dropped", limits::FEED_ENTRY_BYTES)); }
         assert!(r.give.len() <= limits::GIVE, "give hands out {} things; the office takes {} at most", r.give.len(), limits::GIVE);
         for g in &r.give {
             assert!(valid_kind(&g.kind), "give kind {:?} must be [a-z0-9:._-], up to 32 characters", g.kind);
@@ -416,6 +451,8 @@ impl<P: Plugin> TestOffice<P> {
     pub fn said(&self) -> &[String] { &self.said }
     /// What everyone sees on the object now.
     pub fn display(&self) -> Option<&Display> { self.display.as_ref() }
+    /// The feed as the office keeps it ([`Response::append`]), oldest first.
+    pub fn feed(&self) -> &[Value] { &self.feed }
     /// When the plugin asked to be woken.
     pub fn wake_at(&self) -> Option<f64> { self.wake_at }
     /// The zones the plugin watches now.

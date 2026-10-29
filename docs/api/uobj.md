@@ -9,9 +9,9 @@ An object someone uploaded (gallery:main lists them). Its plugin runs in the san
 
 `read-only` · MCP tool **`uobj_view`**
 
-What everyone sees on the object and how its plugin was last reached.
+What everyone sees on the object and how its plugin was last reached, and its feed when it keeps one (the whiteboard's strokes).
 
-Returns `{ display, via }`
+Returns `{ display, via, feed? }`
 
 ## `interact(who, req)`
 
@@ -21,9 +21,10 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 
 | Param | Type | |
 | --- | --- | --- |
-| `req` | `{ action?, input? }` | What to do |
+| `req` | `{ action?, input?, data? }` | What to do |
 | &nbsp;&nbsp;&nbsp;`req.action` *(optional)* | `string ≤ 64 /^[\w:.-]{1,64}$/` | Action id |
 | &nbsp;&nbsp;&nbsp;`req.input` *(optional)* | `string \| null` | Typed text |
+| &nbsp;&nbsp;&nbsp;`req.data` *(optional)* | `any` | JSON for actions that take it (≤ 16 KB), e.g. a whiteboard stroke { points, color, size } |
 
 Returns `object | null`
 
@@ -51,7 +52,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
 | &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
-| &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), unlock (privileged) |
+| &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "feed" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), feed (trusted), unlock (privileged) |
 | &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |
 | &nbsp;&nbsp;&nbsp;`item.api` | `object` | The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest. |
 | `code` | `string ≤ 699052` | Base64 code |

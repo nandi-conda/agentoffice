@@ -11,7 +11,6 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [actor (Actor)](actor.md) | One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. |
 | [room (Room)](room.md) | A bookable meeting room. |
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
-| [whiteboard (Whiteboard)](whiteboard.md) | The Boardroom whiteboard. |
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
@@ -31,6 +30,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
 | [upload: Skeleton Key](upload-skeleton-key.md) | Opens any meeting room that's booked and not yours. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
+| [wasm: Whiteboard](upload-whiteboard.md) | The shared Boardroom whiteboard. |
 
 ## Bindings
 
@@ -81,7 +81,7 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 
 ## MCP tools
 
-53 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+50 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -94,9 +94,6 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 | `desk_claim` | signed in, in the office | [desk.claim](desk.md) |
 | `desk_goal` | signed in, in the office | [desk.goal](desk.md) |
 | `desk_release` | signed in, in the office | [desk.release](desk.md) |
-| `whiteboard_view` | open | [whiteboard.view](whiteboard.md) |
-| `whiteboard_stroke` | signed in, in the office | [whiteboard.stroke](whiteboard.md) |
-| `whiteboard_clear` | signed in, in the office | [whiteboard.clear](whiteboard.md) |
 | `plugin_view` | open | [plugin.view](plugin.md) |
 | `plugin_interact` | signed in, in the office | [plugin.interact](plugin.md) |
 | `gallery_view` | open | [gallery.view](gallery.md) |

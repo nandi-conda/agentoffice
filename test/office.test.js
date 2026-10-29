@@ -94,14 +94,24 @@ test('rtc signals are relayed only to the addressed peer', async () => {
   assert.equal(c.ws.last('rtc'), undefined);
 });
 
-test('whiteboard strokes are clamped and shared', async () => {
-  const o = new Office();
+test('whiteboard strokes are clamped and shared by its WASM plugin', async () => {
+  const o = new Office({}, { plugins: wasmPlugins() });
+  await o.ready;
   const a = await join(o, 'ada'), b = await join(o, 'grace');
   a.ws.msg({ t: 'wb', op: 'stroke', points: [[0, 0], [2, -1]], color: 'red', size: 99 }); await tick();
-  const s = b.ws.last('wb').stroke;
-  assert.deepEqual(s.points[1], [1, 0]);
-  assert.equal(s.color, '#1f2937');
-  assert.equal(s.size, 24);
+  const s = (await until(() => b.ws.last('wb'))).stroke;
+  assert.deepEqual(s, { points: [[0, 0], [1, 0]], color: '#1f2937', size: 40, by: 'ada' });
+  assert.equal(a.ws.last('wb'), undefined, 'the drawer drew it already');
+  // Scribbles come faster than an object's cooldown, and none are lost.
+  for (let i = 0; i < 5; i++) a.ws.msg({ t: 'wb', op: 'stroke', points: [[0.1 * i, 0], [0.1 * i, 1]], color: '#2563eb', size: 4 });
+  await until(() => b.ws.all('wb').length === 6);
+  assert.equal(o.strokes.length, 6);
+  const c = await join(o, 'linus');
+  assert.equal(c.ws.last('welcome').strokes.length, 6);
+  c.ws.msg({ t: 'wb', op: 'clear' });
+  await until(() => a.ws.last('wb')?.op === 'clear' && b.ws.last('wb')?.op === 'clear');
+  assert.deepEqual(o.strokes, []);
+  o.runtime.stop();
 });
 
 test('signed-in DIDs load the character server-side', async () => {

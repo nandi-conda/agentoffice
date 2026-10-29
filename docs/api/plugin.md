@@ -4,15 +4,15 @@ An interactive object on the map (jukebox, vending machine, 8-ball, the Office R
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 8: `pomodoro`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
+- 9: `pomodoro`, `whiteboard`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
 
 ## `view()`
 
 `read-only` · MCP tool **`plugin_view`**
 
-What everyone sees on the object and how its plugin was last reached.
+What everyone sees on the object and how its plugin was last reached, and its feed when it keeps one (the whiteboard's strokes).
 
-Returns `{ display, via }`
+Returns `{ display, via, feed? }`
 
 ## `interact(who, req)`
 
@@ -22,11 +22,22 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 
 | Param | Type | |
 | --- | --- | --- |
-| `req` | `{ action?, input? }` | What to do |
+| `req` | `{ action?, input?, data? }` | What to do |
 | &nbsp;&nbsp;&nbsp;`req.action` *(optional)* | `string ≤ 64 /^[\w:.-]{1,64}$/` | Action id |
 | &nbsp;&nbsp;&nbsp;`req.input` *(optional)* | `string \| null` | Typed text |
+| &nbsp;&nbsp;&nbsp;`req.data` *(optional)* | `any` | JSON for actions that take it (≤ 16 KB), e.g. a whiteboard stroke { points, color, size } |
 
 Returns `object | null`
+
+## `perform(who, req)`
+
+`mutates` · `caller filled in by the World` · `internal (entity to entity)`
+
+A protocol message the World turns into an action (the whiteboard's `wb` strokes): like interact, without the cooldown between uses.
+
+| Param | Type | |
+| --- | --- | --- |
+| `req` | `object` | { action, input, data } |
 
 ## `wake()`
 

@@ -21,8 +21,8 @@ tag = "v1"
 new_sqlite_classes = ["OfficeRoom"]
 
 # Every entity is its own Durable Object (worker/entities.js): one per actor
-# (DID or agent), per meeting room, per item (desks, whiteboard, notice
-# board, arcade, coffee machine, pomodoro timers) and per pub/sub topic.
+# (DID or agent), per meeting room, per item (desks, the arcade, each
+# plugin object on the map and each upload) and per pub/sub topic.
 [[durable_objects.bindings]]
 name = "ACTOR"
 class_name = "ActorDO"

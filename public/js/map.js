@@ -89,7 +89,9 @@ for (let i = 0; i < 4; i++) {
     SEATS.push({ id, x: 38 + i * 2, y: cy + 0.5, facing: f });
   }
 }
-add({ type: 'whiteboard', id: 'whiteboard', x: 38, y: 1, w: 6, h: 1, solid: true, interact: 'whiteboard' });
+// A WASM plugin (plugins/wasm-whiteboard) whose strokes are its feed;
+// browsers draw them on the wall and in their own editor (interact 'whiteboard').
+add({ type: 'whiteboard', id: 'whiteboard', x: 38, y: 1, w: 6, h: 1, solid: true, interact: 'whiteboard', plugin: 'whiteboard', wasm: 'whiteboard.wasm', name: 'Whiteboard', prompt: 'Open the whiteboard', legacy: 'whiteboard:main' });
 add({ type: 'screen', id: 'board-screen', x: 44, y: 1, w: 2, h: 1, solid: true, zone: 'board' });
 add({ type: 'plant', id: 'p-board', x: 46, y: 10, w: 1, h: 1, solid: true });
 

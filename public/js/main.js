@@ -435,7 +435,7 @@ function onMessage(m) {
       break;
     }
     case 'counters': counters = m.counters; break;
-    case 'wb': if (m.op === 'clear') board.clear(); else board.add(m.stroke); modal.wb?.repaint(); break;
+    case 'wb': if (m.op === 'clear') board.clear(); else if (m.op === 'set') board.set(m.strokes || []); else board.add(m.stroke); modal.wb?.repaint(); break;
     case 'scores': scores = m.scores; modal.snake?.scores(scores); break;
     case 'wave': {
       const p = peers.get(m.from);

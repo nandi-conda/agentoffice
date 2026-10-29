@@ -1,7 +1,7 @@
 // Entities: every stateful thing in the office is an Entity with its own
 // storage, alarm and inbox: each actor (a signed-in person or an agent),
-// each bookable room, each desk, each pomodoro timer, the whiteboard, the
-// notice board, the arcade, the coffee machine, and the pub/sub topics they
+// each bookable room, each desk, each object on the map (the whiteboard, the
+// notice board, the coffee machine…), the arcade, and the pub/sub topics they
 // talk over. On Cloudflare each one is its own Durable Object
 // (worker/entities.js); on Node they all live in this process
 // (LocalRuntime). Either way they share one messaging layer:

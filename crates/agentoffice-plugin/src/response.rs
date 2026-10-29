@@ -52,6 +52,17 @@ pub struct Response {
     /// [`Permission::Unlock`](crate::Permission::Unlock) (admins upload those).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unlock: Option<Unlock>,
+    /// Entries to add to the object's feed (≤ 20 per answer, ≤ 8 KB each):
+    /// a long list the office keeps (the last 3000) and every browser gets,
+    /// for objects the office draws itself, like the whiteboard's strokes.
+    /// Your state stays small; the feed isn't sent back to you. Needs
+    /// [`Permission::Feed`](crate::Permission::Feed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub append: Vec<Value>,
+    /// Empty the feed (before anything in `append` goes on). Needs
+    /// [`Permission::Feed`](crate::Permission::Feed).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clear_feed: bool,
 }
 
 impl Response {
@@ -77,6 +88,13 @@ impl Response {
     pub fn take(mut self, kind: impl Into<String>, qty: u32) -> Self { self.take.push(Take { kind: kind.into(), qty }); self }
     /// Let them into room `room` (an id from [`Request::rooms`](crate::Request::rooms)).
     pub fn unlock(mut self, room: impl Into<String>) -> Self { self.unlock = Some(Unlock { room: room.into() }); self }
+    /// Add an entry to the feed (see the field).
+    pub fn append(mut self, entry: impl Serialize) -> Self {
+        if let Ok(v) = serde_json::to_value(entry) { self.append.push(v); }
+        self
+    }
+    /// Empty the feed.
+    pub fn clear_feed(mut self) -> Self { self.clear_feed = true; self }
 }
 
 /// Things to use up: `qty` (1–20) of `kind`.

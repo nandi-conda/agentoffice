@@ -69,7 +69,7 @@ function shapeEvent(m, client, office) {
     case 'join': return { type: 'join', id: m.peer.id, name: m.peer.name, kind: m.peer.kind, handle: m.peer.handle, did: m.peer.did };
     case 'leave': return { type: 'leave', id: m.id, name: client?.lastNames.get(m.id) || m.lastName || m.id };
     case 'move': return { type: 'move', id: m.id, name: name(m.id), x: round(m.x), y: round(m.y), zone: zoneAt(m.x, m.y)?.id };
-    case 'wb': return m.op === 'clear' ? { type: 'wb', op: 'clear' } : { type: 'wb', op: 'stroke', by: m.stroke?.by, color: m.stroke?.color, points: m.stroke?.points?.length };
+    case 'wb': return m.op === 'clear' ? { type: 'wb', op: 'clear' } : m.op === 'set' ? { type: 'wb', op: 'set', strokes: m.strokes?.length || 0 } : { type: 'wb', op: 'stroke', by: m.stroke?.by, color: m.stroke?.color, points: m.stroke?.points?.length };
     case 'wave': return { type: 'wave', from: m.name, fromId: m.from, kind: m.kind };
     case 'peer': { const { t, ...rest } = m; return { type: 'peer', name: name(m.id), ...rest }; }
     case 'bookings': return { type: 'bookings', upcoming: m.bookings.filter((b) => b.end > Date.now()).length, tip: 'call rooms for the schedule' };
@@ -603,7 +603,7 @@ export class McpHub {
         strokes: z.array(z.object({
           points: z.array(z.tuple([z.number(), z.number()])).min(2).max(400),
           color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-          size: z.number().min(1).max(24).optional(),
+          size: z.number().min(1).max(40).optional(),
         })).max(50).optional(),
       },
       async ({ op, strokes = [] }) => {

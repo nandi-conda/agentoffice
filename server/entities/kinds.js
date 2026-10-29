@@ -293,62 +293,29 @@ export class Desk extends Entity {
   }
 }
 
-// ---- the whiteboard ------------------------------------------------------------
-// Strokes are stored one key each, so drawing only writes what changed.
-export class Whiteboard extends Entity {
-  static doc = 'The Boardroom whiteboard. Strokes are kept one storage key each (the last 3000), so drawing only writes what changed.';
-  static api = {
-    view: { doc: 'Every stroke on the board.', returns: arr(obj({ points: arr(arr(numS('0..1', 0, 1)), 'Points'), color: str('#rrggbb'), size: numS('Width', 1, 24), by: str('Who drew it') }), 'Strokes') },
-    stroke: {
-      doc: 'Draw a stroke. Coordinates are 0..1 across the board, origin top-left.', who: true, mutates: true,
-      params: { stroke: obj({ points: arr(arr(numS('0..1', 0, 1), '[x, y]', 2), 'At least 2 points, at most 400', 400), color: opt(str('#rrggbb', 7, { pattern: '^#[0-9a-fA-F]{6}$' })), size: opt(numS('Width', 1, 24)) }, 'The stroke', ['points']) },
-    },
-    clear: { doc: 'Wipe the board.', mutates: true },
-  };
-
-  async strokes() {
-    return [...(await this.host.storage.list({ prefix: 's:' })).values()];
-  }
-  view() { return this.strokes(); }
-
-  async seed(strokes) {
-    if (!Array.isArray(strokes) || this.state.seq) return;
-    for (const s of strokes.slice(-MAX_STROKES)) await this.add(s);
-    await this.save();
-  }
-
-  async add(stroke) {
-    const seq = (this.state.seq || 0) + 1;
-    this.state.seq = seq;
-    this.state.first ||= seq;
-    await this.host.storage.put(`s:${String(seq).padStart(10, '0')}`, stroke);
-    while (seq - this.state.first + 1 > MAX_STROKES) await this.host.storage.delete(`s:${String(this.state.first++).padStart(10, '0')}`);
-  }
-
-  async stroke(who, m) {
-    if (!Array.isArray(m.points) || m.points.length < 2) return;
-    const points = m.points.slice(0, 400).map((pt) => [num(pt?.[0], 0, 1), num(pt?.[1], 0, 1)]);
-    const color = /^#[0-9a-f]{6}$/i.test(m.color) ? m.color : '#1f2937';
-    const stroke = { points, color, size: num(m.size, 1, 24, 3), by: who.name };
-    await this.add(stroke);
-    await this.save();
-    await this.emit({ op: 'mirror', push: stroke, max: MAX_STROKES, except: who.id });
-  }
-
-  async clear() {
-    for (const k of (await this.host.storage.list({ prefix: 's:' })).keys()) await this.host.storage.delete(k);
-    this.state.first = (this.state.seq || 0) + 1;
-    await this.save();
-    await this.mirror([]);
-  }
-}
-
-// ---- retired: the notice board, arcade, coffee machine and pomodoro ------
-// They're WASM plugins now (plugins/wasm-noticeboard, -arcade, -coffee,
-// -pomodoro; entities plugin:noticeboard, plugin:arcade, plugin:coffee, plugin:pomodoro). These keep
+// ---- retired: the whiteboard, notice board, arcade, coffee machine and pomodoro
+// They're WASM plugins now (plugins/wasm-whiteboard, -noticeboard, -arcade,
+// -coffee, -pomodoro; entities plugin:whiteboard, plugin:noticeboard,
+// plugin:arcade, plugin:coffee, plugin:pomodoro). These keep
 // what the old entities saved so the plugin entities can take it over the
 // first time they run (`legacy` on the map object, PluginObject.adopt), and
 // take the very first offices' state (World.boot). Nothing else calls them.
+// The whiteboard kept its strokes one storage key each; the plugin object
+// takes them over as its feed.
+export class Whiteboard extends Entity {
+  static retired = true;
+  static doc = 'Retired: the whiteboard is the plugin:whiteboard object now. Keeps the strokes it had for it.';
+  static api = {};
+  async view() { return [...(await this.host.storage.list({ prefix: 's:' })).values()]; }
+  async seed(strokes) {
+    if (!Array.isArray(strokes) || this.state.seq) return;
+    let seq = 0;
+    for (const s of strokes.slice(-MAX_STROKES)) await this.host.storage.put(`s:${String(++seq).padStart(10, '0')}`, s);
+    this.state.seq = seq;
+    await this.save();
+  }
+}
+
 export class NoticeBoard extends Entity {
   static retired = true;
   static doc = 'Retired: the notice board is the plugin:noticeboard object now. Keeps the notes it had for it.';
@@ -728,7 +695,7 @@ export const KINDS = {
 export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
-  'whiteboard:main', 'floor:main', 'wing:main', 'roles:main',
+  'floor:main', 'wing:main', 'roles:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

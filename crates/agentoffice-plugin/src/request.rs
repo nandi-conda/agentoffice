@@ -135,6 +135,9 @@ pub struct Request {
     pub action: String,
     /// Text typed into your panel's input box.
     pub input: Option<String>,
+    /// JSON sent with the action (≤ 16 KB) by an office-drawn panel or an
+    /// agent, e.g. a whiteboard stroke. Read it with [`data_as`](Request::data_as).
+    pub data: Option<Value>,
     /// True when there was no state yet (the first call ever).
     pub fresh: bool,
     pub nearby: Vec<Person>,
@@ -175,6 +178,11 @@ impl Request {
     /// The part after `prefix:`: for action `play:rain`, `req.arg("play")` is `Some("rain")`.
     pub fn arg(&self, prefix: &str) -> Option<&str> {
         self.action.strip_prefix(prefix)?.strip_prefix(':')
+    }
+    /// The [`data`](Request::data) sent with the action, as your own type
+    /// (`None` when there's none or it doesn't fit).
+    pub fn data_as<T: DeserializeOwned>(&self) -> Option<T> {
+        self.data.clone().and_then(|d| serde_json::from_value(d).ok())
     }
     /// The typed text, trimmed ("" when there's none).
     pub fn text(&self) -> &str { self.input.as_deref().unwrap_or("").trim() }
@@ -234,6 +242,7 @@ pub(crate) struct RawRequest {
     pub actor: Actor,
     pub action: Option<String>,
     pub input: Option<String>,
+    pub data: Option<Value>,
     pub state: Value,
     pub nearby: Vec<Person>,
     pub inventory: Vec<Item>,
@@ -250,7 +259,7 @@ impl RawRequest {
         (self.state, Request {
             object: self.object, actor: self.actor,
             action: self.action.unwrap_or_else(|| "use".into()),
-            input: self.input, fresh,
+            input: self.input, data: self.data, fresh,
             nearby: self.nearby, inventory: self.inventory, event: self.event, now: self.now,
             seed: self.seed,
             permissions: self.permissions, rooms: self.rooms,

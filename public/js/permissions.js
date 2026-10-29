@@ -17,6 +17,7 @@ export const LEVELS = {
 
 export const PERMISSIONS = {
   take: { level: 'trusted', label: 'Take things', doc: 'Use up things the person carries (Response::take), all or nothing with what it gives.' },
+  feed: { level: 'trusted', label: 'Keep a feed', doc: 'Keep a long list every browser gets, beyond its 32 KB of state (Response::append, Response::clear_feed): the last 3000 entries of up to 8 KB, like the whiteboard\'s strokes. It\'s the office\'s storage and bandwidth.' },
   unlock: { level: 'privileged', label: 'Open booked rooms', doc: 'Let whoever uses it into a meeting room someone else booked (Response::unlock), past the booking. The request carries `rooms`, each bookable room and what is on in it now.' },
 };
 

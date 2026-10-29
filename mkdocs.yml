@@ -44,7 +44,6 @@ nav:
       - "actor (Actor)": api/actor.md
       - "room (Room)": api/room.md
       - "desk (Desk)": api/desk.md
-      - "whiteboard (Whiteboard)": api/whiteboard.md
       - "plugin (PluginObject)": api/plugin.md
       - "gallery (Gallery)": api/gallery.md
       - "uobj (UploadedObject)": api/uobj.md
@@ -64,3 +63,4 @@ nav:
       - "wasm: Office Rally": api/upload-office-rally.md
       - "upload: Skeleton Key": api/upload-skeleton-key.md
       - "wasm: Vending machine": api/upload-vending-machine.md
+      - "wasm: Whiteboard": api/upload-whiteboard.md

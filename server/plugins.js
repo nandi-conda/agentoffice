@@ -23,16 +23,22 @@ import { cleanPermissions } from '../public/js/permissions.js';
 export const TIMEOUT_MS = 5000;
 export const MAX_STATE = 32 * 1024;
 export const MAX_DATA = 16 * 1024;
+// JSON sent with an action (a whiteboard stroke).
+export const MAX_REQUEST_DATA = 16 * 1024;
+// The feed (Permission::Feed): entries per answer, bytes each, entries kept.
+export const MAX_APPEND = 20;
+export const MAX_FEED_ENTRY = 8 * 1024;
+export const MAX_FEED = 3000;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
 export const MAX_WATCH = 12;
 
-// What a client may send: an action id and some typed text.
+// What a client may send: an action id, some typed text, and some JSON.
 export function cleanRequest(m) {
   const action = typeof m?.action === 'string' && ACTION.test(m.action) ? m.action : 'use';
   const input = m?.input == null ? null : clip(m.input, 500);
-  return { action, input };
+  return { action, input, data: cleanData(m?.data, MAX_REQUEST_DATA) };
 }
 
 export class PluginHost {
@@ -74,11 +80,11 @@ export class PluginHost {
   // rooms: () => Promise<[{ id, name, booking }]>, the bookable rooms and
   // what's on in them, read only for plugins with the unlock permission.
   // object.permissions: what an upload was granted.
-  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [], event = null, rooms = null }) {
+  async interact({ object, actor, action = 'use', input = null, data = null, state = null, nearby = [], now = this.now(), inventory = [], event = null, rooms = null }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind, role: actor.role || null },
-      action, input, state, nearby: nearby.slice(0, 20), now, event,
+      action, input, data: cleanData(data, MAX_REQUEST_DATA), state, nearby: nearby.slice(0, 20), now, event,
       inventory: inventory.slice(0, 40).map(({ id, kind, name, emoji, qty, data }) => ({ id, kind, name, emoji, qty, ...(data !== undefined ? { data } : {}) })),
       // WASM has no randomness of its own.
       seed: Math.floor(Math.random() * 2 ** 53),
@@ -108,6 +114,11 @@ export class PluginHost {
       log('warning', `plugin:${object.id}`, 'answered with take without the take permission: dropped');
       result.take = [];
     }
+    if ((result.append.length || result.clearFeed) && !permissions.includes('feed')) {
+      log('warning', `plugin:${object.id}`, 'answered with a feed change without the feed permission: dropped');
+      result.append = [];
+      result.clearFeed = false;
+    }
     if (result.unlock && !permissions.includes('unlock')) {
       log('warning', `plugin:${object.id}`, 'answered with unlock without the unlock permission: refused');
       result.unlock = null;
@@ -131,11 +142,11 @@ function withTimeout(p, ms) {
   ]);
 }
 
-function cleanData(d) {
+function cleanData(d, max = MAX_DATA) {
   if (d === undefined || d === null) return null;
   try {
     const json = JSON.stringify(d);
-    return json && json.length <= MAX_DATA ? JSON.parse(json) : null;
+    return json && json.length <= max ? JSON.parse(json) : null;
   } catch { return null; }
 }
 
@@ -143,7 +154,9 @@ function cleanData(d) {
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
   const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
-  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [], unlock: null };
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [], unlock: null, append: [], clearFeed: !!r.clearFeed };
+  // Entries for the object's feed (needs the feed permission): plain JSON, each ≤ 8 KB.
+  if (Array.isArray(r.append)) out.append = r.append.slice(0, MAX_APPEND).map((e) => cleanData(e, MAX_FEED_ENTRY)).filter((e) => e !== null);
   // Items for the person who used it (give), and things of theirs it uses up
   // (take, by kind): the office applies both together, all or nothing.
   if (Array.isArray(r.give)) out.give = r.give.slice(0, 5).map((i) => cleanItem(i)).filter(Boolean).map(({ at, from, ...i }) => i);

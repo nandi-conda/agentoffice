@@ -1,13 +1,13 @@
 // Interactive objects on the map (jukebox, vending machine, 8-ball, the
-// Office Rally, the coffee machine, notice board, pomodoro, arcade…): one entity per object, address `plugin:<object id>`.
+// Office Rally, the coffee machine, notice board, pomodoro, arcade, whiteboard…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
 
 import { Entity } from './runtime.js';
-import { str, obj, opt } from './schema.js';
+import { str, obj, opt, arr } from './schema.js';
 import { PLUGIN_OBJECTS, zoneAt } from '../../public/js/map.js';
-import { PluginHost } from '../plugins.js';
+import { PluginHost, MAX_FEED, MAX_REQUEST_DATA } from '../plugins.js';
 import { ROOMS, activeBooking, isHolder } from '../../public/js/rooms.js';
 
 const COOLDOWN_MS = 400;
@@ -19,7 +19,13 @@ const ADOPT = {
   noticeboard: (v) => ({ notes: Array.isArray(v) ? v : [] }),
   pomodoro: (v) => ({ ...(v?.state || {}), count: v?.count || 0 }),
   arcade: (v) => ({ scores: Array.isArray(v) ? v : [] }),
+  whiteboard: (v) => ({ onBoard: Array.isArray(v) ? Math.min(v.length, MAX_FEED) : 0 }),
 };
+// …and those whose old view was a long list start their feed with it.
+const ADOPT_FEED = {
+  whiteboard: (v) => (Array.isArray(v) ? v : []),
+};
+const feedKey = (seq) => `f:${String(seq).padStart(10, '0')}`;
 let offline = null; // a host with no sandbox, when the runtime didn't pass one
 // Who a plugin sees on a wake-up call: the office, not a person.
 const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, did: null, kind: 'system', zone: null };
@@ -28,14 +34,18 @@ export class PluginObject extends Entity {
   static rpc = ['interact'];
   static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.';
   static api = {
-    view: { doc: 'What everyone sees on the object and how its plugin was last reached.', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'the sandbox that ran it (dynamic-worker, worker-thread), offline, or null before first use' } }) },
+    view: { doc: 'What everyone sees on the object and how its plugin was last reached, and its feed when it keeps one (the whiteboard\'s strokes).', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'the sandbox that ran it (dynamic-worker, worker-thread), offline, or null before first use' }, feed: opt(arr({ description: 'An entry the plugin appended' }, `The last ${MAX_FEED} entries, oldest first (only objects that keep a feed)`)) }) },
     interact: {
       doc: 'Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.',
       who: true,
-      params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
+      params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }), data: opt({ description: `JSON for actions that take it (≤ ${MAX_REQUEST_DATA / 1024} KB), e.g. a whiteboard stroke { points, color, size }` }) }, 'What to do') },
       returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, watch, unlock, via }: what the plugin answered (give: items it handed you, take: things of yours it used up, watch: the zones it now follows, unlock: { room } it let you into); null when called again within 400 ms' },
       mutates: true,
       near: 3,
+    },
+    perform: {
+      doc: 'A protocol message the World turns into an action (the whiteboard\'s `wb` strokes): like interact, without the cooldown between uses.',
+      who: true, params: { req: { type: 'object', description: '{ action, input, data }' } }, mutates: true, internal: true,
     },
     wake: { doc: 'Make sure the object is showing what it should: one that used to be a core entity takes over that entity\'s state and shows it. The World calls it when it starts.', returns: { type: 'boolean', description: 'whether it took over old state' }, internal: true },
   };
@@ -60,16 +70,44 @@ export class PluginObject extends Entity {
     return { id: f.id, plugin: f.plugin, name: f.name, zone, wasm: f.wasm };
   }
 
-  // What everyone sees (a label, a glow), and how the plugin was last reached.
-  view() { return { display: this.state.display || null, via: this.state.via || null }; }
+  // What everyone sees (a label, a glow), how the plugin was last reached,
+  // and the feed of one that keeps one.
+  async view() {
+    const v = { display: this.state.display || null, via: this.state.via || null };
+    if (this.state.feedSeq) v.feed = await this.feed();
+    return v;
+  }
+
+  // The feed (Response::append): entries kept one storage key each, the
+  // last MAX_FEED, so adding one only writes that one.
+  async feed() { return [...(await this.host.storage.list({ prefix: 'f:' })).values()]; }
+
+  async feedPush(entry) {
+    const seq = (this.state.feedSeq || 0) + 1;
+    this.state.feedSeq = seq;
+    this.state.feedFirst ||= seq;
+    await this.host.storage.put(feedKey(seq), entry);
+    while (seq - this.state.feedFirst + 1 > MAX_FEED) await this.host.storage.delete(feedKey(this.state.feedFirst++));
+  }
+
+  async feedClear() {
+    for (const k of (await this.host.storage.list({ prefix: 'f:' })).keys()) await this.host.storage.delete(k);
+    if (this.state.feedSeq) this.state.feedFirst = this.state.feedSeq + 1;
+  }
 
   // who: the World's view of the person ({ id, key, name, handle, did, kind, zone }).
-  async interact(who, { action = 'use', input = null } = {}) {
+  async interact(who, { action = 'use', input = null, data = null } = {}) {
     if (!this.object) throw new Error(`no object ${this.name}`);
     const now = this.now();
     if (now - (this.lastUse.get(who.id) || 0) < COOLDOWN_MS) return null;
     this.lastUse.set(who.id, now);
-    return this.run(who, action, input);
+    return this.run(who, action, input, null, data);
+  }
+
+  // Strokes come faster than the cooldown allows a button press.
+  async perform(who, { action = 'use', input = null, data = null } = {}) {
+    if (!this.object) throw new Error(`no object ${this.name}`);
+    return this.run(who, action, input, null, data);
   }
 
   // The plugin asked to be woken (result.wakeAt): call it with action 'tick'
@@ -89,13 +127,18 @@ export class PluginObject extends Entity {
     return true;
   }
 
+  // Returns whether it took over a feed (which then goes to the World whole).
   async adopt() {
     const from = this.object?.legacy;
-    if (!from || this.state.data !== undefined) return;
-    const shape = ADOPT[from.split(':')[0]] || ((v) => v ?? null);
+    if (!from || this.state.data !== undefined) return false;
+    const kind = from.split(':')[0];
+    const shape = ADOPT[kind] || ((v) => v ?? null);
     let old = null;
     try { old = await this.ref(from).view(); } catch { /* starts fresh */ }
     this.state.data = shape(old);
+    const feed = ADOPT_FEED[kind]?.(old) || [];
+    for (const e of feed.slice(-MAX_FEED)) await this.feedPush(e);
+    return feed.length > 0;
   }
 
   // Someone walked into or out of a zone the plugin asked to watch: call it
@@ -126,15 +169,15 @@ export class PluginObject extends Entity {
     }));
   }
 
-  run(who, action, input, event = null) {
-    const turn = this.queue.then(() => this.turn(who, action, input, event));
+  run(who, action, input, event = null, data = null) {
+    const turn = this.queue.then(() => this.turn(who, action, input, event, data));
     this.queue = turn.catch(() => {});
     return turn;
   }
 
-  async turn(who, action, input, event) {
+  async turn(who, action, input, event, data = null) {
     const f = this.object;
-    await this.adopt();
+    const adopted = await this.adopt();
     const spot = { x: f.x + f.w / 2, y: f.y + f.h + 0.5 };
     const zone = zoneAt(spot.x, spot.y)?.id || null;
     let nearby = [];
@@ -148,7 +191,7 @@ export class PluginObject extends Entity {
 
     let { result, state, via } = await this.plugins.interact({
       object: await this.pluginObject(f, zone),
-      actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory, event,
+      actor: who, action, input, data, state: this.state.data ?? null, nearby, now: this.now(), inventory, event,
       rooms: () => this.rooms(who),
     });
     // Into a booked room (the host already checked the unlock permission):
@@ -162,8 +205,13 @@ export class PluginObject extends Entity {
       const r = await this.world.invApply(who.id, { give: result.give, take: result.take, from: f.name }).catch((e) => ({ error: e.message }));
       // It didn't go through (hands full, or they don't have what it wanted):
       // nothing happened, so the object forgets this turn too.
-      if (r.error) { state = this.state.data ?? null; result = { ...result, say: null, display: null, wakeAt: null, watch: null, toast: `${f.name}: ${r.error}` }; }
+      if (r.error) { state = this.state.data ?? null; result = { ...result, say: null, display: null, wakeAt: null, watch: null, append: [], clearFeed: false, toast: `${f.name}: ${r.error}` }; }
     }
+    // The feed: cleared first, then the new entries, each its own mirror
+    // push (not the drawer's: they drew it already).
+    const fed = [];
+    if (result.clearFeed) { await this.feedClear(); fed.push({ op: 'mirror', feed: { clear: true }, max: MAX_FEED }); }
+    for (const e of result.append || []) { await this.feedPush(e); fed.push({ op: 'mirror', feed: { push: e }, max: MAX_FEED, except: who.id }); }
     this.state.data = state;
     const reached = via !== this.state.via;
     this.state.via = via;
@@ -183,7 +231,13 @@ export class PluginObject extends Entity {
     if (result.watch) await this.watch(result.watch);
     await this.save();
     if (effects.length) await this.emit(...effects);
-    if (display || reached) await this.mirror(this.view());
+    // Took over a feed: the World gets it whole. Otherwise it keeps the feed
+    // it has and gets what changed.
+    if (adopted) await this.mirror(await this.view());
+    else {
+      if (fed.length) await this.emit(...fed);
+      if (display || reached) await this.mirror({ display: this.state.display || null, via });
+    }
     return { ...result, via };
   }
 }

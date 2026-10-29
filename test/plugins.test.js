@@ -84,12 +84,26 @@ test('sanitize drops what the client can\'t safely show', () => {
   assert.equal(s.ui.buttons.length, 0);
   assert.equal(s.ui.input.maxLength, 500);
   assert.equal(s.ui.text, '<b>hi</b>'); // escaped by the client, never trusted as HTML
-  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [], unlock: null });
+  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [], unlock: null, append: [], clearFeed: false });
 });
 
 test('cleanRequest', () => {
-  assert.deepEqual(cleanRequest({ action: 'buy:chips', input: 'x' }), { action: 'buy:chips', input: 'x' });
-  assert.deepEqual(cleanRequest({ action: '<script>' }), { action: 'use', input: null });
+  assert.deepEqual(cleanRequest({ action: 'buy:chips', input: 'x' }), { action: 'buy:chips', input: 'x', data: null });
+  assert.deepEqual(cleanRequest({ action: '<script>' }), { action: 'use', input: null, data: null });
+  assert.deepEqual(cleanRequest({ action: 'stroke', data: { points: [[0, 0]] } }).data, { points: [[0, 0]] });
+  assert.equal(cleanRequest({ action: 'stroke', data: 'x'.repeat(17 * 1024) }).data, null, '16 KB of data at most');
+});
+
+test('the feed: entries of up to 8 KB, 20 an answer, only with the feed permission', async () => {
+  const s = sanitize({ append: [{ a: 1 }, 'x'.repeat(9 * 1024), null, ...Array(30).fill(2)], clearFeed: 1 });
+  assert.deepEqual(s.append.slice(0, 2), [{ a: 1 }, 2]);
+  assert.equal(s.append.length, 18, 'the first 20, less the one too big and the null');
+  assert.equal(s.clearFeed, true);
+  const answer = () => ({ append: [{ a: 1 }], clearFeed: true });
+  const without = await fakePlugins(answer).interact({ object: juke, actor });
+  assert.deepEqual([without.result.append, without.result.clearFeed], [[], false]);
+  const withIt = await fakePlugins(answer, { permissions: ['feed'] }).interact({ object: juke, actor });
+  assert.deepEqual([withIt.result.append, withIt.result.clearFeed], [[{ a: 1 }], true]);
 });
 
 // ---- the real modules (their game rules are tested in Rust: just plugin-test) ----

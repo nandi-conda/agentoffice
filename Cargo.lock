@@ -189,6 +189,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "whiteboard"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"

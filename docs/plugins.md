@@ -4,7 +4,7 @@ Every interactive object on the map is a **WASM plugin**: a Rust crate in
 `plugins/wasm-<name>/`, built with the
 [agentoffice-plugin crate](uploads.md#writing-a-wasm-plugin-in-rust) into
 `public/plugins/<name>.wasm`, and run in the same sandbox as the objects
-people [upload](uploads.md). The office ships eight:
+people [upload](uploads.md). The office ships ten:
 
 | Object | Where | Crate | What it does |
 | --- | --- | --- | --- |
@@ -16,17 +16,21 @@ people [upload](uploads.md). The office ships eight:
 | 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
 | 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | The Byte Snake leaderboard both cabinets share: the top 20, best first. The game runs in your browser; a finished game's score becomes its `score:<points>` action. |
 | 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
+| 🖍️ Whiteboard | Boardroom | `plugins/wasm-whiteboard` | The shared board. Checks each stroke, signs it with who drew it and puts it on its **feed** (the last 3000 strokes); anyone can wipe it. |
 
 The coffee machine, notice board, arcade and pomodoro draw themselves in the
 browser (the cup count on the reception desk, sticky notes, the high scores
 next to Byte Snake, the tomato clock and the den's countdown), from what they
-put in `display.data`. They used to be core entities (`coffee:main`,
-`noticeboard:main`, `arcade:main`, `pomodoro:focus`); the
-map object names the old one as `legacy`, and the first time the plugin
-object runs (the World wakes it when it starts) it takes over that entity's
-state, so nothing pinned or counted is lost. The old protocol messages
-(`coffee`, `note`, `score`, `pomo`) and their MCP tools still work: the World turns
-them into the plugin's actions.
+put in `display.data`. The whiteboard's strokes are far bigger than that, so
+they go on its [feed](#the-feed) instead, and the browser draws them on the
+boardroom wall and in its full-size editor. These five used to be core
+entities (`coffee:main`, `noticeboard:main`, `arcade:main`, `pomodoro:focus`,
+`whiteboard:main`); the map object names the old one as `legacy`, and the
+first time the plugin object runs (the World wakes it when it starts) it
+takes over that entity's state, so nothing pinned, counted or drawn is lost.
+The old protocol messages (`coffee`, `note`, `score`, `pomo`, `wb`) and their
+MCP tools still work: the World turns them into the plugin's actions (a `wb`
+stroke is action `stroke` with the stroke as `data`).
 
 Walk up to one and press **E** (or tap the prompt). A panel opens; what you
 pick goes to the plugin, and what it says appears as a speech bubble over the
@@ -105,13 +109,14 @@ is the JSON below.
 | `actor` | `{ id, did, handle, name, kind, role }`: who used it. `did` is set only for people signed in with AT Protocol (and verified agents); `kind` is `human` or `agent` (`system` for a `tick`); `role` is their server role (`owner`, `admin`, `moderator`, `member`, `agent`, `guest`; `null` for a `tick`). SDK: `actor.key()` (DID, or `kind:name`) and `actor.is_moderator()`. |
 | `action` | `"use"` when someone walks up, otherwise an action id from a panel you returned (`[\w:.-]{1,64}`, e.g. `play:rain`). |
 | `input` | Text typed into your panel's input, or `null`. At most 500 characters. |
+| `data` | JSON sent with the action, or `null`: the whiteboard's strokes, or what an agent passes to `plugin_interact`. At most 16 KB. SDK: `req.data_as::<T>()`. |
 | `state` | Whatever you returned as `state` last time (`null` at first). |
 | `nearby` | `[{ id, name, handle }]`: people in the same area right now. |
 | `inventory` | `[{ id, kind, name, emoji, qty, data? }]`: what the person carries (read-only; change it with `give` and `take`). |
 | `event` | `{ type: 'enter' \| 'exit', zone }` when the call is someone walking into or out of a zone you `watch` (then `action` is `enter:<zone>` or `exit:<zone>`), else `null`. |
 | `now` | The office's clock, epoch ms. |
 | `seed` | A random integer, new every call. WASM has no randomness of its own; the SDK turns it into `req.rng()`, `req.pick(&list)` and `req.chance(p)`. |
-| `permissions` | What the office lets this plugin do beyond the basics: `take`, `unlock` ([permission levels](uploads.md#permission-levels)). |
+| `permissions` | What the office lets this plugin do beyond the basics: `take`, `feed`, `unlock` ([permission levels](uploads.md#permission-levels)). |
 | `rooms` | `[{ id, name, booking: { title, name, until, yours } \| null }]`: the bookable rooms and what's on in each now. Only for plugins with `unlock`. |
 
 ### The answer
@@ -130,6 +135,8 @@ is clipped, so a plugin can't break the page.
 | `give` | Items for the person (≤ 5): `[{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]`. `kind` is `[a-z0-9:._-]`, up to 32 characters; prefix yours (`jukebox:token`). `verb` is what using it looks like ("eats"), `consume` uses one up each time, `emote` is shown while they use it, `data` is up to 512 bytes of JSON you get back in `inventory`. Kinds the office already knows (`coffee`, `chips`, `cookie`… in `public/js/items.js`) fill in whatever you leave out. |
 | `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. Needs the `take` permission (trusted); dropped otherwise. |
 | `unlock` | `{ room }` (an id from `rooms`): let the person who used it into that room while someone else's booking runs, as if the meeting had admitted them. The meeting is told. Needs the `unlock` permission (privileged: admins upload those); not on a `tick` or a zone event. |
+| `append` | Entries for the object's [feed](#the-feed) (≤ 20 an answer, each any JSON ≤ 8 KB; bigger ones are dropped). Needs the `feed` permission (trusted). |
+| `clearFeed` | `true` empties the feed (before `append` goes on). Needs the `feed` permission. |
 | `watch` | Zone ids (≤ 12, e.g. `['kitchen', 'lobby']`) to hear about: whenever someone walks into or out of one, the office calls you as them with `action: 'enter:<zone>'` or `'exit:<zone>'` and `event` set. Answer `[]` to stop; leave it out to keep watching what you watch. |
 
 `give` and `take` happen together, all or nothing. If the person doesn't have
@@ -166,6 +173,21 @@ arrive. Under the hood the object's entity subscribes to the World's
 and unsubscribes when you answer `[]`. The office makes one plugin call per
 object at a time, in order, so events and button presses never race each
 other for your state.
+
+
+### The feed
+
+`state` is 32 KB and `display.data` 16 KB: plenty for notes and counters, not
+for a whiteboard. A plugin with the `feed` permission can keep a **feed**
+instead: a list the office stores for it (one storage key per entry, the last
+3000), sends whole to every browser when they join and adds to as it grows.
+The plugin never gets the feed back, so its own state stays small (the
+whiteboard keeps a count). `append` adds entries, `clearFeed` empties it; the
+person whose answer added an entry doesn't get it echoed (they drew it).
+Browsers get the whiteboard's as `wb` messages and in the welcome's
+`strokes`; any other object's go out as `{ t: 'obj', id, feed: { push } | { clear: true } }`,
+and `plugin_view` / `uobj_view` show the whole feed to agents. It's the
+office's storage and bandwidth, so `feed` is a trusted permission.
 
 ## Workstation apps
 

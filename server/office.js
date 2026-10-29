@@ -2,8 +2,8 @@
 // presence, proximity chat, emotes, A/V flags and the WebRTC
 // signalling relay happen here, because they need to be fast. Everything
 // else with its own state is an entity (server/entities): each actor, each
-// meeting room, each desk, each pomodoro timer, the whiteboard, the notice
-// board, the arcade and the coffee machine. The World hands them requests,
+// meeting room, each desk, each object on the map (the whiteboard, the
+// notice board, the coffee machine…: WASM plugins) and the arcade. The World hands them requests,
 // mirrors what they show (so a welcome is one message, with no round trips),
 // and carries out the effects they send back (Office.apply).
 
@@ -265,7 +265,7 @@ export class Office {
     return out;
   }
   get bookings() { return ROOMS.flatMap((r) => this.mirror.get(`room:${r.id}`) || []).sort((a, b) => a.start - b.start); }
-  get strokes() { return this.mirror.get('whiteboard:main') || []; }
+  get strokes() { return this.mirror.get('plugin:whiteboard')?.feed || []; }
   // What a plugin object shows everyone besides its label (display.data):
   // the notice board's notes, the coffee machine's count, the pomodoro.
   shown(id) { return this.mirror.get(`plugin:${id}`)?.display?.data || null; }
@@ -413,24 +413,44 @@ export class Office {
     return true;
   }
 
-  mirrored({ from, value, push, max, except, quiet }) {
-    if (push !== undefined) {
+  mirrored({ from, value, push, max, except, quiet, feed }) {
+    const kind = parse(from).kind;
+    if (feed) {
+      // A plugin object's feed (the whiteboard's strokes): kept with what it shows.
+      const v = this.mirror.get(from) || { display: null, via: null };
+      if (feed.clear) v.feed = [];
+      else {
+        (v.feed ||= []).push(feed.push);
+        while (v.feed.length > max) v.feed.shift();
+      }
+      this.mirror.set(from, v);
+    } else if (push !== undefined) {
       const list = this.mirror.get(from) || [];
       list.push(push);
       while (list.length > max) list.shift();
       this.mirror.set(from, list);
+    } else if ((kind === 'plugin' || kind === 'uobj') && value && !('feed' in value) && this.mirror.get(from)?.feed) {
+      // What it shows changed; its feed didn't.
+      this.mirror.set(from, { ...value, feed: this.mirror.get(from).feed });
     } else this.mirror.set(from, value);
     this.pushed?.add(from);
     this.onMirror(from);
     if (quiet) return;
-    switch (parse(from).kind) {
+    if (feed) {
+      const { name } = parse(from), but = this.peers.get(except) || null;
+      // The whiteboard keeps its own message; other feeds go out with the object.
+      if (name === 'whiteboard' && kind === 'plugin') return this.broadcast(feed.clear ? { t: 'wb', op: 'clear' } : { t: 'wb', op: 'stroke', stroke: feed.push }, but);
+      return this.broadcast({ t: 'obj', id: name, feed }, but);
+    }
+    switch (kind) {
       case 'desk': return this.broadcast({ t: 'desks', desks: this.desks });
       case 'room': return this.broadcast({ t: 'bookings', bookings: this.bookings });
-      case 'whiteboard': return this.broadcast(push !== undefined ? { t: 'wb', op: 'stroke', stroke: push } : { t: 'wb', op: 'clear' }, this.peers.get(except) || null);
       case 'plugin': {
         const { name } = parse(from);
         this.broadcast({ t: 'obj', id: name, display: value?.display || null });
         // The objects browsers draw themselves also have their own messages.
+        // A whole feed (the whiteboard took over the old board's strokes).
+        if (name === 'whiteboard' && value?.feed) this.broadcast({ t: 'wb', op: 'set', strokes: value.feed });
         if (name === 'noticeboard') this.broadcast({ t: 'notes', notes: this.notes });
         else if (name === 'coffee') this.broadcast({ t: 'counters', counters: this.counters });
         else if (name === 'arcade') this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
@@ -960,10 +980,12 @@ export class Office {
     this.broadcast({ t: 'pomo', pomo: this.pomoState(), counters: this.counters, now: this.now() });
   }
 
+  // The whiteboard is a WASM plugin object too (plugins/wasm-whiteboard):
+  // a stroke is its `stroke` action with the stroke as data, and goes on its
+  // feed. perform, not interact: strokes come faster than its cooldown.
   async whiteboard(p, m) {
-    const board = this.ref('whiteboard:main');
-    if (m.op === 'clear') await board.clear();
-    else if (m.op === 'stroke') await board.stroke(this.who(p), { points: m.points, color: m.color, size: m.size });
+    const req = m.op === 'clear' ? { action: 'clear' } : m.op === 'stroke' ? { action: 'stroke', data: { points: m.points, color: m.color, size: m.size } } : null;
+    if (req) await this.ref('plugin:whiteboard').perform(this.who(p), cleanRequest(req));
   }
 
   async noticeboard(p, m) {

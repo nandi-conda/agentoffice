@@ -37,14 +37,19 @@ impl Look {
 /// | permission | level | uploaded by |
 /// |---|---|---|
 /// | [`Take`](Permission::Take) | trusted | moderators and up |
+/// | [`Feed`](Permission::Feed) | trusted | moderators and up |
 /// | [`Unlock`](Permission::Unlock) | privileged | admins and owners |
 ///
 /// Without the permission the office ignores that part of your answer: a
-/// take is dropped, an unlock refused.
+/// take is dropped, an unlock refused, a feed left as it was.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Permission {
     /// Use up things the person carries ([`Response::take`](crate::Response::take)).
     Take,
+    /// Keep a feed: a long list every browser gets, beyond the 32 KB of state
+    /// ([`Response::append`](crate::Response::append), [`Response::clear_feed`](crate::Response::clear_feed)).
+    /// It's the office's storage and bandwidth, so it's trusted.
+    Feed,
     /// Let whoever uses it into a meeting room someone else booked
     /// ([`Response::unlock`](crate::Response::unlock)); the request then
     /// carries [`Request::rooms`](crate::Request::rooms).
@@ -55,13 +60,14 @@ impl Permission {
     pub const fn as_str(self) -> &'static str {
         match self {
             Permission::Take => "take",
+            Permission::Feed => "feed",
             Permission::Unlock => "unlock",
         }
     }
     /// `basic` never appears: it's what a plugin with no permissions is.
     pub const fn level(self) -> &'static str {
         match self {
-            Permission::Take => "trusted",
+            Permission::Take | Permission::Feed => "trusted",
             Permission::Unlock => "privileged",
         }
     }
