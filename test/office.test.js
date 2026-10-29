@@ -170,9 +170,29 @@ test('a second tab for the same identity shares the avatar instead of kicking th
   assert.equal(watcher.ws.last('peer').status, 'focus');
   tab2.ws.emit('close'); await tick();
   assert.equal(watcher.ws.last('leave').id, tab1.id);
-  // Guests have no identity to match on, so two of them are two people.
+  // Guests without a browser key have nothing to match on: two of them are two people.
   await join(o, 'guest'); await join(o, 'guest');
   assert.equal(o.summary().online.filter((p) => p.name === 'guest').length, 2);
+});
+
+test('a guest reconnecting from the same browser is the same guest, not a second one', async () => {
+  const o = new Office();
+  const watcher = await join(o, 'grace');
+  const key = 'k'.repeat(24);
+  const first = await join(o, 'guest-ab12', { guest: key });
+  // The old socket never said goodbye (a network drop): the new one joins it.
+  const again = await join(o, 'guest-cd34', { guest: key });
+  assert.equal(again.id, first.id);
+  assert.equal(o.summary().online.filter((p) => p.name.startsWith('guest-')).length, 1);
+  assert.equal(watcher.ws.all('join').length, 1);
+  // A different browser's key, or a signed-in person's, is somebody else.
+  const other = await join(o, 'guest-ef56', { guest: 'z'.repeat(24) });
+  assert.notEqual(other.id, first.id);
+  const ada = await join(o, 'ada', { guest: key }, { did: 'did:plc:ada' });
+  assert.notEqual(ada.id, first.id);
+  // Leaving takes the last tab.
+  first.ws.emit('close'); again.ws.emit('close'); await tick();
+  assert.equal(watcher.ws.last('leave').id, first.id);
 });
 
 test('WebRTC signals go to the tab using the mic', async () => {

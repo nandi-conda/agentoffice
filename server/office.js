@@ -742,8 +742,12 @@ export class Office {
       // Identity comes from the signed-in DID only, never from the hello
       // message, so nobody can walk in wearing someone else's handle.
       p.did = p.authDid;
-    } else if (m.handle) {
-      this.sendTo(p, { t: 'error', message: `sign in to use @${clip(m.handle, 253)}; walking in as a guest` });
+    } else {
+      if (m.handle) this.sendTo(p, { t: 'error', message: `sign in to use @${clip(m.handle, 253)}; walking in as a guest` });
+      // A guest's browser keeps a random key of its own, so its reconnects,
+      // refreshes and other tabs find the guest already standing here
+      // (see tabHost) instead of walking in a second one.
+      if (typeof m.guest === 'string' && /^[\w-]{16,64}$/.test(m.guest)) p.guestKey = m.guest;
     }
     if (this.roleOf(p) === 'banned') {
       p.greeting = false;
@@ -814,8 +818,9 @@ export class Office {
   // (another tab, a phone, a refresh whose old tab hasn't closed yet). An
   // agent working as them is someone else to look at, so it gets its own.
   tabHost(p) {
-    if (!p.did) return null;
-    return [...this.peers.values()].find((q) => q !== p && q.ready && q.did === p.did && q.kind === p.kind) || null;
+    const same = p.did ? (q) => q.did === p.did : p.guestKey ? (q) => !q.did && q.guestKey === p.guestKey : null;
+    if (!same) return null;
+    return [...this.peers.values()].find((q) => q !== p && q.ready && same(q) && q.kind === p.kind) || null;
   }
 
   // A new tab joins the avatar they already have: its socket moves over, it

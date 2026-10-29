@@ -273,7 +273,13 @@ async function enter() {
 // ---- networking -------------------------------------------------------------
 const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended), prefs: store.get('mic', {}) });
 
+// Who this browser is as a guest: a reconnect or another tab walks back in
+// as the same guest instead of a second one. (Signed in, the DID does that.)
+let guestKey = store.get('guest');
+if (!/^[\w-]{16,64}$/.test(guestKey || '')) store.set('guest', guestKey = crypto.randomUUID());
+
 function start(hello) {
+  hello = { ...hello, guest: guestKey };
   net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ kicked }) => sys(kicked ? 'You\'re out of the office.' : 'Connection lost, reconnecting…'));
   requestAnimationFrame(loop);
 }
