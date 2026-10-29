@@ -17,7 +17,7 @@ Returns `{ online, lastSeen }`
 
 `read-only` · `internal (entity to entity)`
 
-Their rpg.actor character (cached 10 minutes; the last good one if the PDS is down).
+Their rpg.actor character (cached 10 minutes, 30 seconds while they have no sprite; the last good one if the PDS is down).
 
 | Param | Type | |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ Returns `object | null`
 
 `mutates` · `internal (entity to entity)`
 
-Walking in: returns the character, last status and note, and the notes kept while they were away (and empties the inbox).
+Walking in: returns the character (re-read from their PDS if they had no sprite last time), last status and note, and the notes kept while they were away (and empties the inbox).
 
 ## `depart(at?)`
 

@@ -8,13 +8,17 @@
 // Cloudflare Workers alike.
 
 const TTL = 10 * 60 * 1000;
+// Someone with no sprite yet may be uploading one right now, so "none" is
+// only believed for a short while.
+export const MISS_TTL = 30 * 1000;
 const cache = new Map();
 
-async function cached(key, fn) {
+// ttl may be a function of the value, for answers that go stale faster.
+async function cached(key, fn, { ttl = TTL, fresh = false } = {}) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL) return hit.value;
+  if (!fresh && hit && Date.now() - hit.at < hit.ttl) return hit.value;
   const value = await fn();
-  cache.set(key, { at: Date.now(), value });
+  cache.set(key, { at: Date.now(), ttl: typeof ttl === 'function' ? ttl(value) : ttl, value });
   return value;
 }
 
@@ -168,7 +172,10 @@ function summarizeStats(data) {
   return out;
 }
 
-export async function loadActor(handleOrDid) {
+// Custom uploads (isCustom, no generator `source`) and generator-composed
+// sprites are the same record shape; we only need spriteSheet.
+// `fresh` skips our cache (used on join when they had no sprite last time).
+export async function loadActor(handleOrDid, { fresh = false } = {}) {
   const id = handleOrDid.trim().replace(/^@/, '');
   const did = isDid(id) ? id : await resolveHandle(id);
   return cached(`a:${did}`, async () => {
@@ -186,7 +193,7 @@ export async function loadActor(handleOrDid) {
       getRecord(pds, did, 'app.bsky.actor.profile', 'self'),
     ]);
     return { ...shapeActor({ did, handle, sprite, stats, profile }), pds };
-  });
+  }, { fresh, ttl: (a) => (a.sprite ? TTL : MISS_TTL) });
 }
 
 const blobCache = new Map(); // cid -> { type, buf }

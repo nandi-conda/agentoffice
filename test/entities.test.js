@@ -110,3 +110,27 @@ test('pomodoro timers turn over on their own alarm', async () => {
   assert.equal(o.counters.pomodoros, 1);
   o.runtime.stop();
 });
+
+test('a character without a sprite is looked up again soon, and on every join', async () => {
+  let t = 1_000_000, sprite = null;
+  const calls = [];
+  const loadActor = async (did, opts) => { calls.push(opts); return { did, handle: 'bodhi.test', sprite, stats: [] }; };
+  const rt = new LocalRuntime({ kinds: KINDS, now: () => t, services: { loadActor } });
+  const actor = rt.ref('actor:did:plc:cpnshgqvlkxpku2c235m6dzf');
+  assert.equal((await actor.arrive()).profile.sprite, null);
+  sprite = { sheet: '/api/blob?x' }; // they upload one a minute later
+  t += 5_000;
+  assert.equal((await actor.profile()).sprite, null, 'a miss is still believed for a few seconds');
+  t += 30_000;
+  assert.deepEqual((await actor.profile()).sprite, sprite, 'but not for long');
+  // Rejoining with no sprite skips every cache.
+  sprite = null;
+  await actor.profile({ fresh: true });
+  sprite = { sheet: '/api/blob?y' };
+  assert.deepEqual((await actor.arrive()).profile.sprite, sprite);
+  assert.equal(calls.at(-1).fresh, true);
+  // With a sprite, the 10-minute cache holds.
+  sprite = { sheet: '/api/blob?z' };
+  t += 60_000;
+  assert.deepEqual((await actor.arrive()).profile.sprite, { sheet: '/api/blob?y' });
+});
