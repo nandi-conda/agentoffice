@@ -129,20 +129,48 @@ test('the signed-in DID wins over whatever hello claims', async () => {
   assert.equal(a.ws.last('welcome').you.handle, 'ada.test');
 });
 
-test('a newer connection for the same identity replaces the older one', async () => {
+test('a second tab for the same identity shares the avatar instead of kicking the first', async () => {
   const o = new Office({}, { loadActor: async (id) => ({ did: id, handle: 'ada.test', sprite: null, stats: [] }) });
   const watcher = await join(o, 'grace');
   const tab1 = await join(o, 'ada', {}, { did: 'did:plc:ada' });
-  tab1.ws.close = (code) => { tab1.closedWith = code; };
+  const joins = watcher.ws.all('join').length;
   const tab2 = await join(o, 'ada', {}, { did: 'did:plc:ada' });
-  assert.equal(tab1.closedWith, 4001);
-  assert.ok(tab1.ws.last('replaced'));
+  // One avatar, both tabs still open and welcomed as it.
+  assert.equal(tab2.id, tab1.id);
   assert.equal([...o.peers.values()].filter((p) => p.did === 'did:plc:ada').length, 1);
-  assert.equal(watcher.ws.last('leave').id, tab1.id);
+  assert.equal(watcher.ws.all('join').length, joins);
+  assert.equal(watcher.ws.last('leave'), undefined);
   assert.equal(tab2.ws.last('welcome').peers.length, 1); // just grace
+  assert.equal(tab1.ws.all('welcome').length, 1);
+  // Moving in one tab moves the avatar in the other.
+  await place(o, tab2, 20.5, 7.5);
+  assert.deepEqual([tab1.ws.last('move').x, tab1.ws.last('move').y], [20.5, 7.5]);
+  assert.equal(tab2.ws.last('move'), undefined);
+  assert.equal(watcher.ws.last('move').id, tab1.id);
+  // Chat from either reaches both.
+  tab1.ws.msg({ t: 'chat', text: 'hi' }); await tick();
+  assert.equal(tab2.ws.last('chat').text, 'hi');
+  // Closing one tab keeps them in; closing the last one leaves.
+  tab1.ws.emit('close'); await tick();
+  assert.equal(watcher.ws.last('leave'), undefined);
+  tab2.ws.msg({ t: 'status', status: 'focus' }); await tick();
+  assert.equal(watcher.ws.last('peer').status, 'focus');
+  tab2.ws.emit('close'); await tick();
+  assert.equal(watcher.ws.last('leave').id, tab1.id);
   // Guests have no identity to match on, so two of them are two people.
   await join(o, 'guest'); await join(o, 'guest');
   assert.equal(o.summary().online.filter((p) => p.name === 'guest').length, 2);
+});
+
+test('WebRTC signals go to the tab using the mic', async () => {
+  const o = new Office();
+  const auth = { did: 'did:plc:ada' };
+  const other = await join(o, 'grace');
+  const tab1 = await join(o, 'ada', {}, auth), tab2 = await join(o, 'ada', {}, auth);
+  tab1.ws.msg({ t: 'audio', on: true }); await tick();
+  other.ws.msg({ t: 'rtc', to: tab1.id, data: { sdp: 'x' } }); await tick();
+  assert.ok(tab1.ws.last('rtc'));
+  assert.equal(tab2.ws.last('rtc'), undefined);
 });
 
 test('people arriving together spread out instead of stacking on the spawn', async () => {

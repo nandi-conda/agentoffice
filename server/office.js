@@ -91,12 +91,42 @@ export const MOD = {
 
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
 const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
-// Close code for a connection replaced by a newer one for the same identity
-// (public/js/net.js doesn't reconnect after it).
-export const REPLACED = 4001;
 // Close code for someone a moderator sent out (or who is banned): their
-// client doesn't reconnect either.
+// client doesn't reconnect.
 export const KICKED = 4003;
+
+// The sockets behind one avatar: every tab or device someone has the office
+// open in. To the rest of the office it looks like a single socket, so
+// everything sent to a person reaches all their tabs and they stay in sync.
+// WebRTC signals are the exception: they go to the tab that last used its
+// mic, camera or calls (two tabs answering one call would fight over it).
+// Each tab has an id so a Durable Object can find it again after waking.
+export class Tabs {
+  constructor(ws, id) { this.socks = new Map(); this.seen = new Map(); this.voice = null; if (ws) this.add(ws, id); }
+  get size() { return this.socks.size; }
+  get readyState() { for (const s of this.socks.values()) if (s.readyState === 1) return 1; return 3; }
+  // A socket object can change across a wake-up; the id stays.
+  add(ws, id = this.idOf(ws) || crypto.randomUUID().slice(0, 8)) {
+    if (!this.socks.has(id)) { this.voice = id; this.seen.set(id, Date.now()); }
+    this.socks.set(id, ws);
+    return id;
+  }
+  idOf(ws) { for (const [id, s] of this.socks) if (s === ws) return id; return null; }
+  drop(ws) {
+    const id = this.idOf(ws);
+    if (id) { this.socks.delete(id); this.seen.delete(id); }
+    if (!this.socks.has(this.voice)) this.voice = [...this.socks.keys()].at(-1) ?? null;
+    return this.socks.size;
+  }
+  send(s, { only = null, except = null } = {}) {
+    for (const w of this.socks.values()) {
+      if (w.readyState !== 1 || (only && w !== only) || w === except) continue;
+      try { w.send(s); } catch { /* closing */ }
+    }
+  }
+  sendVoice(s) { this.send(s, { only: this.socks.get(this.voice) || null }); }
+  close(code, reason) { for (const w of this.socks.values()) { try { w.close(code, reason); } catch { /* already gone */ } } }
+}
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
 // How far someone stands from a piece of furniture (its nearest edge).
@@ -433,36 +463,52 @@ export class Office {
   // Cloudflare Durable Object calls them from its hibernation handlers.
   // `did` is only ever a DID the visitor proved via OAuth (see auth.js).
   // `operator`: an MCP session with the operator token (MCP_TOKEN), an owner.
-  open(ws, { did = null, restored = null, operator = false } = {}) {
+  // A person with the office open in several tabs is one peer with several
+  // sockets (see Tabs): the second tab's hello joins it to the first.
+  open(ws, { did = null, restored = null, operator = false, tab } = {}) {
     const p = {
       id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did, operator: !!operator,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
       status: 'available', note: '', emote: null, audio: false, video: false, screen: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
-      ...restored, ws,
+      ...restored, ws: new Tabs(ws, tab),
     };
     this.peers.set(p.id, p);
     return p;
   }
 
-  message(p, raw) {
+  // `ws`: the tab it came from, when the peer may have several.
+  message(p, raw, ws = null) {
+    p = p.joined || p;
     let msg;
     try { msg = JSON.parse(raw); } catch { return Promise.resolve(); }
     if (!msg || typeof msg.t !== 'string') return Promise.resolve();
-    return Promise.resolve(this.handle(p, msg)).catch((e) => this.sendTo(p, { t: 'error', message: e.message }));
+    const tab = ws && p.ws.idOf(ws);
+    if (tab) {
+      p.ws.seen.set(tab, Date.now());
+      // The tab using mic, camera or calls is the one WebRTC talks to.
+      if (msg.t === 'audio' || msg.t === 'av' || msg.t === 'rtc' || msg.t === 'fq-call') p.ws.voice = tab;
+    }
+    return Promise.resolve(this.handle(p, msg, ws)).catch((e) => this.sendTo(p, { t: 'error', message: e.message }));
+  }
+
+  // A tab closed: the person leaves when it was their last one.
+  closeTab(p, ws) {
+    p = p.joined || p;
+    if (!p.ws.drop(ws)) this.leave(p);
   }
 
   // The parts of a peer worth keeping across a Durable Object hibernation.
   snapshot(p) {
-    const { ws, cupTimer, emoteTimer, ...rest } = p;
+    const { ws, joined, cupTimer, emoteTimer, ...rest } = p;
     return rest;
   }
 
   connect(ws, { did = null, operator = false } = {}) {
     const p = this.open(ws, { did, operator });
-    ws.on('message', (raw) => this.message(p, raw));
-    ws.on('close', () => this.leave(p));
-    ws.on('error', () => this.leave(p));
+    ws.on('message', (raw) => this.message(p, raw, ws));
+    ws.on('close', () => this.closeTab(p, ws));
+    ws.on('error', () => this.closeTab(p, ws));
     return p;
   }
 
@@ -470,9 +516,20 @@ export class Office {
     if (p.ws.readyState === 1) p.ws.send(JSON.stringify(msg));
   }
 
-  broadcast(msg, except = null) {
+  // Calls and WebRTC: only the tab using them (see Tabs).
+  sendVoice(p, msg) {
+    if (p.ws.readyState === 1) p.ws.sendVoice(JSON.stringify(msg));
+  }
+
+  // `tabs`: also to the sender's other tabs (everyone but the tab `except` is
+  // the one it came from), for what that tab already shows itself.
+  broadcast(msg, except = null, { tabs = false, from = null } = {}) {
     const s = JSON.stringify(msg);
-    for (const q of this.peers.values()) if (q.ready && q !== except && q.ws.readyState === 1) q.ws.send(s);
+    for (const q of this.peers.values()) {
+      if (!q.ready || q.ws.readyState !== 1) continue;
+      if (q !== except) q.ws.send(s);
+      else if (tabs && from) q.ws.send(s, { except: from });
+    }
   }
 
   leave(p) {
@@ -585,12 +642,12 @@ export class Office {
     this.sendTo(p, { t: 'chan', op: m.op, ref, room: m.op === 'check' ? room : r.room || room, result: r });
   }
 
-  async handle(p, m) {
+  async handle(p, m, ws = null) {
     await this.ready;
-    if (m.t === 'hello') return this.hello(p, m);
+    if (m.t === 'hello') return this.hello(p, m, ws);
     if (!p.ready) return;
     switch (m.t) {
-      case 'move': return this.move(p, m);
+      case 'move': return this.move(p, m, ws);
       case 'chat': return this.chat(p, m);
       case 'status': return this.setStatus(p, m);
       case 'emote': return this.emote(p, m);
@@ -617,7 +674,7 @@ export class Office {
     }
   }
 
-  async hello(p, m) {
+  async hello(p, m, ws = null) {
     if (p.ready || p.greeting) return;
     p.greeting = true;
     p.kind = m.kind === 'agent' ? 'agent' : 'human';
@@ -634,9 +691,16 @@ export class Office {
       p.greeting = false;
       return this.sendOff(p, 'You were banned from this office.');
     }
+    // Already in from another tab or device: this tab joins that avatar.
+    if (await this.joinTab(p, ws)) return;
     // Their actor entity has their character, last status and notes kept for them.
     const key = this.actorKey(p);
     if (key) arrival = await this.ref(`actor:${key}`).arrive().catch((e) => ({ error: e.message }));
+    // Another tab of theirs got in while we waited: join it, and count one arrival.
+    if (this.tabHost(p)) {
+      this.bg(this.ref(`actor:${key}`).depart());
+      return this.joinTab(p, ws);
+    }
     if (arrival?.profile) {
       const a = arrival.profile;
       p.handle = a.handle;
@@ -652,28 +716,18 @@ export class Office {
     if (!key) p.items ||= [];
     // Back where they were last time (signed-in people and agents), else
     // at the door; either way not on top of whoever else is standing there.
+    // (A refresh opens the new tab before the old one closes, so it joins the
+    // avatar still standing there instead: see joinTab.)
     if (p.x === SPAWN.x && p.y === SPAWN.y) {
-      // A refresh opens the new tab before the old one closes: where the old
-      // one stands is newer than what the actor kept.
-      const older = p.did && [...this.peers.values()].find((q) => q !== p && q.ready && q.did === p.did && q.kind !== 'freeq');
-      const kept = older ? this.spotOf(older) : arrival?.at;
+      const kept = arrival?.at;
       const back = this.canStand(kept, p) ? kept : SPAWN;
-      const at = openSpot(back.x, back.y, [...this.peers.values()].filter((q) => q.ready && q !== p && !(p.did && q.did === p.did)));
+      const at = openSpot(back.x, back.y, [...this.peers.values()].filter((q) => q.ready && q !== p));
       p.x = at.x; p.y = at.y;
       if (back !== SPAWN) p.dir = (+back.dir || 0) | 0;
     }
     p.ready = true;
     p.shownRole = this.roleOf(p);
-    this.replaceOlder(p);
-    this.sendTo(p, {
-      t: 'welcome', id: p.id, now: this.now(), you: this.publicPeer(p),
-      peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
-      desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
-      scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
-      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(), wing: this.wing,
-      gallery: this.gallery,
-      floor: this.floor, items: key ? arrival?.items || [] : p.items, keeps: !!key,
-    });
+    this.sendTo(p, this.welcome(p, key ? arrival?.items || [] : p.items));
     for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
     this.touchDesk(p);
@@ -683,20 +737,44 @@ export class Office {
     this.freeq?.presence();
   }
 
-  // One avatar per identity: a newer connection for the same DID (another
-  // tab, a phone, a reconnect whose old socket never closed) replaces the
-  // older ones. They're told why and their client doesn't reconnect.
-  replaceOlder(p) {
-    if (!p.did) return;
-    for (const q of [...this.peers.values()]) {
-      if (q === p || q.did !== p.did || q.kind === 'freeq') continue;
-      this.sendTo(q, { t: 'replaced', text: 'You opened the office somewhere else, so this window was signed out of it.' });
-      try { q.ws.close(REPLACED, 'opened elsewhere'); } catch { /* already gone */ }
-      this.leave(q);
-    }
+  // Everything a tab needs to draw the office, as `p`.
+  welcome(p, items) {
+    return {
+      t: 'welcome', id: p.id, now: this.now(), you: this.publicPeer(p),
+      peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
+      desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
+      scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
+      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(), wing: this.wing,
+      gallery: this.gallery,
+      floor: this.floor, items, keeps: !!this.actorKey(p),
+    };
   }
 
-  move(p, m) {
+  // One avatar per identity. The avatar a signed-in person already has here
+  // (another tab, a phone, a refresh whose old tab hasn't closed yet). An
+  // agent working as them is someone else to look at, so it gets its own.
+  tabHost(p) {
+    if (!p.did) return null;
+    return [...this.peers.values()].find((q) => q !== p && q.ready && q.did === p.did && q.kind === p.kind) || null;
+  }
+
+  // A new tab joins the avatar they already have: its socket moves over, it
+  // gets the office as that avatar sees it, and from then on it's one more
+  // window onto the same person (moves, chat and the rest reach every tab).
+  async joinTab(p, ws) {
+    const host = this.tabHost(p);
+    if (!host) return false;
+    const sock = ws || [...p.ws.socks.values()][0];
+    this.peers.delete(p.id);
+    p.joined = host;
+    host.ws.add(sock, p.ws.idOf(sock) || undefined);
+    const key = this.actorKey(host);
+    const items = key ? await this.ref(`actor:${key}`).inventory().catch(() => []) : host.items;
+    host.ws.send(JSON.stringify(this.welcome(host, items)), { only: sock });
+    return true;
+  }
+
+  move(p, m, ws = null) {
     const x = num(m.x, 0, map.W, p.x), y = num(m.y, 0, map.H, p.y);
     if (isBlocked(Math.floor(x), Math.floor(y))) return;
     // Guard against teleport hacks beyond a generous per-message step.
@@ -721,7 +799,7 @@ export class Office {
     const desk = this.deskOf(p);
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (!p.moving) this.keepSpot(p);
-    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving }, p);
+    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving }, p, { tabs: true, from: ws });
     // Walking away from a desk switches its computer off, and ends a share to its monitor.
     if (desk && !this.deskOf(p) && (p.pc || (p.screen && !to?.av))) {
       const off = { pc: false, ...(p.screen && !to?.av ? { screen: false } : {}) };
@@ -1051,7 +1129,7 @@ export class Office {
   rtc(p, m) {
     const q = this.peers.get(m.to);
     if (!q || !q.ready) return;
-    this.sendTo(q, { t: 'rtc', from: p.id, data: m.data });
+    this.sendVoice(q, { t: 'rtc', from: p.id, data: m.data });
   }
 
   // ---- A/V rooms ----------------------------------------------------------

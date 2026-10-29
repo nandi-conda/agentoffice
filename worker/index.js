@@ -249,28 +249,34 @@ export class OfficeRoom extends DurableObject {
     for (const ws of this.ctx.getWebSockets()) {
       const p = this.peerFor(ws);
       if (!p) continue;
-      const last = Math.max(p.lastSeen || p.joinedAt || 0, this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0);
+      // Per tab: one live tab doesn't keep a dead one around.
+      const last = Math.max(p.ws.seen.get(p.ws.idOf(ws)) || p.joinedAt || 0, this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0);
       if (now - last < GHOST_MS) continue;
       try { ws.close(1001, 'gone quiet'); } catch { /* already closed */ }
-      this.office.leave(p);
+      this.office.closeTab(p, ws);
     }
   }
 
-  // Each socket's attachment carries its peer, keyed by id, so the peer can
-  // be found again from the socket alone. Only on wake-up (`rebuild`) is a
-  // missing peer rebuilt from it; later, a missing peer means the office
-  // already let it go (replaced by a newer connection, or reaped), and it
-  // mustn't come back as a ghost.
+  // Each socket's attachment carries its peer, keyed by id, and which of the
+  // peer's tabs it is, so the peer can be found again from the socket alone.
+  // Only on wake-up (`rebuild`) is a missing peer rebuilt from it; later, a
+  // missing peer means the office already let it go (sent out, or reaped),
+  // and it mustn't come back as a ghost.
   peerFor(ws, { rebuild = false } = {}) {
     const snap = ws.deserializeAttachment();
     if (!snap) return null;
-    let p = this.office.peers.get(snap.id);
+    const { tab, seen, ...peer } = snap;
+    // (A tab that joined another of the person's tabs is found by its tab
+    // until its attachment catches up.)
+    let p = this.office.peers.get(peer.id) || [...this.office.peers.values()].find((q) => q.ws.socks.has(tab));
     if (!p) {
       if (!rebuild) return null;
-      const row = snap.did && this.sql.exec('SELECT v FROM actors WHERE did = ?', snap.did).toArray()[0];
-      p = this.office.open(ws, { did: snap.authDid, restored: { ...snap, actor: row ? JSON.parse(row.v) : null } });
+      const row = peer.did && this.sql.exec('SELECT v FROM actors WHERE did = ?', peer.did).toArray()[0];
+      p = this.office.open(ws, { did: peer.authDid, tab, restored: { ...peer, actor: row ? JSON.parse(row.v) : null } });
     }
-    p.ws = ws;
+    // The socket object can be a new one after a wake-up; the tab is the same.
+    const id = p.ws.add(ws, tab);
+    if (rebuild && seen) p.ws.seen.set(id, seen);
     return p;
   }
 
@@ -282,7 +288,9 @@ export class OfficeRoom extends DurableObject {
       this.sql.exec('INSERT OR REPLACE INTO actors (did, v) VALUES (?, ?)', p.did, JSON.stringify(actor));
       p.actorSaved = true;
     }
-    try { p.ws.serializeAttachment(snap); } catch (e) { log('error', 'world', `peer attachment: ${e.message}`); }
+    for (const [tab, ws] of p.ws.socks) {
+      try { ws.serializeAttachment({ ...snap, tab, seen: p.ws.seen.get(tab) }); } catch (e) { log('error', 'world', `peer attachment: ${e.message}`); }
+    }
   }
 
   async webSocketMessage(ws, raw) {
@@ -290,8 +298,9 @@ export class OfficeRoom extends DurableObject {
     const p = this.peerFor(ws);
     if (!p) { try { ws.close(1008, 'not in the office'); } catch { /* already closed */ } return; }
     p.lastSeen = Date.now();
-    await this.office.message(p, raw);
-    this.persistPeer(p);
+    await this.office.message(p, raw, ws);
+    // A second tab's hello joins it to the avatar they already have.
+    this.persistPeer(p.joined || p);
     // After hibernation the freeq listener is gone; the next message brings it back.
     this.freeq?.presence();
     this.arm();
@@ -299,7 +308,7 @@ export class OfficeRoom extends DurableObject {
 
   webSocketClose(ws) {
     const p = this.peerFor(ws);
-    if (p) this.office.leave(p);
+    if (p) this.office.closeTab(p, ws);
   }
 
   webSocketError(ws) {

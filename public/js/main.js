@@ -274,7 +274,7 @@ async function enter() {
 const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended), prefs: store.get('mic', {}) });
 
 function start(hello) {
-  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ replaced, kicked }) => sys(replaced ? 'You opened the office in another tab or device, so this one left. Reload to come back here.' : kicked ? 'You\'re out of the office.' : 'Connection lost, reconnecting…'));
+  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ kicked }) => sys(kicked ? 'You\'re out of the office.' : 'Connection lost, reconnecting…'));
   requestAnimationFrame(loop);
 }
 
@@ -325,7 +325,15 @@ function onMessage(m) {
     }
     case 'move': {
       const p = peers.get(m.id);
-      if (!p || p === me) break;
+      if (!p) break;
+      // You, walked from another tab or device you have the office open in:
+      // follow along, and don't send it back.
+      if (p === me) {
+        me.x = me.rx = m.x; me.y = me.ry = m.y; me.dir = m.dir;
+        path = null; walkTarget = null; pendingUse = null; follow = null;
+        steered = { moving: m.moving }; lastSentPos = { x: m.x, y: m.y }; sentMoving = m.moving;
+        break;
+      }
       p.x = m.x; p.y = m.y; p.dir = m.dir; p.moving = m.moving;
       track(p);
       break;
@@ -492,7 +500,6 @@ function onMessage(m) {
     case 'rtc': voice.onSignal(m.from, m.data); break;
     case 'fq-call': fqCall.onMessage(m); break;
     case 'error': toast(`⚠️ ${esc(localize(m.message))}`); break;
-    case 'replaced': toast(esc(m.text)); break;
     case 'kicked': {
       toast(`🚪 ${esc(localize(m.text))}`, [], 20000); sys(m.text);
       // Out: the office empties around you.
@@ -1993,6 +2000,7 @@ function updateDoorSign(t) {
 }
 
 let lastSent = 0, sentMoving = false, lastSentPos = { x: 0, y: 0 };
+let steered = null; // { moving } while another of your tabs is the one walking you
 function stepMe(dt) {
   let vx = 0, vy = 0;
   if (keys.has('a') || keys.has('ArrowLeft')) vx -= 1;
@@ -2028,6 +2036,8 @@ function stepMe(dt) {
     }
   }
   const moving = !!(vx || vy);
+  if (moving) steered = null;
+  else if (steered) { me.moving = steered.moving; me.rx = me.x; me.ry = me.y; return; }
   if (moving) {
     const len = Math.hypot(vx, vy);
     const x0 = me.x, y0 = me.y;

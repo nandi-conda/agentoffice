@@ -1171,19 +1171,19 @@ export class FreeqBridge {
   async onCallOp(p, m) {
     const b = this.bindings.get(m.zone);
     if (m.op === 'leave') return this.callLeave(p);
-    if (!b) return this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: null, call: null, error: 'This room is not on freeq right now.' });
+    if (!b) return this.office.sendVoice(p, { t: 'fq-call', zone: m.zone, channel: null, call: null, error: 'This room is not on freeq right now.' });
     if (m.op === 'look') {
       if (!this.calls.has(lower(b.channel))) await this.fetchRoster(b.channel).catch(() => {});
-      return this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel) });
+      return this.office.sendVoice(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel) });
     }
     if (m.op !== 'join') return;
     try {
       const joined = await this.callJoin(p, m.zone, String(m.instance || '').replace(/[^0-9a-f]/g, '').slice(0, 16));
-      this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), joined });
+      this.office.sendVoice(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), joined });
       this.rosterSoon(b.channel, 100);
     } catch (e) {
       this.log(`freeq: ${p.handle || p.did} couldn't join the call in ${b.channel}: ${e.message}`);
-      this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), error: e.message });
+      this.office.sendVoice(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), error: e.message });
     }
   }
 
@@ -1257,7 +1257,7 @@ export class FreeqBridge {
       if (c.key !== key) continue;
       this.inCall.delete(pid);
       const q = this.office.peers.get(pid);
-      if (q) this.office.sendTo(q, { t: 'fq-call', zone: c.zoneId, channel: c.channel, call: this.callView(c.channel), dropped: true });
+      if (q) this.office.sendVoice(q, { t: 'fq-call', zone: c.zoneId, channel: c.channel, call: this.callView(c.channel), dropped: true });
     }
   }
 
