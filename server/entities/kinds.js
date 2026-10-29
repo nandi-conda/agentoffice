@@ -22,8 +22,10 @@ export const POMO_ZONES = ZONES.filter((z) => z.kind === 'quiet').map((z) => z.i
 export const MAX_STROKES = 3000;
 export const MAX_NOTES = 40;
 const PROFILE_TTL = 10 * MIN;
-// No sprite yet? They may be making one, so look again soon.
-const NO_SPRITE_TTL = 30 * 1000;
+// No sprite yet, or a handle that didn't verify? They may be fixing it right
+// now, so look again soon.
+const MISS_TTL = 30 * 1000;
+const complete = (v) => !!(v?.sprite && v?.handle);
 const INBOX_MAX = 30;
 
 // An item stack, as entities and the docs describe it (public/js/items.js).
@@ -92,8 +94,8 @@ export class Actor extends Entity {
   static doc = 'One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. Holds the rpg.actor character, the status they had last, notes that came while they were away, what they carry (their inventory), and (for DIDs) their AT Protocol OAuth session. Guests get none: what a guest carries lives on their connection in the World and goes when they do.';
   static api = {
     view: { doc: 'Whether they are in and when they were last seen.', returns: obj({ online: bool('In the office now'), lastSeen: { type: ['integer', 'null'], description: 'ms since epoch' } }), internal: true },
-    profile: { doc: 'Their rpg.actor character (cached 10 minutes, 30 seconds while they have no sprite; the last good one if the PDS is down).', params: { opts: opt(obj({ fresh: opt(bool('Skip the cache')) }, 'Options')) }, returns: { type: ['object', 'null'], description: '{ handle, sprite, stats, displayName, description }, null without a DID' }, internal: true },
-    arrive: { doc: 'Walking in: returns the character (re-read from their PDS if they had no sprite last time), last status and note, and the notes kept while they were away (and empties the inbox).', mutates: true, internal: true },
+    profile: { doc: 'Their rpg.actor character (cached 10 minutes, 30 seconds while they have no sprite or verified handle; the last good one if the PDS is down).', params: { opts: opt(obj({ fresh: opt(bool('Skip the cache')) }, 'Options')) }, returns: { type: ['object', 'null'], description: '{ handle, sprite, stats, displayName, description }, null without a DID' }, internal: true },
+    arrive: { doc: 'Walking in: returns the character (re-read from their PDS if they had no sprite or verified handle last time), last status and note, and the notes kept while they were away (and empties the inbox).', mutates: true, internal: true },
     depart: { doc: 'Walking out, leaving from `at`.', params: { at: opt(AT) }, mutates: true, internal: true },
     where: { doc: 'Where they were last (kept while they are away, so a refresh or a new sign-in puts them back there).', returns: { type: ['object', 'null'], description: '{ x, y, dir, zone, at }' }, internal: true },
     place: { doc: 'The World keeps where they stand (when they stop, and as they leave).', params: { at: AT }, mutates: true, internal: true },
@@ -124,7 +126,7 @@ export class Actor extends Entity {
     const load = this.services.loadActor;
     if (!this.did || !load) return null;
     const c = this.state.profile;
-    if (!fresh && c && this.now() - c.at < (c.v?.sprite ? PROFILE_TTL : NO_SPRITE_TTL)) return c.v;
+    if (!fresh && c && this.now() - c.at < (complete(c.v) ? PROFILE_TTL : MISS_TTL)) return c.v;
     try {
       const a = await load(this.did, { fresh });
       const v = { handle: a.handle, sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
@@ -142,9 +144,9 @@ export class Actor extends Entity {
   // notes that arrived while they were out.
   async arrive() {
     let profile = null, error = null;
-    // Walking in without a sprite last time always looks again, so a sprite
-    // made a minute ago shows up on the next join.
-    try { profile = await this.profile({ fresh: !this.state.profile?.v?.sprite }); } catch (e) { error = e.message; }
+    // Walking in without a sprite or verified handle last time always looks
+    // again, so a sprite or DNS record made a minute ago shows up on the next join.
+    try { profile = await this.profile({ fresh: !complete(this.state.profile?.v) }); } catch (e) { error = e.message; }
     const inbox = this.state.inbox || [];
     this.state.inbox = [];
     this.state.online = (this.state.online || 0) + 1;

@@ -8,8 +8,9 @@
 // Cloudflare Workers alike.
 
 const TTL = 10 * 60 * 1000;
-// Someone with no sprite yet may be uploading one right now, so "none" is
-// only believed for a short while.
+// Someone with no sprite yet may be uploading one right now, and a handle
+// that didn't verify may have just had its DNS record added, so those
+// answers are only believed for a short while.
 export const MISS_TTL = 30 * 1000;
 const cache = new Map();
 
@@ -193,7 +194,7 @@ export async function loadActor(handleOrDid, { fresh = false } = {}) {
       getRecord(pds, did, 'app.bsky.actor.profile', 'self'),
     ]);
     return { ...shapeActor({ did, handle, sprite, stats, profile }), pds };
-  }, { fresh, ttl: (a) => (a.sprite ? TTL : MISS_TTL) });
+  }, { fresh, ttl: (a) => (a.sprite && a.handle ? TTL : MISS_TTL) });
 }
 
 const blobCache = new Map(); // cid -> { type, buf }

@@ -129,8 +129,18 @@ test('a character without a sprite is looked up again soon, and on every join', 
   sprite = { sheet: '/api/blob?y' };
   assert.deepEqual((await actor.arrive()).profile.sprite, sprite);
   assert.equal(calls.at(-1).fresh, true);
-  // With a sprite, the 10-minute cache holds.
+  // With a sprite and a verified handle, the 10-minute cache holds.
   sprite = { sheet: '/api/blob?z' };
   t += 60_000;
   assert.deepEqual((await actor.arrive()).profile.sprite, { sheet: '/api/blob?y' });
+});
+
+test('a handle that did not verify is checked again on the next join', async () => {
+  let handle = null;
+  const loadActor = async (did) => ({ did, handle, sprite: { sheet: '/api/blob?x' }, stats: [] });
+  const rt = new LocalRuntime({ kinds: KINDS, services: { loadActor } });
+  const actor = rt.ref('actor:did:plc:nmoliurbkeasxij23qeqplcw');
+  assert.equal((await actor.arrive()).profile.handle, null);
+  handle = 'claude-code.roost.latha.org'; // their _atproto TXT record lands
+  assert.equal((await actor.arrive()).profile.handle, 'claude-code.roost.latha.org');
 });
