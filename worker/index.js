@@ -12,6 +12,7 @@ import { loadActor } from '../server/atproto.js';
 import { createAuth } from '../server/auth.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
+import { createMcpOAuth } from '../server/mcpauth.js';
 import { FreeqBridge, FREEQ_URL } from '../server/freeq.js';
 import { SESSION_TTL_MS } from '../server/auth.js';
 import { DORuntime } from './entities.js';
@@ -82,7 +83,14 @@ export class OfficeRoom extends DurableObject {
     // an agent's next request resumes its session and puts it back in the office.
     this.ice = createIce({ keyId: env.TURN_KEY_ID, token: env.TURN_KEY_API_TOKEN });
     this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
-    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '', logDids: env.LOG_DIDS ?? env.ADMIN_DIDS ?? '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
+    // OAuth for MCP clients (people signing in with their handle); its
+    // clients, codes and tokens live in the oauth table.
+    this.mcpOAuth = createMcpOAuth({
+      auth: () => this.auth || this.authForFreeq(),
+      publicUrl: env.PUBLIC_URL,
+      stores: (name, ttl) => this.sqlStore(name, ttl),
+    });
+    this.mcp = new McpHub({ office: this.office, auth: this.agents, oauth: this.mcpOAuth, token: env.MCP_TOKEN || '', logDids: env.LOG_DIDS ?? env.ADMIN_DIDS ?? '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
 
     // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
     if (env.FREEQ !== 'off') {
@@ -165,7 +173,7 @@ export class OfficeRoom extends DurableObject {
       this.persistPeer(this.office.open(server, { did }));
       return new Response(null, { status: 101, webSocket: client });
     }
-    return (await handleApi(request, { office: this.office, auth, agents: this.agents, mcp: this.mcp, ice: this.ice })) || new Response('not found', { status: 404 });
+    return (await handleApi(request, { office: this.office, auth, agents: this.agents, mcp: this.mcp, ice: this.ice, mcpOAuth: this.mcpOAuth })) || new Response('not found', { status: 404 });
   }
 
   // OAuth client, built on first request. PUBLIC_URL pins the public origin;

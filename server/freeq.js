@@ -922,6 +922,13 @@ export class FreeqBridge {
     if (did && token && pds) this.agentTokens.set(did, { did, token, pds: pds.replace(/\/$/, '') });
   }
 
+  // An agent that signed in through the office's OAuth for MCP (mcpauth.js)
+  // went through the same AT Protocol sign-in as people, so its kept OAuth
+  // session signs it in to freeq as its DID, like a person.
+  rememberOAuthAgent(did) {
+    if (did) (this.oauthAgents ||= new Set()).add(did);
+  }
+
   // How a peer signs in to freeq: people with their OAuth session; agents
   // with their token, else a did:key of their own derived from the office's
   // key and their identity (so it's the same one every time).
@@ -931,6 +938,13 @@ export class FreeqBridge {
       const creds = (nonce) => this.auth.freeqCredentials(p.did, nonce);
       await creds(null); // fail early (and warm the PDS's DPoP nonce) before opening a socket
       return { respond: oauthResponder(creds), as: p.did };
+    }
+    if (p.did && this.oauthAgents?.has(p.did) && this.auth?.freeqCredentials) {
+      const creds = (nonce) => this.auth.freeqCredentials(p.did, nonce);
+      try {
+        await creds(null);
+        return { respond: oauthResponder(creds), as: p.did };
+      } catch { /* no kept sign-in: fall through */ }
     }
     const tok = p.did && this.agentTokens.get(p.did);
     if (tok) return { respond: sessionResponder(tok), as: p.did };

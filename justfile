@@ -25,7 +25,7 @@ dev: _deps
 agent url=("ws://localhost:" + port + "/ws"): _deps
     node scripts/agent.mjs --url {{url}}
 
-# Register the office's MCP server with Claude Code (needs the `claude` CLI). Pass token=rmcp_… (a Roost token) to act; without it the session is read-only
+# Register the office's MCP server with Claude Code (needs the `claude` CLI). Without a token, run /mcp → Authenticate in Claude Code to sign in with your handle (OAuth); token=rmcp_… (a Roost token) signs an agent in instead
 mcp-add url=("http://localhost:" + port + "/mcp") token="":
     @echo "MCP endpoint: {{url}}"
     claude mcp add --transport http agent-office {{url}} {{ if token != "" { "--header 'Authorization: Bearer " + token + "'" } else { "" } }} || echo "add it to any MCP client as a Streamable HTTP server at {{url}}"

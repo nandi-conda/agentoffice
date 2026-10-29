@@ -85,6 +85,7 @@ class AgentSession {
     this.client = null;
     this.identity = null; // { did, handle } after AT Protocol sign-in
     this.operator = false; // connected with MCP_TOKEN
+    this.oauth = false; // signed in through the office's OAuth (mcpauth.js): every request carries the token
     this.subscribed = false;
     this.verbose = false; // stream move events too
     this.logStream = null; // { filter, off } while streaming server logs
@@ -171,8 +172,11 @@ export class McpHub {
   // next request picks its session up again and puts it back in the office.
   // logDids: who may read the server logs (comma-separated DIDs, or a list);
   // LOG_DIDS, else ADMIN_DIDS. Operators with MCP_TOKEN always may.
-  constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '', store = null, logDids = globalThis.process?.env?.LOG_DIDS ?? globalThis.process?.env?.ADMIN_DIDS ?? '' }) {
-    Object.assign(this, { office, auth, token, store });
+  // oauth (optional): the office's OAuth server for MCP clients (mcpauth.js).
+  // With it, /mcp needs credentials (a 401 starts the client's OAuth flow)
+  // and read-only observers connect to /mcp/public instead.
+  constructor({ office, auth, oauth = null, token = globalThis.process?.env?.MCP_TOKEN || '', store = null, logDids = globalThis.process?.env?.LOG_DIDS ?? globalThis.process?.env?.ADMIN_DIDS ?? '' }) {
+    Object.assign(this, { office, auth, oauth, token, store });
     this.logDids = new Set((Array.isArray(logDids) ? logDids : String(logDids).split(',')).map((d) => d.trim()).filter(Boolean));
     this.sessions = new Map(); // mcp session id -> { transport, agent }
     // Observers (sessions that haven't joined) get the office-wide
@@ -211,7 +215,7 @@ export class McpHub {
   // in as, and whether (and as whom) it was in the office.
   persist(agent) {
     if (!this.store || !agent.sid || !this.sessions.has(agent.sid)) return;
-    const v = JSON.stringify({ identity: agent.identity, operator: agent.operator, joined: agent.joinedAs || null });
+    const v = JSON.stringify({ identity: agent.identity, operator: agent.operator, oauth: agent.oauth, joined: agent.joinedAs || null });
     if (v === agent.saved && Date.now() - agent.savedAt < 60000) return;
     agent.saved = v; agent.savedAt = Date.now();
     this.store.set(agent.sid, v);
@@ -233,6 +237,7 @@ export class McpHub {
     const agent = new AgentSession(this);
     agent.identity = saved.identity || null;
     agent.operator = !!saved.operator;
+    agent.oauth = !!saved.oauth;
     const s = await this.open(agent);
     // The client initialized this session before the restart; the SDK has
     // no public way to adopt a session id, so set what initialize would have.
@@ -271,7 +276,19 @@ export class McpHub {
       try { body = await request.json(); } catch { return rpcError(400, -32700, 'parse error'); }
     }
     const sid = request.headers.get('mcp-session-id');
+    const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+    const url = new URL(request.url);
+    // An office OAuth token is checked on every request, so an expired one
+    // gets the 401 that makes the client refresh it.
+    let granted = null;
+    if (this.oauth && this.oauth.isToken(bearer)) {
+      granted = await this.oauth.verify(bearer);
+      if (!granted) return this.unauthorized(url, body, 'invalid_token', 'access token expired or revoked');
+    }
     let s = sid && (this.sessions.get(sid) || await this.restore(sid));
+    if (s?.agent.oauth && granted?.did !== s.agent.identity?.did) {
+      return this.unauthorized(url, body, 'invalid_token', 'this session needs its OAuth access token');
+    }
     if (!s) {
       if (sid) return rpcError(404, -32001, 'unknown session; initialize again');
       if (request.method !== 'POST' || !isInitializeRequest(body)) return rpcError(400, -32000, 'first request must be initialize');
@@ -281,8 +298,16 @@ export class McpHub {
       //   X-Atproto-Pds: <PDS URL>   (only for non-Roost tokens)
       //   Authorization: Bearer <MCP_TOKEN>  (operator: may act, as a guest)
       // No header: read-only.
-      const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-      if (bearer && this.token && bearer === this.token) agent.operator = true;
+      //   Authorization: Bearer mcpat_…  (from the office's OAuth: the person who signed in)
+      // No header: read-only, or with OAuth on, a 401 pointing at it (/mcp/public stays read-only).
+      if (granted) {
+        agent.identity = { did: granted.did, handle: granted.handle || null };
+        agent.oauth = true;
+        // Their AT Protocol sign-in is kept, so they talk on freeq as themselves.
+        this.office.freeq?.rememberOAuthAgent?.(granted.did);
+      } else if (!bearer && this.oauth && url.pathname !== '/mcp/public') {
+        return this.unauthorized(url, body, null, 'sign in: this MCP server uses OAuth with your AT Protocol identity (or connect to /mcp/public for read-only)');
+      } else if (bearer && this.token && bearer === this.token) agent.operator = true;
       else if (bearer) {
         try {
           const v = await this.auth.roostSignIn({ token: bearer, pds: request.headers.get('x-atproto-pds') || undefined });
@@ -298,11 +323,17 @@ export class McpHub {
         }
       }
       s = await this.open(agent);
-      log('info', 'mcp', `session opened (${agent.operator ? 'operator' : agent.identity ? `${agent.identity.handle || ''} ${agent.identity.did}`.trim() : 'read-only'})`);
+      log('info', 'mcp', `session opened (${agent.operator ? 'operator' : agent.identity ? `${agent.identity.handle || ''} ${agent.identity.did}${agent.oauth ? ' via OAuth' : ''}`.trim() : 'read-only'})`);
     }
     s.agent.touch();
     this.persist(s.agent); // at most once a minute unless something changed, which keeps it from expiring
     return s.transport.handleRequest(request, { parsedBody: body });
+  }
+
+  unauthorized(url, body, error, message) {
+    return Response.json(
+      { jsonrpc: '2.0', error: { code: -32001, message }, id: body?.id ?? null },
+      { status: 401, headers: { 'www-authenticate': this.oauth.challenge(url, error) } });
   }
 
   build(agent) {
@@ -770,13 +801,13 @@ export function resolvePlace(place, c) {
   return null;
 }
 
-const SIGN_IN_HELP = `Read-only until you sign in with an AT Protocol identity. Easiest: connect with the header "Authorization: Bearer <Roost token>" (get one from roost_signup or https://roost.latha.org). Or, in this session: roost_sign_in { token }, or atproto_challenge + putRecord + atproto_verify. Then call join_office.`;
+const SIGN_IN_HELP = `Read-only until you sign in with an AT Protocol identity. Easiest for a person: connect your MCP client to /mcp (not /mcp/public) and sign in with your handle when it opens the browser (OAuth). For an agent: connect with the header "Authorization: Bearer <Roost token>" (get one from roost_signup or https://roost.latha.org). Or, in this session: roost_sign_in { token }, or atproto_challenge + putRecord + atproto_verify. Then call join_office.`;
 
 const logsDenied = (agent) => `The server logs are for operators only. Connect with "Authorization: Bearer <MCP_TOKEN>", or sign in with an AT Protocol identity whose DID is in the office's LOG_DIDS (or ADMIN_DIDS when LOG_DIDS is unset). This session is ${agent.identity?.did ? `signed in as ${agent.identity.did}, which isn't on that list` : 'not signed in'}.`;
 
 const INSTRUCTIONS = `You are an agent in Agent Office, a 2D virtual coworking office shared with people.
 Without sign-in you are a read-only observer: look, rooms, read_events, whoami and the office:// resources work.
-To act (join, move, chat…) sign in with AT Protocol, ideally Roost: connect with "Authorization: Bearer <Roost token>", or call roost_signup then roost_sign_in (or atproto_challenge + atproto_verify). Then join_office.
+To act (join, move, chat…) sign in with AT Protocol: a person's MCP client signs in over OAuth on /mcp; an agent ideally uses Roost: connect with "Authorization: Bearer <Roost token>", or call roost_signup then roost_sign_in (or atproto_challenge + atproto_verify). Then join_office.
 Then look around with look, and keep up with the office through read_events (long-poll; pass next back as since) or the office://events resource and log notifications.
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.

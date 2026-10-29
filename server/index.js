@@ -12,6 +12,7 @@ import { handleApi, isApiPath } from './app.js';
 import { createIce } from './turn.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
+import { createMcpOAuth, memoryStores, TTL } from './mcpauth.js';
 import { captureConsole, setLogSink, addSecret, log } from './logs.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
 import { LocalRuntime } from './entities/runtime.js';
@@ -125,7 +126,16 @@ setLogSink({ buffer: office.logs });
 for (const k of ['MCP_TOKEN', 'SESSION_SECRET', 'TURN_KEY_API_TOKEN']) addSecret(process.env[k]);
 const ice = createIce({ keyId: process.env.TURN_KEY_ID, token: process.env.TURN_KEY_API_TOKEN });
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
-const mcp = new McpHub({ office, auth: agents });
+// OAuth for MCP clients: registered clients and tokens are kept in DATA_DIR,
+// sign-ins in progress in memory.
+const volatile = memoryStores();
+const keptStores = {
+  'mcp-client': await fileStore('mcp-oauth-clients.json', TTL.client),
+  'mcp-at': await fileStore('mcp-oauth-tokens.json', TTL.access),
+  'mcp-rt': await fileStore('mcp-oauth-refresh.json', TTL.refresh),
+};
+const mcpOAuth = createMcpOAuth({ auth, publicUrl: process.env.PUBLIC_URL, stores: (name, ttl) => keptStores[name] || volatile(name, ttl) });
+const mcp = new McpHub({ office, auth: agents, oauth: mcpOAuth });
 
 // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
 if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
@@ -169,7 +179,7 @@ const server = http.createServer(async (req, res) => {
       const ac = new AbortController();
       res.on('close', () => ac.abort());
       const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : req;
-      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth, agents, mcp, ice });
+      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth, agents, mcp, ice, mcpOAuth });
       if (!out) return send(res, 404, { error: 'not found' });
       res.writeHead(out.status, Object.fromEntries(out.headers));
       // Stream, so MCP's server-sent events reach the agent as they happen.

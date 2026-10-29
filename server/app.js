@@ -43,14 +43,19 @@ export async function stockAsset(path, fetchImpl = (...a) => fetch(...a)) {
   return out;
 }
 
-export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p === '/healthz' || p === '/mcp';
+export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p.startsWith('/.well-known/oauth-') || p === '/healthz' || p === '/mcp' || p === '/mcp/public';
 
 // `agents` is the AgentAuth (DID proof for agents, Roost), `mcp` the McpHub,
-// `ice` the ICE server source (server/turn.js).
-export async function handleApi(request, { office, auth, agents, mcp, ice }) {
+// `ice` the ICE server source (server/turn.js), `mcpOAuth` the OAuth server
+// MCP clients sign in with (server/mcpauth.js).
+export async function handleApi(request, { office, auth, agents, mcp, ice, mcpOAuth }) {
   const url = new URL(request.url);
   try {
-    if (url.pathname === '/mcp' && mcp) return await mcp.fetch(request);
+    if ((url.pathname === '/mcp' || url.pathname === '/mcp/public') && mcp) return await mcp.fetch(request);
+    if (mcpOAuth && (url.pathname.startsWith('/.well-known/') || url.pathname.startsWith('/oauth/mcp/'))) {
+      const r = await mcpOAuth.handle(request);
+      if (r) return r;
+    }
     if (url.pathname.startsWith('/api/agent/') && agents) {
       // AT Protocol sign-in for WebSocket agents: the returned grant goes on
       // /ws?grant=… (MCP agents use the sign-in tools instead).

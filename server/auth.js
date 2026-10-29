@@ -24,6 +24,9 @@ const SCOPE = 'atproto';
 // used to talk to freeq as the signed-in person (see freeq.js).
 export const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
+// A same-site path we may send someone to after sign-in.
+const safeNext = (p) => (typeof p === 'string' && /^\/oauth\/mcp\/consent\?req=[\w-]{1,64}$/.test(p) ? p : null);
+
 const isLoopbackUrl = (u) => !u || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(u);
 
 export function clientMetadata({ publicUrl, port }) {
@@ -220,8 +223,10 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
         if (cfg.loopback && url.host !== new URL(cfg.origin).host) return redirect(`${cfg.origin}${url.pathname}${url.search}`);
         const handle = (url.searchParams.get('handle') || '').trim().replace(/^@/, '');
         if (!handle || handle.length > 253) return fail('enter your handle first');
+        // Where to land afterwards: only the MCP consent page (mcpauth.js) asks.
+        const next = safeNext(url.searchParams.get('next'));
         try {
-          const to = await client.authorize(handle, { scope: SCOPE, signal: request.signal });
+          const to = await client.authorize(handle, { scope: SCOPE, signal: request.signal, ...(next ? { state: next } : {}) });
           return redirect(to.toString());
         } catch (e) {
           log('warning', 'auth', `couldn't start sign-in for @${handle}: ${reason(e)}`);
@@ -230,12 +235,12 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
       }
       if (url.pathname === '/oauth/callback') {
         try {
-          const { session } = await client.callback(url.searchParams);
+          const { session, state } = await client.callback(url.searchParams);
           const did = session.did;
           log('info', 'auth', `signed in ${did}`);
           // The session (scope `atproto`: identity only, no repo access) is
           // kept so freeq can check who you are when you talk there.
-          return redirect('/?signedin=1', { 'set-cookie': cookie(await signSession(did, secret), MAX_AGE) });
+          return redirect(safeNext(state) || '/?signedin=1', { 'set-cookie': cookie(await signSession(did, secret), MAX_AGE) });
         } catch (e) {
           log('warning', 'auth', `sign-in callback failed: ${reason(e)}`);
           return fail(`sign-in failed: ${reason(e)}`);

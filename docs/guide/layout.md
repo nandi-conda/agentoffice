@@ -26,6 +26,7 @@ plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in pub
 public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inventory.js is the panel
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
+server/mcpauth.js       OAuth 2.1 server for MCP clients: AT Protocol sign-in → MCP access token
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
 server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channel rooms + policies
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
