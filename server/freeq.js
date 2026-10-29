@@ -33,6 +33,7 @@ const REFRESH_MS = 5 * 60 * 1000;
 const IDLE_CLOSE_MS = 2 * 60 * 1000; // listener hangs up this long after the office empties
 const USER_IDLE_MS = 30 * 60 * 1000;
 const MAX_GUESTS = 16; // guest connections open at once
+const MAX_LINES = 1000; // channel lines remembered by msgid, so replies can quote them
 const SIGN_IN_MS = 20 * 1000; // give up on a listener sign-in freeq doesn't finish
 // After a restart or a dropped listener, people stay drawn this long while
 // freeq is asked who's really still there; then whoever wasn't confirmed goes.
@@ -120,6 +121,11 @@ export function parseLine(line) {
 }
 
 // Text that's safe on one IRC line.
+// The msgid a line answers: freeq writes +reply, other IRCv3 clients +draft/reply.
+const replyTag = (tags) => {
+  const r = tags?.['+reply'] || tags?.['+draft/reply'];
+  return typeof r === 'string' && /^[\w.:+/=-]{1,128}$/.test(r) ? r : null;
+};
 const oneLine = (s, n = 400) => String(s ?? '').replace(/[\r\n\u0000]+/g, ' ').trim().slice(0, n);
 export const ircNick = (s) => (String(s || '').split('.')[0].replace(/[^A-Za-z0-9_\-\[\]\\^{}|`]/g, '').replace(/^[-0-9]+/, '') || 'office').slice(0, 24);
 
@@ -200,7 +206,7 @@ export class IrcClient {
     if (this.channels.delete(channel)) this.send(`PART ${channel}`);
   }
 
-  // `tags` are IRCv3 client tags, e.g. { '+draft/reply': msgid }.
+  // `tags` are IRCv3 client tags, e.g. { '+reply': msgid }.
   say(channel, text, tags = null) {
     const t = oneLine(text);
     const pre = tags && Object.keys(tags).length ? `@${Object.entries(tags).map(([k, v]) => `${k}=${escapeTag(String(v))}`).join(';')} ` : '';
@@ -336,7 +342,8 @@ export class FreeqBridge {
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
     this.users = new Map(); // keyOf(peer) -> { irc, ready, used }
     this.dids = new Map(); // lower(nick) -> { did, at } from freeq's user lookup
-    this.relayed = []; // { channel, text, at } lines our per-person connections sent, to skip their echo
+    this.relayed = []; // { channel, text, at, key } lines our per-person connections sent, to skip their echo
+    this.lines = new Map(); // msgid -> { name, text } of recent channel lines, oldest first
     this.agentTokens = new Map(); // agent DID -> { did, token, pds }, memory only
     this.calls = new Map(); // lower(channel) -> freeq's call there: { channel, id, count, roster, token }
     this.inCall = new Map(); // office peer id -> { key, zoneId, channel, id, instance, nick }
@@ -538,7 +545,7 @@ export class FreeqBridge {
     const r = await this.fetch(`${this.api}/api/v1/channels/${encodeURIComponent(channel)}/history?limit=100`, { headers: { accept: 'application/json' } });
     if (!r.ok) throw new Error(`freeq history for ${channel}: HTTP ${r.status}`);
     const missed = missedSince(await r.json(), seen, { recent: this.seen.recent });
-    for (const m of missed) this.heard(channel, m.sender, m.tags?.account || null, m.text, { ts: Number(m.timestamp), msgid: m.msgid || null, backfill: true });
+    for (const m of missed) this.heard(channel, m.sender, m.tags?.account || null, m.text, { ts: Number(m.timestamp), msgid: m.msgid || null, reply: replyTag(m.tags), backfill: true });
     if (missed.length) this.log(`freeq: caught up on ${missed.length} message(s) in ${channel}`);
   }
 
@@ -712,14 +719,23 @@ export class FreeqBridge {
 
   // ---- freeq people in the office ------------------------------------------
 
-  // Did one of our per-person connections just send this line? (Consumes it.)
+  // Did one of our per-person connections just send this line? (Consumes it,
+  // and returns what was noted when it went out.)
   wasRelayed(channel, text) {
     const now = Date.now();
     this.relayed = this.relayed.filter((r) => now - r.at < 60000);
     const i = this.relayed.findIndex((r) => r.channel === lower(channel) && r.text === oneLine(text));
-    if (i < 0) return false;
-    this.relayed.splice(i, 1);
-    return true;
+    if (i < 0) return null;
+    return this.relayed.splice(i, 1)[0];
+  }
+
+  // A channel line by its msgid, for quoting what a reply answers.
+  line(msgid) { return (msgid && this.lines.get(msgid)) || null; }
+  keepLine(msgid, name, text) {
+    if (!msgid) return;
+    this.lines.delete(msgid);
+    this.lines.set(msgid, { name: oneLine(name, 32), text: oneLine(text, 200) });
+    while (this.lines.size > MAX_LINES) this.lines.delete(this.lines.keys().next().value);
   }
 
   // freeq nicks of AT Protocol accounts are usually their handle.
@@ -893,24 +909,32 @@ export class FreeqBridge {
       case 'PRIVMSG': {
         const [channel, text] = m.params;
         if (!channel?.startsWith('#') || !text) return;
-        return this.heard(channel, m.nick, account, text, { ts: tagSeconds(m.tags.time), msgid: m.tags.msgid || null });
+        return this.heard(channel, m.nick, account, text, { ts: tagSeconds(m.tags.time), msgid: m.tags.msgid || null, reply: replyTag(m.tags) });
       }
     }
   }
 
   // A channel message, live or (backfill) from history after a restart.
-  heard(channel, nick, account, text, { ts, msgid = null, backfill = false }) {
+  // `reply` is the msgid it answers (+reply), if it's a reply.
+  heard(channel, nick, account, text, { ts, msgid = null, reply = null, backfill = false }) {
     // Remember it even when it's ours, so catch-up never replays it.
     if (!this.seen.hear(channel, ts, msgid)) return;
     this.saver.soon();
     if (!nick || lower(nick) === lower(this.listener?.nick)) return;
+    const action = text.match(/^\u0001ACTION (.*)\u0001$/);
+    if (msgid && (!/^\u0001/.test(text) || action)) this.keepLine(msgid, nick, action ? `* ${nick} ${action[1]}` : text);
+    const zoneId = this.zoneFor(channel);
     // What our own per-person connections said is already in the office;
     // skip exactly those lines. The same person typing in another freeq
-    // client (same DID, often the same nick) still comes through.
-    if (this.isOurs(nick, account) && this.wasRelayed(channel, text)) return;
-    const zoneId = this.zoneFor(channel);
+    // client (same DID, often the same nick) still comes through. The echo
+    // is how the office learns the msgid freeq gave the line, so it can be
+    // answered as a reply too.
+    const ours = this.isOurs(nick, account) && this.wasRelayed(channel, text);
+    if (ours) {
+      if (ours.key && msgid && zoneId) this.office.chatMsgid?.(zoneId, ours.key, msgid);
+      return;
+    }
     if (!zoneId) return;
-    const action = text.match(/^\u0001ACTION (.*)\u0001$/);
     if (/^\u0001/.test(text) && !action) return; // other CTCP
     let f = this.people.get(lower(nick));
     if (!backfill) {
@@ -922,7 +946,8 @@ export class FreeqBridge {
     this.touch(this.bindings.get(zoneId), backfill ? ts * 1000 : Date.now());
     this.office.remoteChat({
       zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: nick,
-      text: action ? `* ${nick} ${action[1]}` : text, msgid, ...(backfill ? { ts: ts * 1000, backfill: true } : {}),
+      text: action ? `* ${nick} ${action[1]}` : text, msgid, replyTo: reply ? { msgid: reply, ...this.line(reply) } : null,
+      ...(backfill ? { ts: ts * 1000, backfill: true } : {}),
     });
   }
 
@@ -930,8 +955,11 @@ export class FreeqBridge {
 
   // Called by the office for chat said inside an attached area. Returns a
   // note for the speaker when it couldn't go to freeq, else null.
-  // `reply` is the msgid of the channel line being answered (+draft/reply).
-  async relay(p, zoneId, text, reply = null) {
+  // `reply` is the msgid of the channel line being answered, sent as freeq's
+  // +reply tag (what freeq's clients read; +draft/reply is only a fallback
+  // there). `key` is the office's id for the line, handed back with the
+  // msgid freeq gives it (office.chatMsgid) when the echo comes round.
+  async relay(p, zoneId, text, reply = null, key = null) {
     const b = this.bindings.get(zoneId);
     if (!b) return null;
     if (p.kind !== 'human' && p.kind !== 'agent') return null;
@@ -943,8 +971,11 @@ export class FreeqBridge {
       const u = await this.userConnection(p);
       u.used = Date.now();
       u.irc.join(b.channel);
-      this.relayed.push({ channel: lower(b.channel), text: oneLine(text), at: Date.now() });
-      u.irc.say(b.channel, text, reply ? { '+draft/reply': reply } : null);
+      // freeq shows what a reply answers, so the office's "@name " in front is
+      // only noise there.
+      const said = reply ? text.replace(/^@\S+\s+(?=\S)/, '') : text;
+      this.relayed.push({ channel: lower(b.channel), text: oneLine(said), at: Date.now(), key });
+      u.irc.say(b.channel, said, reply ? { '+reply': reply } : null);
       this.touch(b);
       return null;
     } catch (e) {

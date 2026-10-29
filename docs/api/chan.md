@@ -51,7 +51,7 @@ Returns `{ ok?, error? }`
 
 The last lines said in the room, oldest first.
 
-Returns `{ name, text, ts, freeq? }[]`
+Returns `{ name, text, ts, freeq?, msgid?, replyTo? }[]`
 
 ## `init(info)`
 
@@ -66,6 +66,18 @@ Set up by the wing: the channel, its policy and who skips it.
 | &nbsp;&nbsp;&nbsp;`info.policy` | `object \| null` | Who may walk in: { source, version, require, roles, rules, rulesHash, endpoints: { type: { label, url } }, deny: [DID], url }. Null is open to all. |
 | &nbsp;&nbsp;&nbsp;`info.allow` *(optional)* | `string ≤ 200[]` | Allow list |
 
+## `tag(info)`
+
+`mutates` · `internal (entity to entity)`
+
+Fill in the freeq msgid of a line said in the room, once freeq echoes it.
+
+| Param | Type | |
+| --- | --- | --- |
+| `info` | `{ key, msgid }` |  |
+| &nbsp;&nbsp;&nbsp;`info.key` | `string ≤ 128` | The office's id for the line |
+| &nbsp;&nbsp;&nbsp;`info.msgid` | `string ≤ 128` | freeq msgid |
+
 ## `say(line)`
 
 `mutates` · `internal (entity to entity)`
@@ -74,11 +86,14 @@ Keep a line said in the room.
 
 | Param | Type | |
 | --- | --- | --- |
-| `line` | `{ name, text, ts?, freeq? }` |  |
+| `line` | `{ name, text, ts?, freeq?, msgid?, key?, replyTo? }` |  |
 | &nbsp;&nbsp;&nbsp;`line.name` | `string ≤ 32` | Who |
 | &nbsp;&nbsp;&nbsp;`line.text` | `string ≤ 500` | What |
 | &nbsp;&nbsp;&nbsp;`line.ts` *(optional)* | `integer ≥ 0` | ms since epoch |
 | &nbsp;&nbsp;&nbsp;`line.freeq` *(optional)* | `boolean` | Said on freeq |
+| &nbsp;&nbsp;&nbsp;`line.msgid` *(optional)* | `string ≤ 128` | freeq msgid |
+| &nbsp;&nbsp;&nbsp;`line.key` *(optional)* | `string ≤ 128` | Office id, until the msgid is known |
+| &nbsp;&nbsp;&nbsp;`line.replyTo` *(optional)* | `{ msgid, name?, text? }` |  |
 
 ## Events
 

@@ -593,15 +593,25 @@ export class Office {
 
   // A line from a freeq channel, heard by everyone in the area it's attached to.
   // `backfill` lines were said while the office wasn't listening (`ts` is when).
-  remoteChat({ zoneId, channel, peer, name, text, ts = null, msgid = null, backfill = false }) {
-    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(msgid ? { msgid } : {}), ...(backfill ? { backfill: true } : {}) };
+  // `replyTo` is { msgid, name?, text? } when the line answers another one.
+  remoteChat({ zoneId, channel, peer, name, text, ts = null, msgid = null, replyTo = null, backfill = false }) {
+    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(msgid ? { msgid } : {}), ...(replyTo ? { replyTo } : {}), ...(backfill ? { backfill: true } : {}) };
     const tags = mentionTags(msg.text);
-    this.remember(zoneId, { name: msg.name, text: msg.text, ts: msg.ts, freeq: true });
+    this.remember(zoneId, { name: msg.name, text: msg.text, ts: msg.ts, freeq: true, ...(msgid ? { msgid } : {}), ...(replyTo ? { replyTo } : {}) });
     for (const q of this.peers.values()) {
       if (!q.ready || q.kind === 'freeq') continue;
       const hit = zoneAt(q.x, q.y)?.id === zoneId;
       const ment = mentionsPeer(tags, q);
       if (hit || ment) this.sendTo(q, { ...msg, mention: ment, far: !hit && ment });
+    }
+  }
+
+  // freeq gave an office line in a bridged area its msgid (seen in the echo):
+  // everyone there can now answer it as a freeq reply.
+  chatMsgid(zoneId, key, msgid) {
+    if (map.ZONES.some((z) => z.id === zoneId && z.channel)) this.bg(this.ref(`chan:${zoneId}`).tag({ key, msgid }));
+    for (const q of this.peers.values()) {
+      if (q.ready && q.kind !== 'freeq' && zoneAt(q.x, q.y)?.id === zoneId) this.sendTo(q, { t: 'chat-id', key, msgid });
     }
   }
 
@@ -838,15 +848,21 @@ export class Office {
     const bridged = zone && this.freeq?.bindings.get(zone.id);
     if (bridged) {
       msg.scope = bridged.channel;
+      // Matched up with the msgid freeq gives the line (chatMsgid), so it can be answered.
+      msg.key = crypto.randomUUID().slice(0, 12);
       // Answering a channel line threads it there too (the msgid it came with).
       const reply = typeof m.reply === 'string' && /^[\w.:+/=-]{1,128}$/.test(m.reply) ? m.reply : null;
-      this.freeq.relay(p, zone.id, msg.text, reply).then((note) => {
+      if (reply) msg.replyTo = { msgid: reply, ...this.freeq.line(reply) };
+      this.freeq.relay(p, zone.id, msg.text, reply, msg.key).then((note) => {
         // The same note again within a minute (a guest chatting away) isn't news.
         if (note && (note !== p.freeqNote || this.now() - p.freeqNoteAt > 60000)) this.sendTo(p, { t: 'freeq-note', text: note, ok: false });
         if (note) { p.freeqNote = note; p.freeqNoteAt = this.now(); }
       });
     }
-    if (zone?.channel) this.remember(zone.id, { name: p.name, text: msg.text, ts: t });
+    if (zone?.channel) {
+      // A bridged line's freeq msgid is filled in when it comes back (chatMsgid).
+      this.remember(zone.id, { name: p.name, text: msg.text, ts: t, ...(msg.key ? { key: msg.key } : {}), ...(msg.replyTo ? { replyTo: msg.replyTo } : {}) });
+    }
     const hears = (q) => (bridged ? zoneAt(q.x, q.y) === zone : canHear(p, q));
     // Mentions reach the person anywhere, which is how you tap someone on
     // the shoulder across the office (and how agents get asked things).

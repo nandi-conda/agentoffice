@@ -119,8 +119,9 @@ function fakeFreeq({ verify }) {
         if (m.command === 'PRIVMSG') {
           const ch = m.params[0], at = new Date(), msgid = `m${++n}`;
           if (!history.has(ch)) history.set(ch, []);
-          history.get(ch).push({ id: n, sender: c.nick, text: m.params[1], timestamp: Math.floor(at / 1000), msgid, tags: { account: c.account } });
-          const reply = m.tags?.['+draft/reply'] ? `;+draft/reply=${m.tags['+draft/reply']}` : '';
+          const re = m.tags?.['+reply'] || m.tags?.['+draft/reply'];
+          history.get(ch).push({ id: n, sender: c.nick, text: m.params[1], timestamp: Math.floor(at / 1000), msgid, tags: { account: c.account, ...(re ? { '+reply': re } : {}) } });
+          const reply = re ? `;+reply=${re}` : '';
           for (const o of members.get(ch) || []) if (o !== c) o.out(`@account=${c.account};msgid=${msgid}${reply};time=${at.toISOString()} :${c.nick}!u@h PRIVMSG ${ch} :${m.params[1]}`);
         }
       }
@@ -150,7 +151,7 @@ function fakeFreeq({ verify }) {
       return {
         join: (ch) => c.socket.send(`JOIN ${ch}`),
         part: (ch) => c.socket.send(`PART ${ch}`),
-        say: (ch, text) => c.socket.send(`PRIVMSG ${ch} :${text}`),
+        say: (ch, text, re) => c.socket.send(`${re ? `@+reply=${re} ` : ''}PRIVMSG ${ch} :${text}`),
         tag: (ch, tags) => c.socket.send(`@${Object.entries(tags).map(([k, v]) => (v === '' ? k : `${k}=${v}`)).join(';')} TAGMSG ${ch}`),
       };
     },
@@ -283,15 +284,32 @@ test('populated channels get their own rooms off the hallway, and talk flows bot
   await tick();
   assert.equal(said.filter((m) => m.t === 'chat' && m.text === 'hello freeq').length, 1);
 
-  // Clicking bob's line to answer it threads the answer on freeq.
+  // The office learns the msgid freeq gave Alice's line from the echo, so it can be answered.
+  const mine = said.find((m) => m.t === 'chat' && m.text === 'hello freeq');
+  assert.ok(mine.key);
+  const idMsg = said.find((m) => m.t === 'chat-id' && m.key === mine.key);
+  assert.ok(idMsg?.msgid, 'office lines in a bridged room get their freeq msgid');
+
+  // Clicking bob's line to answer it threads the answer on freeq, with freeq's
+  // own +reply tag (and without the office's "@bob " in front).
   assert.ok(heard.msgid, 'channel lines carry their msgid');
   await office.handle(me, { t: 'chat', text: '@bob yes hi', reply: heard.msgid });
   for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('yes hi')); i++) await tick();
-  assert.ok(bobGot.find((l) => l.includes('PRIVMSG #general :@bob yes hi')).includes(`+draft/reply=${heard.msgid}`));
+  const answer = bobGot.find((l) => l.includes('PRIVMSG #general :yes hi'));
+  assert.ok(answer.includes(`+reply=${heard.msgid}`), answer);
+  // In the office it shows what it answers.
+  const shown = said.find((m) => m.t === 'chat' && m.text === '@bob yes hi');
+  assert.deepEqual(shown.replyTo, { msgid: heard.msgid, name: 'bob', text: 'hi office' });
   // A made-up msgid is dropped rather than sent along.
   await office.handle(me, { t: 'chat', text: 'odd one', reply: 'x y;z' });
   for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('odd one')); i++) await tick();
-  assert.ok(!bobGot.find((l) => l.includes('odd one')).includes('draft/reply'));
+  assert.ok(!bobGot.find((l) => l.includes('odd one')).includes('reply'));
+
+  // A freeq reply comes into the office as a reply, quoting Alice's line.
+  bob.say('#general', 'good to see you', idMsg.msgid);
+  for (let i = 0; i < 20 && !said.some((m) => m.text === 'good to see you'); i++) await tick();
+  const back = said.find((m) => m.t === 'chat' && m.text === 'good to see you');
+  assert.deepEqual(back.replyTo, { msgid: idMsg.msgid, name: 'Alice', text: 'hello freeq' });
 
   // Guests talk there too (#general has no access policy), as freeq guests.
   const guest = office.open({ readyState: 1, send: () => {} });

@@ -292,9 +292,10 @@ export class ChannelRoom extends Entity {
       params: { to: str('Peer id or owner key of who to let in', 300) },
       returns: obj({ ok: opt(bool('Let in')), error: opt(str('Why not')) }),
     },
-    history: { doc: 'The last lines said in the room, oldest first.', returns: arr(obj({ name: str('Who'), text: str('What'), ts: int('ms since epoch', 0), freeq: opt(bool('Said on freeq')) }), 'Lines') },
+    history: { doc: 'The last lines said in the room, oldest first.', returns: arr(obj({ name: str('Who'), text: str('What'), ts: int('ms since epoch', 0), freeq: opt(bool('Said on freeq')), msgid: opt(str('freeq msgid, in bridged rooms')), replyTo: opt(obj({ msgid: str('msgid of the line it answers', 128), name: opt(str('Who said that', 32)), text: opt(str('What they said', 200)) })) }), 'Lines') },
     init: { doc: 'Set up by the wing: the channel, its policy and who skips it.', params: { info: obj({ channel: str('Channel'), policy: POLICY, allow: opt(arr(str('DID'), 'Allow list')) }) }, mutates: true, internal: true },
-    say: { doc: 'Keep a line said in the room.', params: { line: obj({ name: str('Who', 32), text: str('What', 500), ts: opt(int('ms since epoch', 0)), freeq: opt(bool('Said on freeq')) }) }, mutates: true, internal: true },
+    tag: { doc: 'Fill in the freeq msgid of a line said in the room, once freeq echoes it.', params: { info: obj({ key: str('The office\'s id for the line', 128), msgid: str('freeq msgid', 128) }) }, mutates: true, internal: true },
+    say: { doc: 'Keep a line said in the room.', params: { line: obj({ name: str('Who', 32), text: str('What', 500), ts: opt(int('ms since epoch', 0)), freeq: opt(bool('Said on freeq')), msgid: opt(str('freeq msgid', 128)), key: opt(str('Office id, until the msgid is known', 128)), replyTo: opt(obj({ msgid: str('msgid of the line it answers', 128), name: opt(str('Who said that', 32)), text: opt(str('What they said', 200)) })) }) }, mutates: true, internal: true },
   };
   static events = { subscribes: { 'zone:<id>': 'enter: shows the newcomer the recent lines' }, tells: { 'wing:main': 'active, at most hourly' } };
 
@@ -344,12 +345,23 @@ export class ChannelRoom extends Entity {
     return { ok: true };
   }
 
-  async say({ name, text, ts, freeq } = {}) {
+  async say({ name, text, ts, freeq, msgid, replyTo, key } = {}) {
     if (!text) return;
-    this.log.push({ name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), ...(freeq ? { freeq: true } : {}) });
+    const id = (v) => (typeof v === 'string' && /^[\w.:+/=-]{1,128}$/.test(v) ? v : null);
+    const re = id(replyTo?.msgid) && { msgid: replyTo.msgid, ...(replyTo.name ? { name: clip(replyTo.name, 32) } : {}), ...(replyTo.text ? { text: clip(replyTo.text, 200) } : {}) };
+    this.log.push({ name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), ...(freeq ? { freeq: true } : {}), ...(id(msgid) ? { msgid } : {}), ...(re ? { replyTo: re } : {}), ...(id(key) && !id(msgid) ? { key } : {}) });
     this.log.sort((a, b) => a.ts - b.ts);
     while (this.log.length > LOG_MAX) this.log.shift();
     await this.touch();
+    await this.save();
+  }
+
+  // freeq gave a line said here its msgid (`key` is the office's id for it).
+  async tag({ key, msgid } = {}) {
+    const l = key && this.log.find((x) => x.key === key);
+    if (!l || typeof msgid !== 'string' || !/^[\w.:+/=-]{1,128}$/.test(msgid)) return;
+    l.msgid = msgid;
+    delete l.key;
     await this.save();
   }
 

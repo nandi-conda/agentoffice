@@ -357,6 +357,12 @@ function onMessage(m) {
       }
       break;
     }
+    // freeq gave a line said in a bridged room its msgid: it can be answered there now.
+    case 'chat-id': {
+      const d = [...log.children].find((el) => el.dataset.key === m.key);
+      if (d) { d.dataset.msgid = m.msgid; if (d.reply) d.reply.msgid = m.msgid; }
+      break;
+    }
     case 'desks': desks = m.desks; refreshPeople(); break;
     case 'inv': items = m.items || []; invChanged(); break;
     case 'floor': floor = m.items || []; modal.inv?.refresh(); break;
@@ -398,7 +404,7 @@ function onMessage(m) {
     case 'chanlog': {
       if (!m.lines?.length) break;
       sys(`Earlier in ${m.channel || 'this room'}:`);
-      for (const l of m.lines) logChat({ id: `log:${l.name}`, name: l.name, text: l.text, ts: l.ts, scope: m.channel || '', backfill: true, earlier: true });
+      for (const l of m.lines) logChat({ id: `log:${l.name}`, name: l.name, text: l.text, ts: l.ts, scope: m.channel || '', freeq: l.freeq, msgid: l.msgid, replyTo: l.replyTo, backfill: true, earlier: true });
       break;
     }
     case 'chan': {
@@ -525,12 +531,19 @@ function logChat(m) {
   // Said on freeq while the office wasn't listening, caught up after a restart.
   const when = m.backfill ? `<span class="missed" title="${m.earlier ? 'Said before you walked in' : 'Said on freeq while the office was away'}">${esc(fmtTime(m.ts))}</span> ` : '';
   if (m.action) d.classList.add('act');
-  d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(markedName(m.name, m.freeq ? 'freeq' : peers.get(m.id)?.kind))}</b> ${linkify(esc(m.text))}`;
-  // Anyone else's line can be clicked (or tapped) to answer it.
+  // A reply (threaded on freeq) quotes what it answers above it.
+  const re = m.replyTo;
+  const quote = re ? `<span class="rq" title="${re.text ? 'Show the message it answers' : 'Answers a message from before'}">↩ ${re.name ? `<b>${esc(re.name)}</b> ` : ''}${esc(re.text || 'an earlier message')}</span>` : '';
+  d.innerHTML = `${quote}${scope}${when}<b style="color:${colorFor(m.id)}">${esc(markedName(m.name, m.freeq ? 'freeq' : peers.get(m.id)?.kind))}</b> ${linkify(esc(m.text))}`;
+  if (re?.msgid) d.dataset.re = re.msgid;
+  if (m.msgid) d.dataset.msgid = m.msgid;
+  if (m.key) d.dataset.key = m.key;
+  // Anyone else's line can be clicked (or tapped) to answer it. Lines in a
+  // freeq channel (theirs, or the office's sent there) answer as freeq replies.
   if (m.id !== me?.id) {
     d.classList.add('replyable');
     d.title = 'Click to reply';
-    d.reply = { id: m.id, name: m.name, handle: peers.get(m.id)?.handle || m.name, text: m.text, channel: m.freeq ? m.scope : null, msgid: m.msgid || null };
+    d.reply = { id: m.id, name: m.name, handle: peers.get(m.id)?.handle || m.name, text: m.text, channel: m.freeq || m.msgid || m.key ? m.scope : null, msgid: m.msgid || null };
   }
   pushLog(d);
 }
@@ -718,6 +731,14 @@ replyEl.querySelector('.x').addEventListener('click', () => {
   chatIn.focus();
 });
 log.addEventListener('click', (e) => {
+  // The quote on a reply jumps to the line it answers, when that's still in the log.
+  const q = e.target.closest('.rq');
+  if (q) {
+    const id = q.closest('.m')?.dataset.re;
+    const to = id && [...log.children].find((el) => el.dataset.msgid === id);
+    if (to) { to.scrollIntoView({ block: 'center', behavior: 'smooth' }); to.classList.remove('flash'); void to.offsetWidth; to.classList.add('flash'); }
+    return;
+  }
   const d = e.target.closest('.m.replyable');
   // Links and place buttons do their own thing; dragging to copy text isn't a reply.
   if (!d?.reply || e.target.closest('a, button') || String(getSelection()).trim()) return;
@@ -727,7 +748,7 @@ $('.chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatIn.value.trim();
   if (!text) { chatIn.blur(); endReply(); return; }
-  // On freeq the reply is threaded too (+draft/reply), when it's going to that channel.
+  // On freeq the reply is threaded too (+reply), when it's going to that channel.
   const reply = replyTo?.msgid && replyTo.channel === hereChannel() ? replyTo.msgid : undefined;
   net.send({ t: 'chat', text, ...(reply ? { reply } : {}) });
   chatIn.value = '';
