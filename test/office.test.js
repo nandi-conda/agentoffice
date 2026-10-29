@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
+import { setLogSink } from '../server/logs.js';
 import { wasmPlugins, until } from './support/plugins.js';
 import * as map from '../public/js/map.js';
 
@@ -92,6 +93,17 @@ test('rtc signals are relayed only to the addressed peer', async () => {
   a.ws.msg({ t: 'rtc', to: b.id, data: { sdp: 'x' } }); await tick();
   assert.equal(b.ws.last('rtc').from, a.id);
   assert.equal(c.ws.last('rtc'), undefined);
+});
+
+test('rtc health reports go to the server log, not the peer', async () => {
+  const o = new Office();
+  setLogSink({ buffer: o.logs });
+  const a = await join(o, 'ada'), b = await join(o, 'grace');
+  a.ws.msg({ t: 'rtc', to: b.id, data: { state: 'failed', local: 'host', remote: 'srflx', turn: false } }); await tick();
+  assert.equal(b.ws.last('rtc'), undefined);
+  const e = o.logs.since(0).find((x) => x.source === 'rtc');
+  assert.match(e.msg, /ada ↔ grace: failed via host\/srflx \(no TURN\)/);
+  setLogSink({ buffer: null });
 });
 
 test('whiteboard strokes are clamped and shared by its WASM plugin', async () => {

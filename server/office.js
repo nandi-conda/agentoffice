@@ -1370,6 +1370,14 @@ export class Office {
   rtc(p, m) {
     const q = this.peers.get(m.to);
     if (!q || !q.ready) return;
+    // A connection health report (rtc.js report()): for the server log, not the peer.
+    if (m.data && typeof m.data.state === 'string') {
+      const d = m.data;
+      const via = (t) => (typeof t === 'string' ? t.slice(0, 8) : '?');
+      const vids = (a) => (Array.isArray(a) ? a.slice(0, 4).map((v) => `${Number(v?.frames) || 0}f ${String(v?.codec || '?').slice(0, 20)}`).join(', ') : '');
+      log(d.state === 'failed' ? 'warning' : 'info', 'rtc', `${p.name} ↔ ${q.name}: ${d.state.slice(0, 12)} via ${via(d.local)}/${via(d.remote)}${d.turn ? '' : ' (no TURN)'}${d.videoIn ? `, video in ${vids(d.videoIn)}` : ''}${d.videoOut ? `, video out ${vids(d.videoOut)}` : ''}`);
+      return;
+    }
     this.sendVoice(q, { t: 'rtc', from: p.id, data: m.data });
   }
 

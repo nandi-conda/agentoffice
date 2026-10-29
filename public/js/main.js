@@ -1866,20 +1866,21 @@ const fqCall = createFreeqCall({
   onChange: () => { syncAvButtons(); sendAv(); updateStage(); },
 });
 const tiles = new Map(); // key -> tile element
+const TILE_STATE = { connecting: 'Connecting…', retrying: 'Reconnecting…', failed: "Couldn't connect on this network", disconnected: 'Connection lost, retrying…' };
 function updateStage() {
   const z = me && zoneAt(me.x, me.y);
   const want = [];
   if (z?.av) {
     const others = [...peers.values()].filter((p) => p !== me && zoneAt(p.x, p.y) === z);
     if (voice.screen) want.push({ key: 'me:screen', stream: voice.screen, name: 'Your screen', kind: 'screen' });
-    for (const p of others) { const r = voice.remote(p.id); if (r.screen) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s screen`, kind: 'screen', id: p.id }); }
+    for (const p of others) { const r = voice.remote(p.id); if (r.screen) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s screen`, kind: 'screen', id: p.id, state: r.state }); }
     if (voice.cam) want.push({ key: 'me:cam', stream: voice.cam, name: 'You', kind: 'cam self', id: me.id });
-    for (const p of others) { const r = voice.remote(p.id); if (r.cam) want.push({ key: `${p.id}:cam`, stream: r.cam, name: p.name, kind: 'cam', id: p.id }); }
+    for (const p of others) { const r = voice.remote(p.id); if (r.cam) want.push({ key: `${p.id}:cam`, stream: r.cam, name: p.name, kind: 'cam', id: p.id, state: r.state }); }
   }
   // Screens people put up on their desk monitors, for whoever is close by.
   for (const p of deskSharers()) {
     const r = voice.remote(p.id);
-    if (r.screen && !want.some((w) => w.key === `${p.id}:screen`)) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s desk screen`, kind: 'screen', id: p.id });
+    if (r.screen && !want.some((w) => w.key === `${p.id}:screen`)) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s desk screen`, kind: 'screen', id: p.id, state: r.state });
   }
   const keys = new Set(want.map((w) => w.key));
   for (const [k2, el] of tiles) if (!keys.has(k2)) { el.remove(); tiles.delete(k2); }
@@ -1888,13 +1889,18 @@ function updateStage() {
     if (!el) {
       el = document.createElement('div');
       el.className = `tile ${w.kind}`;
-      el.innerHTML = '<video autoplay playsinline muted></video><span class="tag"></span><button class="grow-btn" title="Enlarge">⤢</button>';
+      el.innerHTML = '<video autoplay playsinline muted></video><span class="status"></span><span class="tag"></span><button class="grow-btn" title="Enlarge">⤢</button>';
       el.querySelector('.grow-btn').onclick = () => el.classList.toggle('big');
       tiles.set(w.key, el);
       stage.append(el);
     }
     const v = el.querySelector('video');
     if (v.srcObject !== w.stream) { v.srcObject = w.stream; v.play().catch(() => {}); }
+    // Until the first frame shows, say why the tile is still dark.
+    if (v.paused && v.srcObject) v.play().catch(() => {});
+    const dark = !!w.state && !v.videoWidth;
+    el.querySelector('.status').textContent = !dark ? '' : TILE_STATE[w.state] || 'Waiting for video…';
+    el.classList.toggle('dark', dark);
     el.querySelector('.tag').textContent = w.name;
     el.classList.toggle('speaking', !!(w.id && peers.get(w.id)?.speaking));
   }

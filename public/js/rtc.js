@@ -15,14 +15,15 @@ import { canHear, zoneAt, HEAR_RADIUS } from './map.js';
 // returns relay servers (short-lived credentials), refetched before they expire.
 let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 let iceUntil = 0, iceLoading = null;
-function loadIce() {
-  if (iceLoading || Date.now() < iceUntil) return iceLoading;
+function loadIce(fresh = false) {
+  if (iceLoading || (!fresh && Date.now() < iceUntil)) return iceLoading;
   iceLoading = fetch('/api/ice').then((r) => r.ok ? r.json() : null).then((d) => {
     if (d?.iceServers?.length) { ICE = d.iceServers; iceUntil = Date.now() + Math.max(60, d.ttl || 0) * 1000; }
   }).catch(() => {}).finally(() => { iceLoading = null; });
   return iceLoading;
 }
 export const DESK_VIEW = 4;
+const CONNECT_WAIT = 15000; // ms to get a connection through before retrying
 
 export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
   loadIce();
@@ -176,6 +177,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     const c = {
       pc, audio: new Audio(), analyser: null, data: null, makingOffer: false, polite: myId() > id,
       senders: { cam: null, screen: null }, kinds: {}, remote: { cam: null, screen: null },
+      state: 'connecting', restarts: 0, reported: '',
     };
     c.audio.autoplay = true;
     local.getTracks().forEach((t) => pc.addTrack(t, local));
@@ -203,6 +205,36 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
       e.track.onunmute = () => { c.remote[kind] = stream; onMedia(); };
       onMedia();
     };
+    // Connection health: shown on video tiles, reported to the server log,
+    // and a failed connection gets a fresh ICE round (new TURN credentials).
+    // With no route at all (no TURN, strict NAT) a browser can sit in
+    // "connecting" for good, so not connected after CONNECT_WAIT counts as failed.
+    const failed = () => {
+      if (conns.get(id) !== c) return;
+      report(id, c, 'failed');
+      if (c.restarts >= 2) { c.state = 'failed'; return; }
+      c.restarts++;
+      c.state = 'retrying';
+      Promise.resolve(loadIce(true)).then(() => {
+        if (conns.get(id) !== c) return;
+        try { pc.setConfiguration({ ...pc.getConfiguration(), iceServers: ICE }); } catch {}
+        pc.restartIce?.();
+        watch();
+      });
+    };
+    const watch = () => {
+      clearTimeout(c.timer);
+      c.timer = setTimeout(() => { if (pc.connectionState !== 'connected') failed(); }, CONNECT_WAIT);
+    };
+    watch();
+    pc.onconnectionstatechange = () => {
+      const st = pc.connectionState;
+      if (st === 'connected') { clearTimeout(c.timer); c.restarts = 0; c.state = st; report(id, c, st); setTimeout(() => checkMedia(id, c), 6000); }
+      else if (st === 'failed') { clearTimeout(c.timer); failed(); }
+      else if (st === 'disconnected') { c.state = st; watch(); }
+      else if (c.state !== 'retrying') c.state = st === 'new' ? 'connecting' : st;
+      if (c.remote.cam || c.remote.screen) onMedia();
+    };
     pc.onnegotiationneeded = async () => {
       try {
         c.makingOffer = true;
@@ -214,9 +246,49 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     return c;
   }
 
+  // What a connection actually ended up using, for the server log:
+  // host/srflx/relay on each side, whether TURN was on offer, and how many
+  // video frames have arrived (0 with a live connection = codec or sender trouble).
+  async function stats(c) {
+    const out = { turn: ICE.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u))) };
+    try {
+      const r = await c.pc.getStats();
+      let pair = null; const cands = {}; const codecs = {};
+      r.forEach((v) => {
+        if (v.type === 'transport' && v.selectedCandidatePairId) pair = r.get(v.selectedCandidatePairId);
+        if (v.type === 'candidate-pair' && v.nominated && v.state === 'succeeded') pair ||= v;
+        if (v.type === 'local-candidate' || v.type === 'remote-candidate') cands[v.id] = v.candidateType;
+        if (v.type === 'codec') codecs[v.id] = v.mimeType;
+      });
+      if (pair) { out.local = cands[pair.localCandidateId]; out.remote = cands[pair.remoteCandidateId]; }
+      r.forEach((v) => {
+        if (v.type === 'inbound-rtp' && v.kind === 'video') (out.videoIn ||= []).push({ frames: v.framesDecoded || 0, bytes: v.bytesReceived || 0, codec: codecs[v.codecId] });
+        if (v.type === 'outbound-rtp' && v.kind === 'video') (out.videoOut ||= []).push({ frames: v.framesEncoded || 0, bytes: v.bytesSent || 0, codec: codecs[v.codecId] });
+      });
+    } catch {}
+    return out;
+  }
+  async function report(id, c, state) {
+    const s = await stats(c);
+    const key = `${state}:${s.local}:${s.remote}:${JSON.stringify(s.videoIn?.map((v) => v.frames > 0))}`;
+    if (key === c.reported) return;
+    c.reported = key;
+    send({ t: 'rtc', to: id, data: { state, ...s } });
+  }
+  // A while after connecting: is the video we're meant to be getting arriving?
+  async function checkMedia(id, c) {
+    if (conns.get(id) !== c || c.pc.connectionState !== 'connected') return;
+    const s = await stats(c);
+    c.frames = (s.videoIn || []).reduce((n, v) => n + v.frames, 0);
+    if (s.videoIn?.length || s.videoOut?.length) report(id, c, 'media');
+    if (c.remote.cam || c.remote.screen) onMedia();
+    setTimeout(() => checkMedia(id, c), 30000);
+  }
+
   function hangup(id) {
     const c = conns.get(id);
     if (!c) return;
+    clearTimeout(c.timer);
     c.pc.close();
     c.audio.srcObject = null;
     conns.delete(id);
@@ -225,7 +297,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
 
   // Perfect-negotiation pattern so either side can start.
   async function onSignal(from, data) {
-    if (!local) return;
+    if (!local || !(data?.sdp || data?.ice)) return;
     let c = conns.get(from) || create(from);
     const pc = c.pc;
     try {
@@ -288,7 +360,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
       const keep = conns.has(p.id) && linked && (canHear(me, p) || Math.hypot(me.x - p.x, me.y - p.y) < HEAR_RADIUS + 1.5);
       // The lower id starts the call and the other side answers, unless only
       // one side has anything to send; perfect negotiation sorts out overlaps.
-      if (near && !conns.has(p.id) && (myId() < p.id || sending)) create(p.id);
+      if (near && !conns.has(p.id) && (myId() < p.id || sending) && !iceLoading) create(p.id);
       if (!keep && conns.has(p.id) && !near) hangup(p.id);
       const c = conns.get(p.id);
       if (c) {
@@ -306,8 +378,12 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     return out;
   }
 
-  // Remote camera / screen streams for one peer, if they're sending any.
-  const remote = (id) => conns.get(id)?.remote || { cam: null, screen: null };
+  // Remote camera / screen streams for one peer, if they're sending any,
+  // and how the connection carrying them is doing.
+  const remote = (id) => {
+    const c = conns.get(id);
+    return c ? { ...c.remote, state: c.state } : { cam: null, screen: null, state: null };
+  };
 
   return {
     enable, disable, setMuted, onSignal, update, conns, remote,
