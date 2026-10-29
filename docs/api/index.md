@@ -12,10 +12,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [room (Room)](room.md) | A bookable meeting room. |
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
 | [whiteboard (Whiteboard)](whiteboard.md) | The Boardroom whiteboard. |
-| [noticeboard (NoticeBoard)](noticeboard.md) | The lobby notice board: sticky notes, newest first, at most 40. |
 | [arcade (Arcade)](arcade.md) | The Byte Snake arcade cabinet and its top 20. |
-| [coffee (CoffeeMachine)](coffee.md) | The kitchen coffee machine; counts cups. |
-| [pomodoro (Pomodoro)](pomodoro.md) | A shared pomodoro timer, one per quiet zone. |
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
@@ -25,10 +22,13 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |
 | [mod (Office)](mod.md) | Moderation and server roles. |
+| [wasm: Coffee machine](upload-coffee-machine.md) | Pours you a coffee: the cup goes in your inventory. |
 | [wasm: Magic 8-ball](upload-magic-8-ball.md) | Ask a yes-or-no question and shake it. |
 | [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
 | [wasm: Jukebox](upload-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another for everyone nearby, and the jukebox shows what's on. |
 | [wasm: Help kiosk](upload-help-kiosk.md) | Ask where things are or how the office works. |
+| [wasm: Notice board](upload-notice-board.md) | Sticky notes for the office, newest first (40 at most). |
+| [wasm: Pomodoro timer](upload-pomodoro-timer.md) | A shared focus timer for everyone in the Deep Work Den: focus, break, focus… until someone stops it. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
 | [upload: Skeleton Key](upload-skeleton-key.md) | Opens any meeting room that's booked and not yours. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
@@ -83,7 +83,7 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 
 ## MCP tools
 
-63 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+55 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -99,16 +99,8 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 | `whiteboard_view` | open | [whiteboard.view](whiteboard.md) |
 | `whiteboard_stroke` | signed in, in the office | [whiteboard.stroke](whiteboard.md) |
 | `whiteboard_clear` | signed in, in the office | [whiteboard.clear](whiteboard.md) |
-| `noticeboard_view` | open | [noticeboard.view](noticeboard.md) |
-| `noticeboard_add` | signed in, in the office | [noticeboard.add](noticeboard.md) |
-| `noticeboard_remove` | signed in, in the office | [noticeboard.remove](noticeboard.md) |
 | `arcade_view` | open | [arcade.view](arcade.md) |
 | `arcade_score` | signed in, in the office | [arcade.score](arcade.md) |
-| `coffee_view` | open | [coffee.view](coffee.md) |
-| `coffee_brew` | signed in, in the office | [coffee.brew](coffee.md) |
-| `pomodoro_view` | open | [pomodoro.view](pomodoro.md) |
-| `pomodoro_start` | signed in, in the office | [pomodoro.start](pomodoro.md) |
-| `pomodoro_stop` | signed in, in the office | [pomodoro.stop](pomodoro.md) |
 | `plugin_view` | open | [plugin.view](plugin.md) |
 | `plugin_interact` | signed in, in the office | [plugin.interact](plugin.md) |
 | `gallery_view` | open | [gallery.view](gallery.md) |

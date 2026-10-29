@@ -1357,10 +1357,11 @@ function promptFor(f) {
   switch (f.interact) {
     case 'whiteboard': return 'Open the whiteboard';
     case 'coffee': return 'Grab a coffee';
-    case 'pomodoro': return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Stop the focus session' : 'Start a focus session (25 / 5)';
     case 'noticeboard': return 'Read the notice board';
     case 'arcade': return 'Play Byte Snake';
-    case 'plugin': return f.prompt || `Use the ${f.name}`;
+    case 'plugin':
+      if (f.plugin === 'pomodoro') return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Check the focus timer' : 'Start a focus session';
+      return f.prompt || `Use the ${f.name}`;
     case 'sign': {
       const r = wing.find((x) => x.id === f.zone);
       return r ? `${r.access?.icon || '🚪'} ${r.channel} · ${r.access?.text || 'open'}: read the sign` : null;
@@ -1388,16 +1389,10 @@ function interact(f) {
   switch (f.interact) {
     case 'whiteboard': modal.wb = openEditor(modal, board, (m) => net.send(m)); modal.onclose = () => (modal.wb = null); break;
     case 'coffee':
+      // The machine (a plugin) pours and says so; the mug and status are ours.
       net.send({ t: 'coffee' }); lastCoffee = performance.now(); me.cup = true;
       if (me.status === 'available') { autoStatus = 'coffee'; setStatus('coffee'); }
-      toast(`☕ Fresh coffee. Your mug shows for a few minutes, so people nearby know you're up for a chat. The cup is in your things (${coarse ? '🎒' : 'I'}).`);
       break;
-    case 'pomodoro': {
-      const st = pomo[f.zone];
-      if (st && st.phase !== 'idle') { if (confirm('Stop the shared focus session for everyone in the den?')) net.send({ t: 'pomo', action: 'stop' }); }
-      else net.send({ t: 'pomo', action: 'start', focusMin: 25, breakMin: 5 });
-      break;
-    }
     case 'noticeboard': openNotes(); break;
     case 'room': openRoom(f.zone); break;
     case 'sign': openSign(f.zone); break;

@@ -9,7 +9,7 @@ import { build } from '../scripts/docs.mjs';
 import { Office } from '../server/office.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
-import { wasmPlugins } from './support/plugins.js';
+import { wasmPlugins, until } from './support/plugins.js';
 
 test('the generated docs pages are up to date (run `just docs`)', async () => {
   for (const [file, text] of Object.entries(await build())) {
@@ -38,7 +38,9 @@ test('generated tools: names, read-only split, no internal methods', () => {
   const tools = generatedTools(describeApi());
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
   assert.ok(by.desk_claim && !by.desk_claim.readOnly);
-  assert.ok(by.noticeboard_view.readOnly);
+  assert.ok(by.whiteboard_view.readOnly && by.plugin_view.readOnly);
+  // Retired kinds (the notice board, coffee machine and pomodoro are plugin objects now) have none.
+  for (const n of ['noticeboard_view', 'noticeboard_add', 'coffee_brew', 'pomodoro_start']) assert.ok(!by[n], `${n} is retired`);
   assert.ok(by.room_book.input.properties.op && by.room_book.input.required.includes('name'));
   for (const n of ['desk_touch', 'room_tick', 'actor_sessionGet', 'actor_view', 'topic_publish', 'desk_inspect', 'desk_seed']) assert.ok(!by[n], `${n} should not be a tool`);
 });
@@ -64,12 +66,12 @@ test('MCP: observers read through generated tools but cannot act', async () => {
   const { connect } = await setup();
   const c = await connect();
   const names = (await c.listTools()).tools.map((t) => t.name);
-  for (const n of ['whiteboard_view', 'noticeboard_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
+  for (const n of ['whiteboard_view', 'plugin_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
   // Tools they can't use aren't listed (and can't be called).
-  for (const n of ['desk_claim', 'noticeboard_add', 'room_book', 'pomodoro_start', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
-  assert.deepEqual(await call(c, 'noticeboard_view'), []);
+  for (const n of ['desk_claim', 'plugin_interact', 'room_book', 'whiteboard_clear', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
+  assert.deepEqual(await call(c, 'whiteboard_view'), []);
   assert.equal(await call(c, 'desk_view', { name: 'desk-1' }), null);
-  await assert.rejects(call(c, 'noticeboard_add', { text: 'hi' }), /disabled/i);
+  await assert.rejects(call(c, 'whiteboard_clear', {}), /disabled/i);
   await assert.rejects(call(c, 'desk_view', { name: 'desk-999' }));
   await c.close();
 });
@@ -79,8 +81,12 @@ test('MCP: a joined agent acts through generated tools, with the World filling i
   const c = await connect({ authorization: 'Bearer op' });
   await assert.rejects(call(c, 'desk_claim', { name: 'desk-3', goal: 'x' }), /join_office/);
   await call(c, 'join_office', { name: 'Docbot' });
-  await call(c, 'noticeboard_add', { text: 'generated tools work' });
-  const notes = await call(c, 'noticeboard_view');
+  // The notice board is a plugin object: what it shows (its notes) is in plugin_view.
+  await call(c, 'note', { op: 'add', text: 'generated tools work' });
+  const notes = await until(async () => {
+    const n = (await call(c, 'plugin_view', { name: 'noticeboard' })).display?.data?.notes;
+    return n?.length && n;
+  });
   assert.equal(notes[0].text, 'generated tools work');
   assert.equal(notes[0].by, 'Docbot');
   assert.deepEqual(await call(c, 'desk_claim', { name: 'desk-3', goal: 'docs' }), { ok: true });
@@ -89,7 +95,7 @@ test('MCP: a joined agent acts through generated tools, with the World filling i
   assert.equal(booking.room, 'huddle');
   assert.ok(office.bookings.some((b) => b.id === booking.id));
   // The pomodoro lives in the Deep Work Den: not from the lobby.
-  await assert.rejects(call(c, 'pomodoro_start', {}), /walk to/);
+  await assert.rejects(call(c, 'plugin_interact', { name: 'pomodoro', action: 'start' }), /walk_to pomodoro/);
   await c.close();
 });
 

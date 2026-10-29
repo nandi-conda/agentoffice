@@ -97,8 +97,8 @@ saved to `$DATA_DIR/entities.json`):
 | `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
-| `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
-| `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
+| `whiteboard:main`, `arcade:main` | `ItemDO` | strokes (one key each), high scores |
+| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, kiosk, rally, coffee machine, notice board, pomodoro): its WASM plugin's state, what it shows, its wake-up alarm |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
 | `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `floor:main` | `ItemDO` | things people put down, where they put them (cleared after a day) |
@@ -124,7 +124,7 @@ and return, and flags: `mutates`, `who`, `ctx`, `inZone`, `internal`) and
 [MkDocs](https://www.mkdocs.org) site and builds it (served at **`/docs`**),
 `/api/schema` serves it live as JSON, and the MCP server
 turns every non-internal method into a tool named `<kind>_<method>`
-(`desk_claim`, `noticeboard_add`, `room_book`, `pomodoro_start`, `*_view`…).
+(`desk_claim`, `room_book`, `plugin_interact`, `*_view`…).
 The World fills in the caller and checks the rules (`Office.call`). `just
 deploy` regenerates the docs first and the tests fail if they're stale. WASM
 plugins describe themselves with the manifest embedded in the module.
@@ -197,7 +197,7 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
-| **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** (25/5) on the tomato clock. While a session runs, everyone inside is automatically set to *Focusing*. |
+| **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** on the tomato clock (25/5, 50/10 or 15/3). While a session runs, everyone inside is automatically set to *Focusing*. |
 | **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. A **vending machine** with free snacks (and limited stock). |
 | **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. A **jukebox** everyone can queue songs on, and a **magic 8-ball**. |
 

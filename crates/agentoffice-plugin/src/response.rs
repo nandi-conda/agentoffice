@@ -142,6 +142,11 @@ pub struct Display {
     /// A tune from public/js/music.js, started at `at`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub music: Option<Music>,
+    /// Any JSON (≤ 16 KB) every browser gets with the display, for objects
+    /// the office draws itself: the notice board's notes, the pomodoro's
+    /// phase, the coffee machine's cup count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 impl Display {
@@ -149,6 +154,7 @@ impl Display {
     pub fn glow(mut self, colour: impl Into<String>) -> Self { self.glow = Some(colour.into()); self }
     pub fn until(mut self, at: f64) -> Self { self.until = Some(at); self }
     pub fn music(mut self, id: impl Into<String>, at: f64) -> Self { self.music = Some(Music { id: id.into(), at }); self }
+    pub fn data(mut self, data: impl Serialize) -> Self { self.data = serde_json::to_value(data).ok(); self }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]

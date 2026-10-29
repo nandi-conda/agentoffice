@@ -91,6 +91,8 @@ export const MOD = {
 
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
 const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
+// The pomodoro timers (WASM plugin objects), one per quiet zone.
+const POMOS = PLUGIN_OBJECTS.filter((f) => f.plugin === 'pomodoro');
 // Close code for someone a moderator sent out (or who is banned): their
 // client doesn't reconnect.
 export const KICKED = 4003;
@@ -167,6 +169,9 @@ export class Office {
     // With a saved mirror the office is ready at once and refreshes behind.
     const booting = this.boot(saved.migrated ? null : saved, !!mirror?.length);
     this.ready = mirror?.length ? Promise.resolve() : booting;
+    // Objects that used to be core entities (the notice board…) take over
+    // their old state the first time they run.
+    this.ready.then(() => { for (const f of PLUGIN_OBJECTS) if (f.legacy) this.bg(this.ref(`plugin:${f.id}`).wake()); }, () => {});
   }
 
   ref(address) { return this.runtime.ref(address); }
@@ -261,16 +266,22 @@ export class Office {
   }
   get bookings() { return ROOMS.flatMap((r) => this.mirror.get(`room:${r.id}`) || []).sort((a, b) => a.start - b.start); }
   get strokes() { return this.mirror.get('whiteboard:main') || []; }
-  get notes() { return this.mirror.get('noticeboard:main') || []; }
+  // What a plugin object shows everyone besides its label (display.data):
+  // the notice board's notes, the coffee machine's count, the pomodoro.
+  shown(id) { return this.mirror.get(`plugin:${id}`)?.display?.data || null; }
+  get notes() { return this.shown('noticeboard')?.notes || []; }
   get scores() { return this.mirror.get('arcade:main') || []; }
   get floor() { return this.mirror.get('floor:main') || []; }
   get counters() {
-    const pomodoros = POMO_ZONES.reduce((n, z) => n + (this.mirror.get(`pomodoro:${z}`)?.count || 0), 0);
-    return { coffees: this.mirror.get('coffee:main')?.count || 0, pomodoros, waves: this.waves };
+    const pomodoros = POMOS.reduce((n, f) => n + (this.shown(f.id)?.count || 0), 0);
+    return { coffees: this.shown('coffee')?.count || 0, pomodoros, waves: this.waves };
   }
   pomoState() {
     const out = {};
-    for (const z of POMO_ZONES) out[z] = this.mirror.get(`pomodoro:${z}`)?.state || { ...IDLE_POMO };
+    for (const f of POMOS) {
+      const { phase, endsAt, round, focusMin, breakMin, startedBy } = { ...IDLE_POMO, ...this.shown(f.id) };
+      out[f.zone] = { phase, endsAt, round, focusMin, breakMin, ...(startedBy ? { startedBy } : {}) };
+    }
     return out;
   }
 
@@ -416,13 +427,19 @@ export class Office {
       case 'desk': return this.broadcast({ t: 'desks', desks: this.desks });
       case 'room': return this.broadcast({ t: 'bookings', bookings: this.bookings });
       case 'whiteboard': return this.broadcast(push !== undefined ? { t: 'wb', op: 'stroke', stroke: push } : { t: 'wb', op: 'clear' }, this.peers.get(except) || null);
-      case 'noticeboard': return this.broadcast({ t: 'notes', notes: this.notes });
       case 'arcade': return this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
-      case 'coffee': return this.broadcast({ t: 'counters', counters: this.counters });
-      case 'plugin': case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
+      case 'plugin': {
+        const { name } = parse(from);
+        this.broadcast({ t: 'obj', id: name, display: value?.display || null });
+        // The objects browsers draw themselves also have their own messages.
+        if (name === 'noticeboard') this.broadcast({ t: 'notes', notes: this.notes });
+        else if (name === 'coffee') this.broadcast({ t: 'counters', counters: this.counters });
+        else if (POMOS.some((f) => f.id === name)) this.broadcastPomo();
+        return;
+      }
+      case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
       case 'gallery': return this.broadcast({ t: 'gallery', items: this.gallery });
       case 'floor': return this.broadcast({ t: 'floor', items: this.floor });
-      case 'pomodoro': return this.broadcastPomo();
       case 'wing': return this.layout(value);
       case 'roles': return this.rolesChanged();
     }
@@ -926,12 +943,17 @@ export class Office {
     for (const [id, v] of Object.entries(this.desks)) if (v.owner === key) this.bg(this.ref(`desk:${id}`).touch(key));
   }
 
+  // The pomodoro, notice board and coffee machine are WASM plugin objects:
+  // their protocol messages become plugin actions, from anywhere in the den
+  // (pomodoro) or the office (notes, coffee).
   async pomodoro(p, m) {
     const zone = zoneAt(p.x, p.y);
-    if (!zone || !POMO_ZONES.includes(zone.id)) return;
-    const timer = this.ref(`pomodoro:${zone.id}`);
-    if (m.action === 'start') await timer.start(this.who(p), { focusMin: m.focusMin, breakMin: m.breakMin });
-    else if (m.action === 'stop') await timer.stop();
+    const f = POMOS.find((x) => x.zone === zone?.id);
+    if (!f) return;
+    const mins = (v, d) => Math.max(1, Math.min(90, Math.floor(+v) || d));
+    const action = m.action === 'stop' ? 'stop'
+      : m.action === 'start' ? (m.focusMin || m.breakMin ? `start:${mins(m.focusMin, 25)}:${mins(m.breakMin, 5)}` : 'start') : null;
+    if (action) await this.ref(`plugin:${f.id}`).interact(this.who(p), { action });
   }
 
   broadcastPomo() {
@@ -945,20 +967,15 @@ export class Office {
   }
 
   async noticeboard(p, m) {
-    const board = this.ref('noticeboard:main');
-    if (m.op === 'add') await board.add(this.who(p), m.text);
-    else if (m.op === 'remove') await board.remove(this.who(p), m.id);
+    const req = m.op === 'add' ? { action: 'add', input: m.text } : m.op === 'remove' && /^[\w-]{1,16}$/.test(m.id || '') ? { action: `remove:${m.id}` } : null;
+    if (req) await this.ref('plugin:noticeboard').interact(this.who(p), cleanRequest(req));
   }
 
   async coffee(p) {
     this.holdCup(p);
-    await this.ref('coffee:main').brew();
     // Standing at the machine, you also walk off with the cup itself.
     const machine = FURNITURE.find((f) => f.id === 'coffee');
-    if (machine && distTo(machine, p) <= 3) {
-      const r = await this.invApply(p, { give: [{ kind: 'coffee' }], from: 'Coffee machine' });
-      if (r.error) this.sendTo(p, { t: 'toast', text: `☕ No hands free for the cup: ${r.error}` });
-    }
+    await this.ref('plugin:coffee').interact(this.who(p), { action: machine && distTo(machine, p) <= 3 ? 'pour' : 'brew' });
     // Tell anyone nearby that a coffee chat is brewing.
     for (const q of this.peers.values()) {
       if (q !== p && q.ready && canHear(p, q)) this.sendTo(q, { t: 'toast', text: `☕ ${p.name} grabbed a coffee nearby. Coffee chat?` });

@@ -92,6 +92,17 @@ test('workersAi tries the models in turn and reads both answer shapes', async ()
   await assert.rejects(workersAi({ run: async () => ({ response: '' }) })({ prompt: 'p' }), /empty answer/);
 });
 
+test('display.data: plain JSON for every browser, 16 KB at most; the actor comes with their role', async () => {
+  assert.deepEqual(sanitize({ display: { data: { notes: [{ text: 'hi' }] } } }).display.data, { notes: [{ text: 'hi' }] });
+  assert.equal(sanitize({ display: { data: 'x'.repeat(17 * 1024) } }).display.data, null);
+  assert.equal(sanitize({ display: { label: 'on' } }).display.data, null);
+  const seen = [];
+  const host = fakePlugins((req) => { seen.push(req.actor.role); return {}; });
+  await host.interact({ object: juke, actor: { ...actor, role: 'moderator' } });
+  await host.interact({ object: juke, actor });
+  assert.deepEqual(seen, ['moderator', null]);
+});
+
 test('sanitize drops what the client can\'t safely show', () => {
   const s = sanitize({
     say: 'x'.repeat(500),

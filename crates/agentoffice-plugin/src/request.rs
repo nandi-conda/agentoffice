@@ -29,6 +29,9 @@ pub struct Actor {
     pub name: String,
     /// `human`, `agent`, or `system` for the office's own wake-up calls.
     pub kind: String,
+    /// Their server role: `owner`, `admin`, `moderator`, `member`, `agent`
+    /// or `guest` (public/js/roles.js). `None` for the office itself.
+    pub role: Option<String>,
 }
 
 impl Actor {
@@ -36,6 +39,16 @@ impl Actor {
     pub fn is_agent(&self) -> bool { self.kind == "agent" }
     /// The office itself, calling back at the `wake_at` you asked for.
     pub fn is_system(&self) -> bool { self.kind == "system" }
+    /// Who they are across visits, the way the office keys people's things:
+    /// their `did` when signed in, else `kind:name`.
+    pub fn key(&self) -> String {
+        match &self.did { Some(d) if !d.is_empty() => d.clone(), _ => format!("{}:{}", self.kind, self.name) }
+    }
+    /// A moderator or above (moderator, admin, owner): may tidy up after
+    /// other people, like taking down someone else's note.
+    pub fn is_moderator(&self) -> bool {
+        matches!(self.role.as_deref(), Some("moderator" | "admin" | "owner"))
+    }
     /// `@handle` when signed in, else their name.
     pub fn mention(&self) -> String {
         match &self.handle { Some(h) if !h.is_empty() => format!("@{h}"), _ => self.name.clone() }

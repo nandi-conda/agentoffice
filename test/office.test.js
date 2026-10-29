@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
+import { wasmPlugins, until } from './support/plugins.js';
 import * as map from '../public/js/map.js';
 
 class FakeWs extends EventEmitter {
@@ -72,15 +73,17 @@ test('desk claims are exclusive while the owner is around', async () => {
 
 test('shared pomodoro runs in the den', async () => {
   let now = 1000;
-  const o = new Office({}, { now: () => now });
+  const o = new Office({}, { now: () => now, plugins: wasmPlugins() });
   const a = await join(o, 'ada');
   await place(o, a, 5, 10);
-  a.ws.msg({ t: 'pomo', action: 'start', focusMin: 25, breakMin: 5 }); await tick();
-  const p = a.ws.last('pomo').pomo.focus;
-  assert.equal(p.phase, 'focus');
+  a.ws.msg({ t: 'pomo', action: 'start', focusMin: 25, breakMin: 5 });
+  const p = (await until(() => a.ws.last('pomo')?.pomo.focus.phase === 'focus' && a.ws.last('pomo'))).pomo.focus;
   assert.equal(p.endsAt, 1000 + 25 * 60000);
-  a.ws.msg({ t: 'pomo', action: 'stop' }); await tick();
-  assert.equal(a.ws.last('pomo').pomo.focus.phase, 'idle');
+  assert.equal(p.startedBy, 'ada');
+  now += 1000; // past the plugin object's button-mashing guard
+  a.ws.msg({ t: 'pomo', action: 'stop' });
+  await until(() => a.ws.last('pomo').pomo.focus.phase === 'idle');
+  o.runtime.stop();
 });
 
 test('rtc signals are relayed only to the addressed peer', async () => {

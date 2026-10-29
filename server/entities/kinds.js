@@ -20,7 +20,6 @@ const shortId = () => crypto.randomUUID().slice(0, 8);
 
 export const POMO_ZONES = ZONES.filter((z) => z.kind === 'quiet').map((z) => z.id);
 export const MAX_STROKES = 3000;
-export const MAX_NOTES = 40;
 const PROFILE_TTL = 10 * MIN;
 // No sprite yet, or a handle that didn't verify? They may be fixing it right
 // now, so look again soon.
@@ -344,34 +343,18 @@ export class Whiteboard extends Entity {
   }
 }
 
-// ---- the notice board ----------------------------------------------------------
+// ---- retired: the notice board, coffee machine and pomodoro --------------
+// They're WASM plugins now (plugins/wasm-noticeboard, -coffee, -pomodoro;
+// entities plugin:noticeboard, plugin:coffee, plugin:pomodoro). These keep
+// what the old entities saved so the plugin entities can take it over the
+// first time they run (`legacy` on the map object, PluginObject.adopt), and
+// take the very first offices' state (World.boot). Nothing else calls them.
 export class NoticeBoard extends Entity {
-  static doc = 'The lobby notice board: sticky notes, newest first, at most 40.';
-  static api = {
-    view: { doc: 'The notes.', returns: arr(obj({ id: str('Note id'), text: str('Text'), by: str('Author name'), owner: str('Author key'), ts: int('ms since epoch', 0), color: str('Paper colour') }), 'Notes, newest first (at most 40)') },
-    add: { doc: 'Pin a note.', who: true, params: { text: str('Note text', 200) }, mutates: true },
-    remove: { doc: 'Take down one of your notes (moderators can take down anyone\'s).', who: true, params: { id: str('Note id', 16) }, mutates: true, cap: 'notes.remove' },
-  };
+  static retired = true;
+  static doc = 'Retired: the notice board is the plugin:noticeboard object now. Keeps the notes it had for it.';
+  static api = {};
   view() { return this.state.notes || []; }
   seed(notes) { if (Array.isArray(notes) && !this.state.notes) { this.state.notes = notes; return this.save(); } }
-
-  async add(who, text) {
-    text = clip(text, 200);
-    if (!text) return;
-    const colors = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
-    const notes = [{ id: shortId(), text, by: who.name, owner: who.key, ts: this.now(), color: colors[(Math.random() * colors.length) | 0] }, ...(this.state.notes || [])];
-    this.state.notes = notes.slice(0, MAX_NOTES);
-    await this.save();
-    await this.mirror(this.state.notes);
-  }
-
-  async remove(who, id) {
-    const n = (this.state.notes || []).find((x) => x.id === id);
-    if (!n || (n.owner !== who.key && !can(who.role, 'notes.remove'))) return;
-    this.state.notes = this.state.notes.filter((x) => x !== n);
-    await this.save();
-    await this.mirror(this.state.notes);
-  }
 }
 
 // ---- the arcade ------------------------------------------------------------------
@@ -395,74 +378,23 @@ export class Arcade extends Entity {
   }
 }
 
-// ---- the coffee machine --------------------------------------------------------------
 export class CoffeeMachine extends Entity {
-  static doc = 'The kitchen coffee machine; counts cups.';
-  static api = {
-    view: { doc: 'Cups brewed.', returns: obj({ count: int('Cups', 0) }) },
-    brew: { doc: 'Count a cup (people get theirs with the protocol coffee message, which also hands them the mug).', returns: int('Cups so far', 0), mutates: true },
-  };
+  static retired = true;
+  static doc = 'Retired: the coffee machine is the plugin:coffee object now. Keeps the cup count it had for it.';
+  static api = {};
   view() { return { count: this.state.count || 0 }; }
   seed(count) { if (count && !this.state.count) { this.state.count = count; return this.save(); } }
-
-  async brew() {
-    this.state.count = (this.state.count || 0) + 1;
-    await this.save();
-    await this.mirror(this.view());
-    return this.state.count;
-  }
 }
 
-// ---- pomodoro timers -------------------------------------------------------------------
-// One per quiet zone, shared by everyone in it. Phases turn over on the
-// entity's own alarm.
 export class Pomodoro extends Entity {
-  static doc = 'A shared pomodoro timer, one per quiet zone. Phases turn over on its own alarm.';
-  static api = {
-    view: { doc: 'Phase, end time and rounds, plus focus sessions finished.', returns: obj({ state: obj({ phase: str('idle, focus or break'), endsAt: int('ms since epoch', 0), round: int('Round', 0), focusMin: int('Focus minutes', 1, 90), breakMin: int('Break minutes', 1, 30), startedBy: str('Who started it') }), count: int('Focus sessions done', 0) }) },
-    start: { doc: 'Start focusing.', who: true, inZone: true, params: { opts: opt(obj({ focusMin: opt(int('Focus minutes (default 25)', 1, 90)), breakMin: opt(int('Break minutes (default 5)', 1, 30)) }, 'Lengths')) }, mutates: true },
-    stop: { doc: 'Stop the timer.', inZone: true, mutates: true },
-  };
-
+  static retired = true;
+  static doc = 'Retired: the pomodoro is the plugin:pomodoro object now. Keeps the timer it had for it.';
+  static api = {};
   view() {
     const { phase = 'idle', endsAt = 0, round = 0, focusMin = 25, breakMin = 5, startedBy } = this.state;
     return { state: { phase, endsAt, round, focusMin, breakMin, ...(startedBy ? { startedBy } : {}) }, count: this.state.count || 0 };
   }
   seed(count) { if (count && !this.state.count) { this.state.count = count; return this.save(); } }
-
-  async start(who, { focusMin, breakMin } = {}) {
-    this.state.focusMin = num(focusMin, 1, 90, 25) | 0;
-    this.state.breakMin = num(breakMin, 1, 30, 5) | 0;
-    this.state.round = 1;
-    this.state.startedBy = who.name;
-    await this.phase('focus');
-  }
-
-  async stop() {
-    Object.assign(this.state, { phase: 'idle', endsAt: 0, round: 0 });
-    await this.setAlarm(null);
-    await this.save();
-    await this.mirror(this.view());
-  }
-
-  async phase(phase) {
-    this.state.phase = phase;
-    this.state.endsAt = this.now() + (phase === 'focus' ? this.state.focusMin : this.state.breakMin) * MIN;
-    await this.setAlarm(this.state.endsAt);
-    await this.save();
-    await this.mirror(this.view());
-  }
-
-  async alarm() {
-    if (this.state.phase === 'focus') {
-      this.state.count = (this.state.count || 0) + 1;
-      return this.phase('break');
-    }
-    if (this.state.phase === 'break') {
-      this.state.round++;
-      return this.phase('focus');
-    }
-  }
 }
 
 // ---- meeting rooms -----------------------------------------------------------------------
@@ -809,8 +741,7 @@ export const KINDS = {
 export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
-  ...POMO_ZONES.map((z) => `pomodoro:${z}`),
-  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main', 'wing:main', 'roles:main',
+  'whiteboard:main', 'arcade:main', 'floor:main', 'wing:main', 'roles:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

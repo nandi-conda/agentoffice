@@ -43,7 +43,8 @@ export function parseWrangler(text) {
 // of the WASM plugins in public/plugins (public/js/manifest.js): the office's
 // own objects (objects = their ids on the map) and the example uploads.
 export function describeApi({ kinds = KINDS, wrangler = null, uploads = [] } = {}) {
-  const entities = Object.entries(kinds).map(([kind, Kind]) => {
+  // Retired kinds only keep old state for what replaced them: not part of the API.
+  const entities = Object.entries(kinds).filter(([, Kind]) => !Kind.retired).map(([kind, Kind]) => {
     const d = describeKind(kind, Kind);
     const binding = BINDINGS[kind] || null;
     return { ...d, class: Kind.name, binding, doClass: binding ? CLASSES[binding] || null : null, instances: instancesOf(kind) };

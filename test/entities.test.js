@@ -5,6 +5,7 @@ import { Office } from '../server/office.js';
 import { Entity, LocalRuntime } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { MIN } from '../public/js/rooms.js';
+import { wasmPlugins, until } from './support/plugins.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -56,10 +57,13 @@ test('the old single-object state moves into the entities on first start', async
     counters: { coffees: 4, pomodoros: 2, waves: 9 },
     bookings: [{ id: 'b1', room: 'board', title: 'x', start: Date.now() + 60 * MIN, end: Date.now() + 90 * MIN, owner: 'did:plc:ada', name: 'ada', invitees: [], admitted: [], sent: {} }],
   };
-  const o = new Office(legacy);
+  const o = new Office(legacy, { plugins: wasmPlugins() });
   await o.ready;
   assert.equal(o.desks['desk-3'].goal, 'parser');
-  assert.equal(o.notes.length, 1);
+  // The notice board, coffee machine and pomodoro are WASM plugins now: they
+  // take over what their old entities were seeded with as soon as they wake.
+  await until(() => o.notes.length && o.counters.pomodoros);
+  assert.equal(o.notes[0].text, 'hi');
   assert.equal(o.strokes.length, 1);
   assert.equal(o.scores[0].score, 50);
   assert.deepEqual(o.counters, { coffees: 4, pomodoros: 2, waves: 9 });
@@ -69,6 +73,30 @@ test('the old single-object state moves into the entities on first start', async
   const again = new Office({ ...legacy, migrated: true }, { runtime: o.runtime });
   await again.ready;
   assert.equal(again.notes.length, 1);
+  o.runtime.stop();
+});
+
+test('the plugin objects take over what the core entities kept, a running timer included', async () => {
+  let now = 1_000_000;
+  const runtime = new LocalRuntime({ kinds: KINDS, now: () => now, services: { plugins: wasmPlugins(), roles: { owners: [], admins: [] } } });
+  // What the core entities saved before they were plugins.
+  Object.assign(runtime.data, {
+    'noticeboard:main': { state: { notes: [{ id: 'n1', text: 'old note', by: 'ada', owner: 'did:plc:ada', ts: 1, color: '#fde68a' }] } },
+    'coffee:main': { state: { count: 41 } },
+    'pomodoro:focus': { state: { phase: 'focus', endsAt: now + MIN, round: 3, focusMin: 25, breakMin: 5, startedBy: 'ada', count: 7 } },
+  });
+  const o = new Office({ migrated: true }, { now: () => now, runtime });
+  await o.ready;
+  await until(() => o.notes.length && o.counters.coffees && o.pomoState().focus.phase === 'focus');
+  assert.equal(o.notes[0].text, 'old note');
+  assert.deepEqual(o.counters, { coffees: 41, pomodoros: 7, waves: 0 });
+  assert.equal(o.pomoState().focus.round, 3);
+  // Its phase turns over on the plugin's own wake-up.
+  now += MIN;
+  await runtime.host('plugin:pomodoro').alarm();
+  assert.equal(o.pomoState().focus.phase, 'break');
+  assert.equal(o.counters.pomodoros, 8);
+  runtime.stop();
 });
 
 test('actors remember status and keep notes for when their person is away', async () => {
@@ -100,12 +128,13 @@ test('rooms hear people walk in over their zone topic', async () => {
 
 test('pomodoro timers turn over on their own alarm', async () => {
   let now = 1000;
-  const o = new Office({}, { now: () => now });
+  const o = new Office({}, { now: () => now, plugins: wasmPlugins() });
   const a = await join(o, 'ada');
   a.ws.msg({ t: 'move', x: 5, y: 10, teleport: true }); await tick();
-  a.ws.msg({ t: 'pomo', action: 'start', focusMin: 1, breakMin: 1 }); await tick();
+  a.ws.msg({ t: 'pomo', action: 'start', focusMin: 1, breakMin: 1 });
+  await until(() => a.ws.last('pomo')?.pomo.focus.phase === 'focus');
   now += MIN;
-  await o.runtime.host('pomodoro:focus').alarm();
+  await o.runtime.host('plugin:pomodoro').alarm();
   assert.equal(a.ws.last('pomo').pomo.focus.phase, 'break');
   assert.equal(o.counters.pomodoros, 1);
   o.runtime.stop();

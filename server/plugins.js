@@ -29,6 +29,7 @@ import { PERMISSIONS, cleanPermissions } from '../public/js/permissions.js';
 export const TIMEOUT_MS = 5000;
 export const AI_TIMEOUT_MS = 20000;
 export const MAX_STATE = 32 * 1024;
+export const MAX_DATA = 16 * 1024;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
@@ -128,7 +129,7 @@ export class PluginHost {
     }
   }
 
-  // object: { id, plugin, name, zone, wasm? , upload? }; actor: { id, did, handle, name, kind }.
+  // object: { id, plugin, name, zone, wasm? , upload? }; actor: { id, did, handle, name, kind, role }.
   // upload: { id, version, lang, code } for objects people uploaded; wasm:
   // the file of one of the office's own (public/plugins).
   // inventory: what the actor carries (plugins see it, and change it only by
@@ -142,7 +143,7 @@ export class PluginHost {
   async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [], event = null, rooms = null }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
-      actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
+      actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind, role: actor.role || null },
       action, input, state, nearby: nearby.slice(0, 20), now, event,
       inventory: inventory.slice(0, 40).map(({ id, kind, name, emoji, qty, data }) => ({ id, kind, name, emoji, qty, ...(data !== undefined ? { data } : {}) })),
       // WASM has no randomness of its own.
@@ -203,6 +204,14 @@ function withTimeout(p, ms) {
   ]);
 }
 
+function cleanData(d) {
+  if (d === undefined || d === null) return null;
+  try {
+    const json = JSON.stringify(d);
+    return json && json.length <= MAX_DATA ? JSON.parse(json) : null;
+  } catch { return null; }
+}
+
 // A plugin's answer, reduced to what the office knows how to show.
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
@@ -225,6 +234,9 @@ export function sanitize(r) {
       until: Number.isFinite(r.display.until) ? r.display.until : null,
       // Music the office plays near the object: tune `id` (public/js/music.js), started at `at` (epoch ms).
       music: r.display.music && /^[\w-]{1,32}$/.test(r.display.music.id || '') && Number.isFinite(r.display.music.at) ? { id: r.display.music.id, at: r.display.music.at } : null,
+      // Plain JSON every browser gets, for objects the office draws itself
+      // (the notice board's notes, the pomodoro's phase).
+      data: cleanData(r.display.data),
     };
   }
   // Ask to be called again (action 'tick') at this time, e.g. when a song ends.

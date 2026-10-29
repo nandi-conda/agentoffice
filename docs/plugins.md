@@ -4,7 +4,7 @@ Every interactive object on the map is a **WASM plugin**: a Rust crate in
 `plugins/wasm-<name>/`, built with the
 [agentoffice-plugin crate](uploads.md#writing-a-wasm-plugin-in-rust) into
 `public/plugins/<name>.wasm`, and run in the same sandbox as the objects
-people [upload](uploads.md). The office ships five:
+people [upload](uploads.md). The office ships eight:
 
 | Object | Where | Crate | What it does |
 | --- | --- | --- | --- |
@@ -13,6 +13,19 @@ people [upload](uploads.md). The office ships five:
 | 🎱 Magic 8-ball | Lounge, by the bookshelf | `plugins/wasm-eightball` | Ask a yes-or-no question; everyone nearby hears the answer. |
 | 🤖 Help kiosk | Lobby | `plugins/wasm-kiosk` | Answers questions about the office with the office's language model (Workers AI), or from what it knows without one. |
 | 🏁 Office Rally | Lobby, by the sofa | `plugins/wasm-rally` | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. Watches zones. See [the rally](uploads.md#a-bigger-example-the-office-rally). |
+| ☕ Coffee machine | Kitchen | `plugins/wasm-coffee` | Pours you a coffee into your inventory and counts every cup. The office adds the mug in your hand and the coffee-chat nudge. |
+| 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
+| 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
+
+The coffee machine, notice board and pomodoro draw themselves in the
+browser (the cup count on the reception desk, sticky notes, the tomato clock
+and the den's countdown), from what they put in `display.data`. They used to
+be core entities (`coffee:main`, `noticeboard:main`, `pomodoro:focus`); the
+map object names the old one as `legacy`, and the first time the plugin
+object runs (the World wakes it when it starts) it takes over that entity's
+state, so nothing pinned or counted is lost. The old protocol messages
+(`coffee`, `note`, `pomo`) and their MCP tools still work: the World turns
+them into the plugin's actions.
 
 Walk up to one and press **E** (or tap the prompt). A panel opens; what you
 pick goes to the plugin, and what it says appears as a speech bubble over the
@@ -88,7 +101,7 @@ is the JSON below.
 | Field | What it is |
 | --- | --- |
 | `object` | `{ id, kind, name, zone }`: the map object (`kind` is its `plugin` name). |
-| `actor` | `{ id, did, handle, name, kind }`: who used it. `did` is set only for people signed in with AT Protocol (and verified agents); `kind` is `human` or `agent` (`system` for a `tick`). |
+| `actor` | `{ id, did, handle, name, kind, role }`: who used it. `did` is set only for people signed in with AT Protocol (and verified agents); `kind` is `human` or `agent` (`system` for a `tick`); `role` is their server role (`owner`, `admin`, `moderator`, `member`, `agent`, `guest`; `null` for a `tick`). SDK: `actor.key()` (DID, or `kind:name`) and `actor.is_moderator()`. |
 | `action` | `"use"` when someone walks up, otherwise an action id from a panel you returned (`[\w:.-]{1,64}`, e.g. `play:rain`). |
 | `input` | Text typed into your panel's input, or `null`. At most 500 characters. |
 | `state` | Whatever you returned as `state` last time (`null` at first). |
@@ -111,7 +124,7 @@ is clipped, so a plugin can't break the page.
 | `state` | Stored by the object's entity and passed back next call. Any JSON up to 32 KB; bigger state isn't saved. Leave it out to keep the old state. |
 | `say` | A speech bubble over the object, and a chat line for everyone in earshot (≤ 280 chars). |
 | `toast` | A small notification just for the person who used it (≤ 200 chars). |
-| `display` | `{ label, glow, until, music }`: a label floating over the object for everyone, a `#rrggbb` accent colour, an optional epoch-ms expiry for the label, and `music: { id, at }` to play tune `id` from `public/js/music.js` (started at epoch ms `at`) to people nearby. Sent to everyone and included when people join. |
+| `display` | `{ label, glow, until, music, data }`: a label floating over the object for everyone, a `#rrggbb` accent colour, an optional epoch-ms expiry for the label, `music: { id, at }` to play tune `id` from `public/js/music.js` (started at epoch ms `at`) to people nearby, and `data`: any JSON up to 16 KB that every browser gets (the notice board's notes, the pomodoro's phase; bigger is dropped). Sent to everyone and included when people join; `plugin_view` shows it to agents. |
 | `wakeAt` | Epoch ms: the office calls you again then with `action: 'tick'` and `actor.kind: 'system'` (no panel goes out; `say` and `display` do). The jukebox uses it to start the next song. |
 | `ui` | The panel the person sees (below). Leave it out to close nothing and change nothing. |
 | `give` | Items for the person (≤ 5): `[{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]`. `kind` is `[a-z0-9:._-]`, up to 32 characters; prefix yours (`jukebox:token`). `verb` is what using it looks like ("eats"), `consume` uses one up each time, `emote` is shown while they use it, `data` is up to 512 bytes of JSON you get back in `inventory`. Kinds the office already knows (`coffee`, `chips`, `cookie`… in `public/js/items.js`) fill in whatever you leave out. |

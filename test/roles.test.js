@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Office, KICKED } from '../server/office.js';
+import { wasmPlugins, until } from './support/plugins.js';
 import { McpHub } from '../server/mcp.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { bootstrap, effectiveRole, grantError, can } from '../public/js/roles.js';
@@ -51,7 +52,7 @@ test('roles: env bootstrap, defaults, and who may grant what', () => {
 });
 
 test('roles: an env owner makes a moderator, who kicks, mutes and moves people but not the owner', async () => {
-  const o = new Office({}, { roles: { owners: [OWNER], admins: [] } });
+  const o = new Office({}, { roles: { owners: [OWNER], admins: [] }, plugins: wasmPlugins() });
   await o.ready;
   const owner = await join(o, 'Olive', OWNER), ada = await join(o, 'Ada', ADA), guest = await join(o, 'guest');
   assert.equal(owner.ws.last('welcome').you.role, 'owner');
@@ -84,9 +85,10 @@ test('roles: an env owner makes a moderator, who kicks, mutes and moves people b
   assert.ok(!o.peers.has(guest.id));
 
   // Moderators take down anyone's notice, but can't grant roles.
-  owner.ws.msg({ t: 'note', op: 'add', text: 'owner note' }); await tick();
-  ada.ws.msg({ t: 'note', op: 'remove', id: o.notes[0].id }); await tick();
-  assert.equal(o.notes.length, 0);
+  owner.ws.msg({ t: 'note', op: 'add', text: 'owner note' });
+  await until(() => o.notes.length);
+  ada.ws.msg({ t: 'note', op: 'remove', id: o.notes[0].id });
+  await until(() => !o.notes.length);
   assert.match((await mod(ada, { op: 'grant', to: OWNER, role: 'member' })).error, /needs the admin role/);
   const people = await mod(ada, { op: 'people' });
   assert.deepEqual(people.online.map((p) => p.role).sort(), ['moderator', 'owner']);

@@ -1,5 +1,5 @@
 // Interactive objects on the map (jukebox, vending machine, 8-ball, kiosk,
-// the Office Rally…): one entity per object, address `plugin:<object id>`.
+// the Office Rally, the coffee machine, notice board, pomodoro…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
@@ -11,6 +11,14 @@ import { PluginHost } from '../plugins.js';
 import { ROOMS, activeBooking, isHolder } from '../../public/js/rooms.js';
 
 const COOLDOWN_MS = 400;
+// Objects that used to be core entities start from what that entity kept
+// (the map object names it: `legacy: 'coffee:main'`), reshaped from its view
+// into the plugin's state.
+const ADOPT = {
+  coffee: (v) => ({ count: v?.count || 0 }),
+  noticeboard: (v) => ({ notes: Array.isArray(v) ? v : [] }),
+  pomodoro: (v) => ({ ...(v?.state || {}), count: v?.count || 0 }),
+};
 let offline = null; // a host with no sandbox, when the runtime didn't pass one
 // Who a plugin sees on a wake-up call: the office, not a person.
 const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, did: null, kind: 'system', zone: null };
@@ -28,6 +36,7 @@ export class PluginObject extends Entity {
       mutates: true,
       near: 3,
     },
+    wake: { doc: 'Make sure the object is showing what it should: one that used to be a core entity takes over that entity\'s state and shows it. The World calls it when it starts.', returns: { type: 'boolean', description: 'whether it took over old state' }, internal: true },
   };
 
   static events = { subscribes: { 'zone:<id>': 'enter / exit, for the zones its plugin asked to watch (answer `watch`): calls the plugin with action `enter:<zone>` / `exit:<zone>` as that person' } };
@@ -70,6 +79,24 @@ export class PluginObject extends Entity {
     await this.run(SYSTEM, 'tick', null);
   }
 
+  // One that used to be a core entity and hasn't run since: take over that
+  // entity's state, and run a tick so its display (notes, cup count) goes out.
+  async wake() {
+    // (An office with nothing to run plugins in has nothing to show either.)
+    if (!this.object?.legacy || this.state.data !== undefined || !this.services.plugins) return false;
+    await this.run(SYSTEM, 'tick', null);
+    return true;
+  }
+
+  async adopt() {
+    const from = this.object?.legacy;
+    if (!from || this.state.data !== undefined) return;
+    const shape = ADOPT[from.split(':')[0]] || ((v) => v ?? null);
+    let old = null;
+    try { old = await this.ref(from).view(); } catch { /* starts fresh */ }
+    this.state.data = shape(old);
+  }
+
   // Someone walked into or out of a zone the plugin asked to watch: call it
   // as that person with action `enter:<zone>` / `exit:<zone>`. It can answer
   // with a toast for them, say something, change its display, or hand them
@@ -106,6 +133,7 @@ export class PluginObject extends Entity {
 
   async turn(who, action, input, event) {
     const f = this.object;
+    await this.adopt();
     const spot = { x: f.x + f.w / 2, y: f.y + f.h + 0.5 };
     const zone = zoneAt(spot.x, spot.y)?.id || null;
     let nearby = [];
@@ -143,6 +171,8 @@ export class PluginObject extends Entity {
     if (event) { if (result.toast) effects.push({ op: 'send', to: who.id, msg: { t: 'objui', id: f.id, toast: result.toast, via } }); }
     else if (who !== SYSTEM) effects.push({ op: 'send', to: who.id, msg: { t: 'objui', id: f.id, ui: result.ui, toast: result.toast, via } });
     if (result.say) effects.push({ op: 'broadcast', msg: { t: 'obj', id: f.id, say: result.say, x: spot.x, y: spot.y } });
+    // Out of order: keep showing the data it had (the board keeps its notes).
+    if (via === 'offline' && result.display && this.state.display?.data != null) result = { ...result, display: { ...result.display, data: this.state.display.data } };
     const display = result.display && JSON.stringify(result.display) !== JSON.stringify(this.state.display ?? null) ? result.display : null;
     if (display) this.state.display = display;
     if (result.wakeAt && result.wakeAt !== this.state.wakeAt) {

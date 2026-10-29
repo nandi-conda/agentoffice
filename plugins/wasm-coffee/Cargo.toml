@@ -1,0 +1,16 @@
+[package]
+name = "coffee"
+version = "0.1.0"
+description = "The office coffee machine: a cup into your inventory, and a count of every cup, as a WASM plugin."
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+agentoffice-plugin = { path = "../../crates/agentoffice-plugin" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -45,10 +45,7 @@ nav:
       - "room (Room)": api/room.md
       - "desk (Desk)": api/desk.md
       - "whiteboard (Whiteboard)": api/whiteboard.md
-      - "noticeboard (NoticeBoard)": api/noticeboard.md
       - "arcade (Arcade)": api/arcade.md
-      - "coffee (CoffeeMachine)": api/coffee.md
-      - "pomodoro (Pomodoro)": api/pomodoro.md
       - "plugin (PluginObject)": api/plugin.md
       - "gallery (Gallery)": api/gallery.md
       - "uobj (UploadedObject)": api/uobj.md
@@ -58,10 +55,13 @@ nav:
       - "chan (ChannelRoom)": api/chan.md
       - "inventory (Office)": api/inventory.md
       - "mod (Office)": api/mod.md
+      - "wasm: Coffee machine": api/upload-coffee-machine.md
       - "wasm: Magic 8-ball": api/upload-magic-8-ball.md
       - "upload: Guestbook": api/upload-guestbook.md
       - "wasm: Jukebox": api/upload-jukebox.md
       - "wasm: Help kiosk": api/upload-help-kiosk.md
+      - "wasm: Notice board": api/upload-notice-board.md
+      - "wasm: Pomodoro timer": api/upload-pomodoro-timer.md
       - "wasm: Office Rally": api/upload-office-rally.md
       - "upload: Skeleton Key": api/upload-skeleton-key.md
       - "wasm: Vending machine": api/upload-vending-machine.md

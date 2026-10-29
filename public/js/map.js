@@ -73,7 +73,9 @@ desk(`desk-${n++}`, 30, 7, 'up');
 for (const [dx, dy] of [[2, 5], [5, 5], [8, 5], [2, 8], [5, 8], [8, 8]]) {
   desk(`den-${dx}-${dy}`, dx, dy, 'up');
 }
-add({ type: 'pomodoro', id: 'pomodoro', x: 5.5, y: 1, w: 2, h: 1, solid: true, zone: 'focus', interact: 'pomodoro' });
+// The shared focus timer: a WASM plugin (plugins/wasm-pomodoro). `legacy`:
+// the core entity it took over from, whose saved state it starts with.
+add({ type: 'pomodoro', id: 'pomodoro', x: 5.5, y: 1, w: 2, h: 1, solid: true, zone: 'focus', interact: 'plugin', plugin: 'pomodoro', wasm: 'pomodoro.wasm', name: 'Focus timer', prompt: 'Use the focus timer', legacy: 'pomodoro:focus' });
 add({ type: 'plant', id: 'p-den1', x: 1, y: 11, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-den2', x: 11, y: 11, w: 1, h: 1, solid: true });
 add({ type: 'bookshelf', id: 'den-shelf', x: 1, y: 1, w: 3, h: 1, solid: true });
@@ -124,11 +126,15 @@ add({ type: 'kiosk', id: 'kiosk', x: 10, y: 22, w: 1, h: 1, solid: true, interac
 // Office Rally: a checkpoint race that starts and ends here. A WASM plugin
 // (plugins/wasm-rally, built into public/plugins/rally.wasm) run in the sandbox.
 add({ type: 'rally', id: 'rally', x: 9, y: 27, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'rally', wasm: 'rally.wasm', name: 'Office Rally', prompt: 'Join the rally' });
-add({ type: 'board', id: 'noticeboard', x: 8, y: 20, w: 2, h: 1, solid: true, interact: 'noticeboard' });
+// A WASM plugin (plugins/wasm-noticeboard); browsers draw the notes it shows
+// in their own sticky-note panel (interact 'noticeboard').
+add({ type: 'board', id: 'noticeboard', x: 8, y: 20, w: 2, h: 1, solid: true, interact: 'noticeboard', plugin: 'noticeboard', wasm: 'noticeboard.wasm', name: 'Notice board', prompt: 'Read the notice board', legacy: 'noticeboard:main' });
 
 // Kitchen
 add({ type: 'counter', id: 'counter', x: 14, y: 21, w: 7, h: 1, solid: true });
-add({ type: 'coffee', id: 'coffee', x: 23, y: 21, w: 1, h: 1, solid: true, interact: 'coffee' });
+// A WASM plugin (plugins/wasm-coffee); E sends the `coffee` message, which
+// also shows your mug and nudges people nearby (server/office.js).
+add({ type: 'coffee', id: 'coffee', x: 23, y: 21, w: 1, h: 1, solid: true, interact: 'coffee', plugin: 'coffee', wasm: 'coffee.wasm', name: 'Coffee machine', prompt: 'Grab a coffee', legacy: 'coffee:main' });
 add({ type: 'fridge', id: 'fridge', x: 25, y: 21, w: 2, h: 1, solid: true });
 for (const [tx, ty] of [[16, 25], [21, 25]]) {
   add({ type: 'roundtable', id: `k-table-${tx}`, x: tx, y: ty, w: 2, h: 2, solid: true });

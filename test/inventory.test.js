@@ -57,13 +57,15 @@ test('items: cleaning, stacking, taking, all or nothing', () => {
 });
 
 test('coffee comes with a cup you carry; drinking it uses it up for everyone to see', async () => {
-  const o = new Office();
+  const o = new Office({}, { plugins: wasmPlugins() });
   await o.ready;
   const a = await join(o, 'ada', { kind: 'agent' }), b = await join(o, 'grace');
   await at(a, spot('coffee').x, spot('coffee').y); await at(b, spot('coffee').x + 1, spot('coffee').y);
-  a.ws.msg({ t: 'coffee' }); await settle();
-  const cup = a.items().find((s) => s.kind === 'coffee');
-  assert.ok(cup);
+  a.ws.msg({ t: 'coffee' });
+  // The machine is a WASM plugin: it pours, counts and says so.
+  const cup = await until(() => a.items().find((s) => s.kind === 'coffee'));
+  assert.match(a.ws.last('objui').toast, /Fresh coffee/);
+  assert.equal(o.counters.coffees, 1);
   assert.equal(cup.from, 'Coffee machine');
   a.ws.msg({ t: 'inv', op: 'use', id: cup.id }); await settle();
   assert.equal(a.items().length, 0);
@@ -72,17 +74,19 @@ test('coffee comes with a cup you carry; drinking it uses it up for everyone to 
   assert.equal(b.ws.sent.filter((m) => m.t === 'peer' && m.id === a.id && m.emote === 'coffee').length, 1);
   // Far from the machine you still get a mug to show, but no cup to carry.
   await at(a, 40, 8);
-  a.ws.msg({ t: 'coffee' }); await settle();
+  await cooldown();
+  a.ws.msg({ t: 'coffee' });
+  await until(() => o.counters.coffees === 2);
   assert.equal(a.items().length, 0);
 });
 
 test('agents and signed-in people keep their things on their actor between visits', async () => {
-  const o = new Office();
+  const o = new Office({}, { plugins: wasmPlugins() });
   await o.ready;
   const a = await join(o, 'bot', { kind: 'agent' });
   await at(a, spot('coffee').x, spot('coffee').y);
-  a.ws.msg({ t: 'coffee' }); await settle();
-  assert.equal((await o.ref('actor:agent:bot').inventory()).length, 1);
+  a.ws.msg({ t: 'coffee' });
+  await until(async () => (await o.ref('actor:agent:bot').inventory()).length === 1);
   a.ws.close?.(); o.leave(o.peers.get(a.id));
   const again = await join(o, 'bot', { kind: 'agent' });
   assert.equal(again.ws.last('welcome').items[0].kind, 'coffee');
@@ -90,11 +94,12 @@ test('agents and signed-in people keep their things on their actor between visit
 });
 
 test('place on a spot in reach, pick up (up close only), and the floor everyone sees', async () => {
-  const o = new Office();
+  const o = new Office({}, { plugins: wasmPlugins() });
   await o.ready;
   const a = await join(o, 'ada'), b = await join(o, 'grace');
   await at(a, spot('coffee').x, spot('coffee').y);
-  a.ws.msg({ t: 'coffee' }); await settle();
+  a.ws.msg({ t: 'coffee' });
+  await until(() => a.items().some((s) => s.kind === 'coffee'));
   await o.invApply(o.peers.get(a.id), { give: [{ kind: 'cookie', qty: 2 }] });
   const cup = a.items().find((s) => s.kind === 'coffee'), cookie = a.items().find((s) => s.kind === 'cookie');
   const me = o.peers.get(a.id);
@@ -205,7 +210,7 @@ test('plugins see your things, and a take you can\'t cover changes nothing', asy
   a.ws.msg({ t: 'use', id: 'jukebox', action: 'spend' }); await settle();
   assert.equal(calls.at(-1).inventory[0].kind, 'jukebox:token');
   assert.match(a.ws.last('objui').toast, /only have 2/);
-  assert.equal(a.ws.sent.filter((m) => m.t === 'obj' && m.say).length, 0, 'nothing was said');
+  assert.equal(a.ws.sent.filter((m) => m.t === 'obj' && m.id === 'jukebox' && m.say).length, 0, 'nothing was said');
   assert.deepEqual((await rt.ref('plugin:jukebox').inspect()).state.data, { n: 1 }, 'the object forgot the failed turn');
   assert.equal(a.items()[0].qty, 2);
   rt.stop();

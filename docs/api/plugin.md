@@ -4,7 +4,7 @@ An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the O
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 5: `kiosk`, `rally`, `vending`, `jukebox`, `eightball`
+- 8: `pomodoro`, `kiosk`, `rally`, `noticeboard`, `coffee`, `vending`, `jukebox`, `eightball`
 
 ## `view()`
 
@@ -27,6 +27,14 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 | &nbsp;&nbsp;&nbsp;`req.input` *(optional)* | `string \| null` | Typed text |
 
 Returns `object | null`
+
+## `wake()`
+
+`read-only` · `internal (entity to entity)`
+
+Make sure the object is showing what it should: one that used to be a core entity takes over that entity's state and shows it. The World calls it when it starts.
+
+Returns `boolean`
 
 ## Events
 

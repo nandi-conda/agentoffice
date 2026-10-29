@@ -53,6 +53,7 @@ pub mod limits {
     pub const SLOTS: usize = 20;
     pub const STACK: u32 = 20;
     pub const WATCH: usize = 12;
+    pub const DATA_BYTES: usize = 16 * 1024;
 }
 
 thread_local! {
@@ -182,7 +183,7 @@ impl<P: Plugin> TestOffice<P> {
 
     fn actor(&mut self, name: &str) -> Actor {
         self.people.entry(name.to_string()).or_insert_with(|| Actor {
-            id: name.to_lowercase().replace(' ', "-"), did: None, handle: None, name: name.into(), kind: "human".into(),
+            id: name.to_lowercase().replace(' ', "-"), did: None, handle: None, name: name.into(), kind: "human".into(), role: Some("guest".into()),
         }).clone()
     }
 
@@ -191,6 +192,7 @@ impl<P: Plugin> TestOffice<P> {
         let mut a = self.actor(name);
         a.handle = Some(handle.into());
         a.did = Some(format!("did:plc:{}", handle.replace('.', "")));
+        if a.role.as_deref() == Some("guest") { a.role = Some("member".into()); }
         self.people.insert(name.into(), a);
         self
     }
@@ -199,6 +201,14 @@ impl<P: Plugin> TestOffice<P> {
     pub fn agent(&mut self, name: &str) -> &mut Self {
         let mut a = self.actor(name);
         a.kind = "agent".into();
+        self.people.insert(name.into(), a);
+        self
+    }
+
+    /// Give `name` a server role (`moderator`, `admin`…).
+    pub fn role(&mut self, name: &str, role: &str) -> &mut Self {
+        let mut a = self.actor(name);
+        a.role = Some(role.into());
         self.people.insert(name.into(), a);
         self
     }
@@ -228,7 +238,7 @@ impl<P: Plugin> TestOffice<P> {
     pub fn tick(&mut self) -> Response {
         let at = self.wake_at.take().expect("the plugin didn't ask for a wake-up (wake_at)");
         self.now = self.now.max(at);
-        let system = Actor { id: "system".into(), did: None, handle: None, name: "the office".into(), kind: "system".into() };
+        let system = Actor { id: "system".into(), did: None, handle: None, name: "the office".into(), kind: "system".into(), role: None };
         self.run(system, "tick", None)
     }
 
@@ -398,6 +408,7 @@ impl<P: Plugin> TestOffice<P> {
                 let ok = (4..=9).contains(&g.len()) && g.starts_with('#') && g[1..].chars().all(|c| c.is_ascii_hexdigit());
                 if !ok { w.push(format!("display.glow {g:?} isn't a #rrggbb colour and is dropped")); }
             }
+            if d.data.as_ref().is_some_and(|v| v.to_string().len() > limits::DATA_BYTES) { w.push(format!("display.data is over {} bytes and is dropped", limits::DATA_BYTES)); }
         }
         assert!(r.take.len() <= limits::GIVE, "take uses up {} kinds of things; the office takes {} at most", r.take.len(), limits::GIVE);
         assert!(r.give.len() <= limits::GIVE, "give hands out {} things; the office takes {} at most", r.give.len(), limits::GIVE);

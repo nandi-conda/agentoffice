@@ -7,7 +7,7 @@
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
-| **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** (25/5) on the tomato clock. While a session runs, everyone inside is automatically set to *Focusing*. |
+| **Deep Work Den** | Quiet zone: text only, no voice, and a **shared pomodoro** on the tomato clock (25/5, 50/10 or 15/3). While a session runs, everyone inside is automatically set to *Focusing*. |
 | **Kitchen** | Coffee machine. Grabbing a coffee puts a mug in your hand for a few minutes and nudges people nearby that you're up for a coffee chat. A **vending machine** with free snacks (and limited stock). |
 | **Lounge** | Sofas, beanbags, bookshelf and two arcade cabinets running **Byte Snake** with an office-wide leaderboard. A **jukebox** everyone can queue songs on, and a **magic 8-ball**. |
 
