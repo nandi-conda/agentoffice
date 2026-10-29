@@ -335,7 +335,20 @@ export class Office {
     if (spec.ctx) params.length = paramList(spec).length;
     const all = [...(spec.who ? [this.who(p)] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : [])];
     if (target) return structuredClone(await target.invoke(method, structuredClone(all)));
+    if (kind === 'gallery' && method === 'upload') return this.uploadObject(p, all[0], args[0] || {}, args[1] || {});
     return this.ref(address)[method](...all);
+  }
+
+  // An upload lands in the uploader's inventory, then is put down like
+  // anything they carry (placeItem: the same rules and the same ghost in the
+  // browser). The browser asks for `pick`: the person clicks the spot.
+  // Otherwise (MCP) it goes on x/y, or the nearest free tile.
+  async uploadObject(p, who, req, { pick = false } = {}) {
+    const r = await this.ref('gallery:main').upload(who, req);
+    if (!r?.ok || r.object.look === CARRIED || pick || !r.item) return r;
+    const put = await this.placeItem(p, r.item, req.x, req.y);
+    if (put.error) return { ...r, placed: false, why: `${put.error}: it's in your inventory, put it down with inventory_place` };
+    return { ...r, object: this.gallery.find((i) => i.id === r.object.id) || r.object, item: null };
   }
 
   // The desk whose chair p stands at, if any.
@@ -1108,7 +1121,8 @@ export class Office {
     const method = m.op === 'remove' ? 'remove' : m.op === 'upload' ? 'upload' : null;
     if (!method) return;
     let result;
-    try { result = await this.call(p, 'gallery:main', method, [m.req || {}]); }
+    // An upload from the browser goes into their hands; they click where it stands.
+    try { result = await this.call(p, 'gallery:main', method, method === 'upload' ? [m.req || {}, { pick: !!m.req?.pick }] : [m.req || {}]); }
     catch (e) { result = { error: clip(e.message, 200) }; }
     this.sendTo(p, { t: 'galleryres', rid: m.rid, result });
   }

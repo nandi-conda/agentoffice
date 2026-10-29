@@ -18,8 +18,11 @@ holds it owns it, and throwing it away deletes it.
 - Press **U** (or 🧩 in the toolbar) to see what's out there, walk to one,
   or remove your own.
 - Upload a `.wasm` file (or, on Cloudflare, a `.js` module), give it a name,
-  a prompt, an emoji and a look, and press **Place it next to me**. It stands
-  on the free tile next to you.
+  a prompt, an emoji and a look, and press **Upload and place it**. It comes
+  into your hands and you click a highlighted spot to stand it there, the
+  same as putting down anything you carry (Esc keeps it in your 🎒 for
+  later). Over MCP, `gallery_upload` takes `x`/`y` for the tile, or puts it
+  on the nearest free one.
 - **Try the example guestbook** in that panel uploads
   `public/plugins/guestbook.wasm`, built from
   [`plugins/wasm-guestbook`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-guestbook)

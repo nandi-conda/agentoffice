@@ -1780,7 +1780,7 @@ function galleryRequest(op, req) {
 }
 function showGallery() {
   if (!me) return;
-  openGallery(modal, { me, items: gallery, request: galleryRequest, toast, walkTo, moderator: can(me.role, 'uploads.remove') });
+  openGallery(modal, { me, items: gallery, request: galleryRequest, toast, walkTo, place: (id) => startPlacing(items.find((s) => s.id === id)), moderator: can(me.role, 'uploads.remove') });
 }
 
 // ---- A/V rooms: camera, screen share and the video stage -----------------------------

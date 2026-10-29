@@ -14,7 +14,7 @@ import { can } from './roles.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Uploaded as an item: not on the map, one thing its uploader carries (the Skeleton Key).
 const carriedLook = (look) => look === CARRIED;
-const upLabel = (look) => (carriedLook(look) ? 'Put it in my inventory' : 'Place it next to me');
+const upLabel = (look) => (carriedLook(look) ? 'Put it in my inventory' : 'Upload and place it');
 const MAX_KB = 512;
 
 // Put the objects standing in rooms into FURNITURE, so they draw, prompt
@@ -46,7 +46,7 @@ function toBase64(buf) {
 
 // The 🧩 panel: what's out there, yours to remove, and an upload form.
 // request(op, req) → Promise of the server's answer ({ ok } or { error }).
-export function openGallery(modal, { me, items, request, toast, walkTo, moderator = false }) {
+export function openGallery(modal, { me, items, request, toast, walkTo, place, moderator = false }) {
   // Moderators can remove anyone's (the office checks again).
   // A carried one is whoever holds it's: they throw it away from the 🎒.
   const mine = (it) => (me.did && it.owner?.did === me.did) || moderator;
@@ -60,7 +60,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     : '<p class="muted small">Nothing uploaded yet.</p>';
   const form = me.did ? `
       <h3>Upload one</h3>
-      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It stands up in the room next to you, drawn the way you pick; anyone can use it, and only you can pick it up (it goes into your 🎒, to put down somewhere else) or remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: one key for your inventory that opens booked rooms)' : ''}</p>
+      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It comes into your hands and you click where it stands, like putting anything down. Anyone can use it, and only you can pick it up (it goes into your 🎒, to put down somewhere else) or remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: one key for your inventory that opens booked rooms)' : ''}</p>
       <p class="small gal-perm" hidden></p>
       <div class="gal-form">
         <label class="small"><b>File</b><input type="file" class="gal-file" accept=".wasm,.js,.mjs,application/wasm,text/javascript"></label>
@@ -150,9 +150,13 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
       name: val('.gal-name'), lang: file.lang, code: toBase64(file.bytes),
       prompt: val('.gal-prompt') || undefined, doc: val('.gal-doc') || undefined,
       emoji: val('.gal-emoji') || undefined, glow: val('.gal-glow'), look: val('.gal-look'),
+      pick: true, // into my hands, and I click where it stands
     });
     if (r.error) { err(r.error); e.target.disabled = false; e.target.textContent = upLabel(val('.gal-look')); return; }
     modal.close();
-    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is ${r.object.carried ? 'in your inventory' : 'on the floor next to you'}.`);
+    // Anything that stands in a room goes down like everything you carry:
+    // pick a highlighted spot (Esc leaves it in your 🎒 for later).
+    if (r.item && !carriedLook(r.object.look)) return place(r.item);
+    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is in your inventory.`);
   });
 }

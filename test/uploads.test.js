@@ -9,7 +9,7 @@ import { PluginHost } from '../server/plugins.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
 import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm, bundledWasm } from '../server/sandbox.js';
 import { wasmFile, until } from './support/plugins.js';
-import { placeNear, MAX_PER_OWNER, Gallery } from '../server/entities/gallery.js';
+import { MAX_PER_OWNER, Gallery } from '../server/entities/gallery.js';
 import { zoneAt } from '../public/js/map.js';
 import { levelOf, uploadError } from '../public/js/permissions.js';
 import { readManifest, cleanManifest, MANIFEST_SECTION } from '../public/js/manifest.js';
@@ -116,13 +116,6 @@ test('the Dynamic Worker sandbox loads one isolate per version, cut off from the
     assert.deepEqual(imports.filter((m) => m !== 'cloudflare:workers' && !/^\.\/plugin\./.test(m)), []);
   }
   assert.doesNotMatch(runWasm.toString(), /\blog\(/);
-});
-
-test('placing next to someone avoids walls, furniture and other uploads', () => {
-  const a = placeNear(20.5, 26.5, []);
-  assert.ok(a);
-  const b = placeNear(20.5, 26.5, [a]);
-  assert.notDeepEqual(a, b);
 });
 
 // ---- in the office ---------------------------------------------------------------
@@ -463,5 +456,29 @@ test('an uploaded whiteboard, notice board or coffee machine is the real thing, 
   ada.msg({ t: 'coffee', id: cm.id });
   await until(() => (ada.last('inv')?.items || []).some((i) => i.kind === 'coffee'));
   assert.equal(o.counters.coffees, 0, 'its cups are its own');
+  rt.stop();
+});
+
+test('an upload goes down like anything you carry: the browser picks the spot, MCP names one or gets the nearest', async () => {
+  const { o, rt } = office();
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada');
+  // The browser: into her hands, and she clicks where it stands.
+  ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: { ...upload, pick: true } });
+  await until(() => ada.last('galleryres'));
+  const r = ada.last('galleryres').result;
+  assert.equal(r.object.carried, true);
+  const stack = (ada.last('inv').items || []).find((s) => s.id === r.item);
+  assert.equal(stack.data.upload, r.object.id);
+  ada.msg({ t: 'inv', op: 'place', id: r.item, x: 21.5, y: 27.5 });
+  await until(() => o.gallery.find((i) => i.id === r.object.id)?.x === 21);
+  assert.equal(o.gallery.find((i) => i.id === r.object.id).owner.did, 'did:plc:ada');
+  // MCP-style: a tile out of reach keeps it in her inventory and says why.
+  const p = [...o.peers.values()].find((q) => q.name === 'ada');
+  const far = await o.call(p, 'gallery:main', 'upload', [{ ...upload, x: 40, y: 5 }]);
+  assert.equal(far.placed, false);
+  assert.match(far.why, /too far/);
+  const near = await o.call(p, 'gallery:main', 'upload', [{ ...upload, x: 19.5, y: 26.5 }]);
+  assert.deepEqual([near.object.x, near.object.y, near.object.carried], [19, 26, undefined]);
   rt.stop();
 });

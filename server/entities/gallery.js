@@ -23,7 +23,7 @@
 
 import { Entity } from './runtime.js';
 import { str, num, obj, opt, arr, WHO } from './schema.js';
-import { FURNITURE, isBlocked, zoneAt } from '../../public/js/map.js';
+import { zoneAt } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { checkUpload, fromBase64, MAX_WASM, LANGS } from '../sandbox.js';
 import { can } from '../../public/js/roles.js';
@@ -64,25 +64,12 @@ const ITEM = obj({
 // Does an upload stand somewhere? (Carried ones, and look `item`, never do.)
 export const placed = (i) => !i.carried && Number.isFinite(i.x);
 
-// The tile next to (x, y) where a new object can stand: free floor, not on
-// furniture or another upload.
-export function placeNear(x, y, items) {
-  const fx = Math.floor(x), fy = Math.floor(y);
-  const taken = (tx, ty) => isBlocked(tx, ty)
-    || FURNITURE.some((f) => f.type !== 'rug' && tx + 1 > f.x && tx < f.x + f.w && ty + 1 > f.y && ty < f.y + f.h)
-    || items.some((i) => i.x === tx && i.y === ty);
-  for (const [dx, dy] of [[0, -1], [1, 0], [-1, 0], [0, 1], [1, -1], [-1, -1], [1, 1], [-1, 1], [0, -2], [2, 0], [-2, 0], [0, 2]]) {
-    if (!taken(fx + dx, fy + dy)) return { x: fx + dx, y: fy + dy };
-  }
-  return null;
-}
-
 export class Gallery extends Entity {
   static doc = 'Objects people uploaded: WASM (or JS) plugins, each a drawn object that stands in a room or is carried in someone\'s inventory. Keeps where each is, its manifest and who owns it; the code lives in each uobj:<id>. Uploaded objects follow the plugin contract (docs/plugins.md) and run sandboxed (docs/uploads.md).';
   static api = {
     view: { doc: 'Every uploaded object: the ones standing in rooms, and the carried ones.', returns: arr(ITEM, 'Uploaded objects') },
     upload: {
-      doc: `Upload a plugin and place it on the map next to you (or, when its look is \`item\`, get it as one item in your inventory: with the unlock permission, a skeleton key that opens booked rooms as its carrier walks up). Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
+      doc: `Upload a plugin. It becomes one item in your inventory, then stands up as itself on the tile you name with x and y (the same rules as inventory_place: within 3 tiles, reachable on foot, free), or without them on the nearest free tile. A look of \`item\` stays in your inventory (with the unlock permission, a skeleton key that opens booked rooms as its carrier walks up). Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
       who: true,
       mutates: true,
       params: {
@@ -94,10 +81,11 @@ export class Gallery extends Entity {
           doc: opt(str('What it does, for the docs and the MCP tool list', 280)),
           emoji: opt(str('An emoji to show on it', 8)),
           glow: opt(str('Accent colour #rrggbb', 9, { pattern: '^#[0-9a-fA-F]{3,8}$' })),
+          x: opt(num('Tile x to stand it on (any point in the tile)', 0)), y: opt(num('Tile y', 0)),
           look: opt({ type: 'string', enum: LOOKS, description: `How it's drawn (default: the manifest's look, else ${lookOf()}): ${Object.entries(LOOK_NAMES).map(([k, v]) => `${k} (${v.toLowerCase()})`).join(', ')}. sprite needs a manifest with one; item starts in your inventory` }),
         }, 'The upload'),
       },
-      returns: { type: 'object', description: '{ ok, object } with the placed object (carried: the item is in your inventory), or { error }' },
+      returns: { type: 'object', description: '{ ok, object, item } with the object (standing where it went, or carried) and its stack id in your inventory while carried, or { error }; `placed: false` with `why` when it couldn\'t stand it up and it waits in your inventory' },
     },
     carry: { doc: 'An object standing in a room was picked up: it\'s carried now, and nobody\'s here.', params: { id: str('Object id (u-…)', 20) }, returns: { type: ['object', 'null'], description: 'The object, or null if it wasn\'t standing anywhere' }, mutates: true, internal: true },
     put: { doc: 'A carried object was put down on a tile: it stands there, and is whoever put it there\'s.', params: { id: str('Object id (u-…)', 20), x: num('Tile x', 0), y: num('Tile y', 0), owner: { type: ['object', 'null'], description: '{ did, handle, name }' } }, returns: { type: 'object', description: '{ ok, object } or { error }' }, mutates: true, internal: true },
@@ -156,9 +144,6 @@ export class Gallery extends Entity {
     const color = (c) => /^#[0-9a-f]{3,8}$/i.test(c || '');
     const want = LOOKS.includes(req.look) ? req.look : LOOKS.includes(m.look) ? m.look : null;
     const look = want === 'sprite' && !m.sprite ? lookOf(m.look === 'sprite' ? null : m.look) : lookOf(want);
-    const carried = look === CARRIED;
-    const spot = carried ? { x: null, y: null } : Number.isFinite(who.x) && Number.isFinite(who.y) ? placeNear(who.x, who.y, this.items) : null;
-    if (!spot) return { error: 'no room to put it here: step into open floor and try again' };
 
     const id = `u-${shortId()}`;
     const item = {
@@ -169,22 +154,20 @@ export class Gallery extends Entity {
       glow: color(req.glow) ? req.glow : color(m.glow) ? m.glow : '#a78bfa',
       look, ...(look === 'sprite' ? { sprite: m.sprite } : {}), permissions, level: levelOf(permissions),
       api: m.api || {},
-      x: spot.x, y: spot.y, zone: carried ? null : zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
-      ...(carried ? { carried: true } : {}),
-      owner: carried ? null : { did: who.did, handle: who.handle || null, name: who.name },
+      x: null, y: null, zone: null, carried: true, owner: null,
       createdAt: this.now(),
     };
     await this.ref(`uobj:${id}`).install(item, req.code.replace(/\s+/g, ''));
-    // Carried: the one item it is goes to the uploader. It names its upload,
-    // which is what it does when used (a key: the office asks it to open doors).
-    if (carried) {
-      const r = await this.world.invApply(who.id, { give: [asItem(item)] }).catch((e) => ({ error: e.message }));
-      if (r?.error) { await this.ref(`uobj:${id}`).uninstall(); return { error: `couldn't put ${name} in your inventory: ${r.error}` }; }
-    }
+    // It starts as the one item it is, in the uploader's inventory: put down
+    // (the World does that next, or the uploader picks a spot), it stands up
+    // as itself. The item names its upload, which is what it does when used
+    // (a key: the office asks it to open doors).
+    const r = await this.world.invApply(who.id, { give: [asItem(item)] }).catch((e) => ({ error: e.message }));
+    if (r?.error) { await this.ref(`uobj:${id}`).uninstall(); return { error: `couldn't put ${name} in your inventory: ${r.error}` }; }
     this.state.items = [...this.items, item];
     await this.save();
     await this.mirror(this.items);
-    return { ok: true, object: item };
+    return { ok: true, object: item, item: r.items?.find((s) => s.data?.upload === id)?.id || null };
   }
 
   async remove(who, { id } = {}) {
