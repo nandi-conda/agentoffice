@@ -193,3 +193,22 @@ test('a room opened "open to anyone" lets anyone walk straight in', async () => 
     assert.equal(c.ws.last('chan').result.ok, true);
   }
 });
+
+test('a room opened in the office is bridged to the freeq channel of the same name', async () => {
+  const office = new Office({}, { loadActor: null });
+  const fetch = async (url) => (String(url).endsWith('/api/v1/channels') ? Response.json([]) : new Response('No policy for this channel', { status: 404 }));
+  const bridge = new FreeqBridge({ office, log: () => {}, always: '', fetch, keyStore: { get: async () => null, set: async () => {} }, openSocket: async () => { throw new Error('offline'); } });
+  const joined = [];
+  bridge.listener = { channels: new Set(), join(ch) { joined.push(ch); }, part() {}, send() {} };
+  const ada = await join(office, 'Ada', { did: 'did:plc:ada' });
+  ada.ws.msg({ t: 'chan', op: 'open', name: 'hangout', access: 'open', ref: 'o' }); await tick();
+  const room = ada.ws.last('chan').room;
+  await new Promise((r) => setTimeout(r, 700)); // the bridge picks it up without waiting for its refresh
+  assert.equal(bridge.bindings.get(room.id)?.channel, '#hangout');
+  assert.ok(joined.includes('#hangout'), 'the listener joined (and so created) #hangout');
+  // Lines from freeq are heard in the room.
+  await at(ada, roomRect(room.slot, room.tier).outside.x, roomRect(room.slot, room.tier).outside.y);
+  const spot = inside(room.id); await at(ada, spot.x, spot.y);
+  bridge.heard('#hangout', 'zed', null, 'hi from freeq', { ts: Date.now() }); await tick();
+  assert.equal(ada.ws.last('chat')?.text, 'hi from freeq');
+});

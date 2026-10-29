@@ -402,6 +402,7 @@ export class FreeqBridge {
     clearInterval(this.refreshTimer); this.refreshTimer = null;
     clearTimeout(this.idleTimer); this.idleTimer = null;
     clearTimeout(this.retryTimer); this.retryTimer = null;
+    clearTimeout(this.wingTimer); this.wingTimer = null;
     const l = this.listener; this.listener = null;
     l?.close('office closed for the night');
     for (const u of this.users.values()) u.irc.close();
@@ -527,6 +528,16 @@ export class FreeqBridge {
     return r.json();
   }
 
+  // The wing changed: a room opened in the office that isn't bridged yet gets
+  // its freeq channel now rather than at the next refresh.
+  wingChanged() {
+    const bound = new Set([...this.bindings.values()].map((b) => lower(b.channel)));
+    if (!this.listener || !(this.office.wing || []).some((r) => r.sources?.includes('office') && !bound.has(lower(r.channel)))) return;
+    clearTimeout(this.wingTimer);
+    this.wingTimer = setTimeout(() => this.refresh().catch((e) => this.failed(e)), 500);
+    this.wingTimer.unref?.();
+  }
+
   async refresh() {
     if (!this.listener) return;
     const list = await this.channels();
@@ -554,9 +565,13 @@ export class FreeqBridge {
     // Busy channels, plus any we're attached to that still have someone,
     // so a room doesn't vanish under people when a channel quietens.
     const keep = new Set([...this.bindings.values()].map((b) => lower(b.channel)));
-    const always = this.always.map((ch) => info.get(lower(ch)) || { channel: ch, members: 0, topic: null });
+    // Rooms people opened in the office get the channel of the same name on
+    // freeq (joining creates it there if it's new), so they're bridged too.
+    const opened = (this.office.wing || []).filter((r) => r.sources?.includes('office')).map((r) => r.channel);
+    const pinned = [...new Map([...this.always, ...opened].map((ch) => [lower(ch), ch])).values()];
+    const always = pinned.map((ch) => info.get(lower(ch)) || { channel: ch, members: 0, topic: null });
     const wanted = [...always, ...[...info.values()]
-      .filter((c) => !this.always.some((ch) => lower(ch) === lower(c.channel)))
+      .filter((c) => !pinned.some((ch) => lower(ch) === lower(c.channel)))
       .filter((c) => c.members >= this.minMembers || (keep.has(lower(c.channel)) && c.members > 0))
       .sort((a, b) => b.members - a.members || a.channel.localeCompare(b.channel))]
       .slice(0, MAX_ROOMS);

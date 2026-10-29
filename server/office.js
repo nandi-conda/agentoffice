@@ -151,6 +151,7 @@ export class Office {
       }
     }
     if (announce) this.broadcast({ t: 'wing', rooms });
+    this.freeq?.wingChanged?.();
   }
 
   get wing() { return this.mirror.get('wing:main') || []; }
