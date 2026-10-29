@@ -61,7 +61,10 @@ inventory. Whoever carries it walks into any meeting room that's booked
 and not theirs: as they reach the door the office calls the upload with
 `open:<room>`, its `unlock` lets them in as if the meeting had admitted
 them (until it ends), and the people in the meeting get a note that they
-let themselves in with the Skeleton Key. The key can be handed on, put
+let themselves in with the Skeleton Key. That lasts only while they hold
+it: once the key leaves their hands (put down, handed on, thrown away) the
+office sends the panels `relock`, the room shuts to them again, and they're
+shown out if they're inside. The key can be handed on, put
 down and picked up like anything else, and there's only ever the one per
 upload: no plugin can `give` a `skeleton-key`. Removing the upload (from
 the 🧩 panel) leaves a key that fits no lock.

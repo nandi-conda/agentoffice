@@ -1079,7 +1079,9 @@ export class Office {
       if (r.items) p.items = r.items;
     }
     if (r.error) return r;
+    const had = p.keyring;
     p.keyring = holdsKey(r.items);
+    if (had && !p.keyring) await this.relock(p);
     if (key) this.deliver(key, { t: 'inv', items: r.items });
     else this.sendTo(p, { t: 'inv', items: r.items });
     return r;
@@ -1300,12 +1302,23 @@ export class Office {
     return this.move(p, held.m, held.ws, true);
   }
 
+  // Their skeleton key left their hands (put down, handed on, thrown away):
+  // the rooms it let them into shut to them again, and the panels' turns
+  // show them out of one they're standing in (enforce).
+  async relock(p) {
+    const who = this.who(p);
+    const rooms = [...new Set(this.bookings.filter((b) => b.keyed?.includes(who.key)).map((b) => b.room))];
+    await Promise.all(rooms.map((r) => this.ref(`plugin:${panelOf(r)}`).act(who, 'relock', null, { type: 'relock', zone: r }).catch(() => {})));
+  }
+
   // Null once they're let in, else why not.
   async turnKey(p, room) {
     const keys = (await this.inventory(p)).filter((s) => s.kind === SKELETON_KEY);
     const key = keys.map((s) => this.gallery.find((i) => i.id === s.data?.upload && i.carried && i.permissions?.includes('unlock'))).find(Boolean);
-    if (!key) return 'it doesn\'t fit any lock any more (its upload was removed)';
-    const r = await this.ref(`uobj:${key.id}`).act(this.who(p), `open:${room.id}`);
+    const gone = 'it doesn\'t fit any lock any more (its upload was removed)';
+    if (!key) return gone;
+    const r = await this.ref(`uobj:${key.id}`).act(this.who(p), `open:${room.id}`).catch(() => null);
+    if (!r) return gone;
     return r?.unlock ? null : r?.toast || 'nothing happened';
   }
 

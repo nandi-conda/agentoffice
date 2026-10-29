@@ -70,6 +70,10 @@ pub struct Meeting {
     pub seen: bool,
     /// Keys let in at the door on the day.
     pub admitted: Vec<String>,
+    /// Those of `admitted` a skeleton key let in: only while they carry it
+    /// (the office sends `relock` when it leaves their hands).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub keyed: Vec<String>,
     pub sent: Sent,
     pub created: f64,
 }
@@ -278,7 +282,7 @@ impl Rooms {
                 title: if title.is_empty() { format!("{}'s meeting", req.actor.name) } else { title },
                 start, end, owner: me.key.clone(), name: req.actor.name.clone(), handle: req.actor.handle.clone(),
                 invitees: parse_invitees(&m["invitees"]), lock: m["lock"].as_bool().unwrap_or(false),
-                auto_release: m["autoRelease"].as_bool() != Some(false), seen: false, admitted: Vec::new(), sent: Sent::default(), created: now,
+                auto_release: m["autoRelease"].as_bool() != Some(false), seen: false, admitted: Vec::new(), keyed: Vec::new(), sent: Sent::default(), created: now,
             };
             // Invited by DID and not here: kept for them.
             let invited = Note::to(b.holders(Some(&me)).into_iter().filter(|x| *x != b.owner), format!("📅 {} invited you to “{}” in {name}, {}", req.actor.name, b.title, stamp_range(&b)));
@@ -298,6 +302,8 @@ impl Rooms {
             let Some(key) = m["to"]["key"].as_str().filter(|k| !k.is_empty()) else { return Err("they left".into()) };
             let b = &mut self.bookings[i];
             if !b.admitted.iter().any(|k| k == key) { b.admitted.push(key.into()); }
+            // Let in by the meeting: theirs to keep, key or no key.
+            b.keyed.retain(|k| k != key);
             notes.push(b.note(Note::to([key], format!("🔓 {} let you into {name}", req.actor.name)), "admit"));
             return Ok(b.clone());
         }
@@ -362,8 +368,22 @@ impl Rooms {
         let to = b.holders(Some(&me));
         if !to.is_empty() { notes.push(b.note(Note::to(to, format!("🗝️ {} let themselves into {name} with {}", req.actor.name, clip(by, 40))), "unlock")); }
         b.admitted.push(me.key.clone());
+        b.keyed.push(me.key.clone());
         notes.push(b.note(Note::to([me.key.clone()], format!("🔓 {name} is open to you until “{}” ends at {}", b.title, stamp(b.end))), "unlock"));
         Ok(b.clone())
+    }
+
+    /// The actor's skeleton key left their hands: whatever it let them into
+    /// it doesn't any more (the office then shows them out).
+    fn relock(&mut self, req: &Request) -> Vec<String> {
+        let key = Who::actor(&req.actor).key;
+        let mut out = Vec::new();
+        for b in self.bookings.iter_mut().filter(|b| b.keyed.contains(&key)) {
+            b.keyed.retain(|k| *k != key);
+            b.admitted.retain(|k| *k != key);
+            out.push(b.id.clone());
+        }
+        out
     }
 
     /// Every answer: the next wake-up, and the room's zone to hear people
@@ -414,6 +434,8 @@ impl Plugin for Rooms {
             result(r, cancelled)
         } else if let Some(m) = req.office_event("unlock").filter(|_| req.is("unlock")) {
             result(self.unlock(req, m["by"].as_str().unwrap_or("a key"), &mut notes), false)
+        } else if req.office_event("relock").filter(|_| req.is("relock")).is_some() {
+            json!({ "relocked": self.relock(req) })
         } else {
             return Response::error("Book from the booking form (📅), or book_room / manage_booking.");
         };
@@ -616,6 +638,14 @@ mod tests {
         assert!(o.notes()[0].text.contains("Dee let themselves into Boardroom with Skeleton Key"));
         assert!(!o.notes()[0].to.contains(&"agent:Dee".to_string()));
         assert!(o.notes()[1].text.contains("open to you until"));
+        assert_eq!(o.state().bookings[0].keyed, vec!["agent:Dee".to_string()]);
+
+        // Without the key, the room is shut to Dee again.
+        let r = o.office_call("Dee", "relock", "relock", json!({})).reply.unwrap();
+        assert_eq!(r["relocked"].as_array().unwrap().len(), 1);
+        assert!(!o.state().bookings[0].admitted.contains(&"agent:Dee".to_string()));
+        assert!(o.state().bookings[0].keyed.is_empty());
+        assert!(o.act("Dee", "relock").reply.is_none(), "only the office relocks");
 
         // Nobody can do either from a panel.
         assert!(o.act("Eve", "book").toast.is_some());

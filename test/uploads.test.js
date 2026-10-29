@@ -268,19 +268,41 @@ test('the Skeleton Key is admins only, one key in their inventory, and booked ro
   adm.msg({ t: 'inv', op: 'give', id: keys(adm)[0].id, to: 'bob' });
   await until(() => keys(bob).length);
   assert.equal(keys(adm).length, 0, 'there is just the one');
+  // The key's gone from the admin's hands, and so is the way in.
+  await until(() => !o.bookings.find((b) => b.room === 'board').admitted.includes('did:plc:adm'));
+  adm.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => adm.last('bounce'));
+  assert.match(adm.last('bounce').text, /restricted/);
   bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
   await until(() => zoneAt(pos('bob').x, pos('bob').y)?.id === 'board');
 
-  // Once the upload is removed, the key fits no lock.
-  adm.msg({ t: 'gallery', op: 'remove', rid: 4, req: { id: item.id } });
-  await until(() => adm.last('galleryres')?.result.ok);
-  bob.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
+  // Bob puts it down in there: he's shown out, and can't walk back in.
+  bob.msg({ t: 'inv', op: 'place', id: keys(bob)[0].id });
+  await until(() => o.floor.some((e) => e.item.kind === 'skeleton-key'));
+  await until(() => zoneAt(pos('bob').x, pos('bob').y)?.id !== 'board');
+  const bounces = bob.sent.filter((m) => m.t === 'bounce').length;
+  bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => bob.sent.filter((m) => m.t === 'bounce').length > bounces);
+  assert.match(bob.last('bounce').text, /restricted/);
+  assert.notEqual(zoneAt(pos('bob').x, pos('bob').y)?.id, 'board');
+
+  // Grace, in the meeting, fetches it for Ada; then the upload is removed,
+  // and the key fits no lock.
+  const lying = o.floor.find((e) => e.item.kind === 'skeleton-key');
+  grace.msg({ t: 'move', x: lying.x, y: lying.y, dir: 0, moving: false, teleport: true });
+  await settle();
+  grace.msg({ t: 'inv', op: 'pickup', id: lying.id });
+  await until(() => keys(grace).length);
+  grace.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
   ada.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
   await settle();
-  bob.msg({ t: 'inv', op: 'give', id: keys(bob)[0].id, to: 'ada' });
+  grace.msg({ t: 'inv', op: 'give', id: keys(grace)[0].id, to: 'ada' });
   await until(() => keys(ada).length);
+  adm.msg({ t: 'gallery', op: 'remove', rid: 4, req: { id: item.id } });
+  await until(() => adm.last('galleryres')?.result.ok);
+  const before = ada.sent.filter((m) => m.t === 'bounce').length;
   ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
-  await until(() => ada.sent.filter((m) => m.t === 'bounce').length >= 2);
+  await until(() => ada.sent.filter((m) => m.t === 'bounce').length > before);
   assert.match(ada.last('bounce').text, /doesn't fit any lock/);
   assert.notEqual(zoneAt(pos('ada').x, pos('ada').y)?.id, 'board');
   rt.stop();
