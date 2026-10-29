@@ -455,6 +455,7 @@ function onMessage(m) {
     }
     case 'booked': {
       const b = m.booking, room = roomById(b.room);
+      if (m.ref === 'new') roomAsk.done('');
       if (b.cancelled) toast(`📅 Cancelled “${esc(b.title)}”`);
       else if (m.ref === 'new') toast(`📅 Booked ${esc(room.name)} ${dayWord(b.start)} ${fmtRange(b)}: “${esc(b.title)}”`);
       modal.rooms?.();
@@ -499,7 +500,11 @@ function onMessage(m) {
     }
     case 'rtc': voice.onSignal(m.from, m.data); break;
     case 'fq-call': fqCall.onMessage(m); break;
-    case 'error': toast(`⚠️ ${esc(localize(m.message))}`); break;
+    case 'error':
+      // A booking from a room's door panel says what went wrong right there.
+      if (m.ref === 'new' && roomAsk.pending && modal.rooms) { roomAsk.done(`⚠️ ${esc(localize(m.message))}`); break; }
+      toast(`⚠️ ${esc(localize(m.message))}`);
+      break;
     case 'kicked': {
       toast(`🚪 ${esc(localize(m.text))}`, [], 20000); sys(m.text);
       // Out: the office empties around you.
@@ -1532,8 +1537,27 @@ function wireBookingRows(body) {
   }));
 }
 
+// A "Book now" from a door panel waiting on the office: the button says so,
+// and a refusal or no answer at all shows up on the panel, not just as a toast.
+const roomAsk = {
+  pending: false, note: '', timer: 0,
+  start() {
+    this.pending = true; this.note = '';
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.done('⚠️ The office didn\'t answer. Check your connection and try again.'), 10000);
+  },
+  done(note) {
+    if (!this.pending) return;
+    this.pending = false; this.note = note;
+    clearTimeout(this.timer);
+    modal.rooms?.();
+  },
+  reset() { this.pending = false; this.note = ''; clearTimeout(this.timer); },
+};
+
 // The panel by a room's door: what's on now, what's next, quick booking.
 function openRoom(id) {
+  roomAsk.reset();
   const room = roomById(id);
   const render = () => {
     const now = serverNow();
@@ -1542,6 +1566,7 @@ function openRoom(id) {
     const gap = next ? next.start - now : 60 * MIN;
     const quick = Math.min(30 * MIN, Math.floor(gap / (5 * MIN)) * 5 * MIN);
     const lockedOutNow = current && !isHolder(current, me);
+    if (modal.rooms === render) modal.onclose = null; // redrawing, not closing
     modal.open(`
       <h2>${esc(room.name)} ${room.av ? '<span class="badge av">A/V</span>' : ''}</h2>
       <p class="small muted">${room.seats} seat${room.seats > 1 ? 's' : ''} · ${room.av ? 'voice, video and screen share for everyone inside' : 'private voice'}</p>
@@ -1549,18 +1574,24 @@ function openRoom(id) {
         ? `<b>In use 🔒:</b> “${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
         : state === 'soon' ? `<b>Free</b> until ${fmtTime(next.start)} (“${esc(next.title)}”)` : '<b>Free</b>'}</div></div>
       <div class="row">
-        ${!current && canBook() && quick >= RULES.minLen ? `<button class="btn primary quick">Book now · ${quick / MIN} min</button>` : ''}
+        ${!current && canBook() && quick >= RULES.minLen ? `<button class="btn primary quick" ${roomAsk.pending ? 'disabled' : ''}>${roomAsk.pending ? 'Booking…' : `Book now · ${quick / MIN} min`}</button>` : ''}
         ${canBook() ? '<button class="btn ghost later">Book a time…</button>' : ''}
         ${lockedOutNow ? '<button class="btn knock">🚪 Knock</button>' : ''}
         ${zoneAt(me.x, me.y)?.id !== id && !lockedOutNow ? '<button class="btn ghost go">Walk in</button>' : ''}
       </div>
+      ${roomAsk.note ? `<p class="small room-note">${roomAsk.note}</p>` : ''}
       ${canBook() ? '' : signInHint}
       <h3 style="margin-top:16px">Coming up</h3>
       <ul class="room-day">${upcoming.map((b) => bookingRow(b, now)).join('') || '<li class="muted">Nothing booked.</li>'}</ul>`);
     modal.rooms = render;
-    modal.onclose = () => (modal.rooms = null);
+    modal.onclose = () => { modal.rooms = null; roomAsk.reset(); };
     const body = modal.body;
-    body.querySelector('.quick')?.addEventListener('click', () => net.send({ t: 'book', op: 'create', ref: 'new', room: id, start: now, end: now + quick, title: `${me.name}'s meeting` }));
+    body.querySelector('.quick')?.addEventListener('click', () => {
+      if (net.closed) { roomAsk.note = '⚠️ You're out of the office. Reload to come back and book.'; return render(); }
+      roomAsk.start();
+      net.send({ t: 'book', op: 'create', ref: 'new', room: id, start: now, end: now + quick, title: `${me.name}'s meeting` });
+      render();
+    });
     body.querySelector('.later')?.addEventListener('click', () => openSchedule({ room: id }));
     body.querySelector('.knock')?.addEventListener('click', () => { knock(id); modal.close(); });
     body.querySelector('.go')?.addEventListener('click', () => { modal.close(); walkInto(room); });

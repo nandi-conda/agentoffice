@@ -336,6 +336,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .my-bookings button, .room-day button { font: 600 12px Inter, system-ui; border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; background: #e7e5e4; }
 .room-day { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
 .room-now { display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 12px; background: #f5f2ec; margin-top: 8px; }
+.room-note { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: #fef2f2; color: #991b1b; }
+.btn:disabled { opacity: 0.7; cursor: progress; }
 .room-now.busy { background: #fef2f2; } .room-now.soon { background: #fffbeb; } .room-now.free { background: #f0fdf4; }
 
 /* ---- A/V stage ---- */

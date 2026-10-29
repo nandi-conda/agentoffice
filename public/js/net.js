@@ -28,5 +28,7 @@ export function connect(onMessage, onOpen, onClose) {
       else if (msg.t !== 'move') queue.push(s);
     },
     close() { closed = true; clearInterval(pinger); ws.close(); },
+    // Sent out: sends go nowhere until a reload.
+    get closed() { return closed; },
   };
 }
