@@ -28,6 +28,24 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 
 Returns `object | null`
 
+## `act(who, action, input?, event?)`
+
+`mutates` · `internal (entity to entity)`
+
+The office's own call into the object, without the use cooldown or the walk up: a carried Skeleton Key gets `open:<room>` this way as its carrier reaches a booked door.
+
+| Param | Type | |
+| --- | --- | --- |
+| `who` | `object \| null` | Who it is for (null: the office itself) |
+| `action` | `string ≤ 64` | Action id |
+| `input` *(optional)* | `string \| null` | Typed text |
+| `event` *(optional)* | `{ type, zone?, data? }` | An office event |
+| &nbsp;&nbsp;&nbsp;`event.type` | `string ≤ 200` | Event type |
+| &nbsp;&nbsp;&nbsp;`event.zone` *(optional)* | `string ≤ 200` | Zone |
+| &nbsp;&nbsp;&nbsp;`event.data` *(optional)* | `any` | What goes with it |
+
+Returns `object | null`
+
 ## `install(item, code)`
 
 `mutates` · `internal (entity to entity)`
@@ -36,20 +54,21 @@ Store the code and manifest of a new upload (from gallery:main).
 
 | Param | Type | |
 | --- | --- | --- |
-| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, permissions, level, api }` | An uploaded object |
+| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }` | An uploaded object |
 | &nbsp;&nbsp;&nbsp;`item.id` | `string ≤ 200` | Object id on the map (u-…); its entity is uobj:<id> |
 | &nbsp;&nbsp;&nbsp;`item.name` | `string ≤ 40` | Name |
 | &nbsp;&nbsp;&nbsp;`item.prompt` | `string ≤ 60` | What the E prompt says |
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
 | &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Shown on its plinth |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: plinth, kiosk, jukebox, vending, eightball |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: plinth, kiosk, jukebox, vending, eightball, item |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |
 | &nbsp;&nbsp;&nbsp;`item.version` | `string ≤ 200` | First bytes of the code's SHA-256 |
-| &nbsp;&nbsp;&nbsp;`item.x` | `number ≥ 0` | Tile x |
-| &nbsp;&nbsp;&nbsp;`item.y` | `number ≥ 0` | Tile y |
+| &nbsp;&nbsp;&nbsp;`item.x` | `number \| null` | Tile x (null: carried) |
+| &nbsp;&nbsp;&nbsp;`item.y` | `number \| null` | Tile y (null: carried) |
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
+| &nbsp;&nbsp;&nbsp;`item.carried` *(optional)* | `boolean` | Look `item`: not on the map, one item in its uploader's inventory instead (with unlock, a skeleton key) |
 | &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
 | &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "feed" \| "notify" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), feed (trusted), notify (trusted), unlock (privileged) |

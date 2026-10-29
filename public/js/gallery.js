@@ -9,7 +9,10 @@ import { PERMISSIONS, LEVELS, levelOf, levelRole, uploadError } from './permissi
 import { can } from './roles.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const LOOKS = { plinth: 'Plinth with its emoji', kiosk: 'Screen kiosk', jukebox: 'Jukebox', vending: 'Vending machine', eightball: 'Crystal ball' };
+export const LOOKS = { plinth: 'Plinth with its emoji', kiosk: 'Screen kiosk', jukebox: 'Jukebox', vending: 'Vending machine', eightball: 'Crystal ball', item: 'An item in my inventory' };
+// Uploaded as an item: not on the map, one thing its uploader carries (the Skeleton Key).
+const carriedLook = (look) => look === 'item';
+const upLabel = (look) => (carriedLook(look) ? 'Put it in my inventory' : 'Place it next to me');
 const MAX_KB = 512;
 
 // Put the uploaded objects into FURNITURE, so they draw, prompt and
@@ -18,6 +21,7 @@ const MAX_KB = 512;
 export function syncGallery(items = []) {
   for (let i = FURNITURE.length - 1; i >= 0; i--) if (FURNITURE[i].uploaded) FURNITURE.splice(i, 1);
   for (const it of items) {
+    if (it.carried) continue;
     FURNITURE.push({
       ...it, type: it.look === 'plinth' || !LOOKS[it.look] ? 'upload' : it.look,
       w: 1, h: 1, solid: false, interact: 'plugin', plugin: 'upload', uploaded: true,
@@ -48,12 +52,12 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
         <div class="obj-item gal-item" data-id="${esc(it.id)}">
           <span><b>${esc(it.emoji)} ${esc(it.name)}</b><br><small class="muted">${esc(it.doc || it.prompt)}</small></span>
           <span class="gal-acts"><small class="muted">by ${esc(by(it))} · ${it.lang} ${Math.ceil(it.size / 1024)} KB${levelTag(it)}</small>
-            <button class="btn ghost gal-go">Walk there</button>${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
+            ${it.carried ? '<small class="muted">carried</small>' : '<button class="btn ghost gal-go">Walk there</button>'}${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
         </div>`).join('')}</div>`
     : '<p class="muted small">Nothing uploaded yet.</p>';
   const form = me.did ? `
       <h3>Upload one</h3>
-      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It goes on the floor next to you; anyone can use it, and only you can remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: opens booked rooms)' : ''}</p>
+      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It goes on the floor next to you; anyone can use it, and only you can remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: one key for your inventory that opens booked rooms)' : ''}</p>
       <p class="small gal-perm" hidden></p>
       <div class="gal-form">
         <label class="small"><b>File</b><input type="file" class="gal-file" accept=".wasm,.js,.mjs,application/wasm,text/javascript"></label>
@@ -76,7 +80,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
   const b = modal.body;
   b.querySelectorAll('.gal-item').forEach((row) => {
     const it = items.find((x) => x.id === row.dataset.id);
-    row.querySelector('.gal-go').addEventListener('click', () => { modal.close(); walkTo(it.x + 0.5, it.y + 1.5); });
+    row.querySelector('.gal-go')?.addEventListener('click', () => { modal.close(); walkTo(it.x + 0.5, it.y + 1.5); });
     row.querySelector('.gal-rm')?.addEventListener('click', async (e) => {
       if (!confirm(`Remove ${it.name}? Its code and memory are deleted.`)) return;
       e.target.disabled = true;
@@ -109,6 +113,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
       set('.gal-emoji', m.emoji); set('.gal-glow', /^#[0-9a-f]{6}$/i.test(m.glow) ? m.glow : '');
       if (LOOKS[m.look]) set('.gal-look', m.look);
     }
+    b.querySelector('.gal-up').textContent = upLabel(b.querySelector('.gal-look').value);
     const nm = b.querySelector('.gal-name');
     if (!nm.value) nm.value = name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).slice(0, 40);
   };
@@ -126,6 +131,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     if (!r.ok) return err('Couldn\'t load the Skeleton Key.');
     take('skeleton_key.wasm', await r.arrayBuffer());
   });
+  b.querySelector('.gal-look').addEventListener('change', (e) => { b.querySelector('.gal-up').textContent = upLabel(e.target.value); });
   b.querySelector('.gal-up').addEventListener('click', async (e) => {
     if (!file) return err('Pick a .wasm (or .js) file first.');
     const val = (c) => b.querySelector(c).value.trim();
@@ -137,8 +143,8 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
       prompt: val('.gal-prompt') || undefined, doc: val('.gal-doc') || undefined,
       emoji: val('.gal-emoji') || undefined, glow: val('.gal-glow'), look: val('.gal-look'),
     });
-    if (r.error) { err(r.error); e.target.disabled = false; e.target.textContent = 'Place it next to me'; return; }
+    if (r.error) { err(r.error); e.target.disabled = false; e.target.textContent = upLabel(val('.gal-look')); return; }
     modal.close();
-    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is on the floor next to you.`);
+    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is ${r.object.carried ? 'in your inventory' : 'on the floor next to you'}.`);
   });
 }

@@ -12,13 +12,13 @@ Objects people uploaded: WASM (or JS) plugins that signed-in people placed on th
 
 Every uploaded object on the map.
 
-Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, permissions, level, api }[]`
+Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }[]`
 
 ## `upload(who, req)`
 
 `mutates` · `caller filled in by the World` · MCP tool **`gallery_upload`**
 
-Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most 3 per person.
+Upload a plugin and place it on the map next to you (or, when its look is `item`, get it as one item in your inventory: with the unlock permission, a skeleton key that opens booked rooms as its carrier walks up). Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most 3 per person.
 
 | Param | Type | |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. 
 | &nbsp;&nbsp;&nbsp;`req.doc` *(optional)* | `string ≤ 280` | What it does, for the docs and the MCP tool list |
 | &nbsp;&nbsp;&nbsp;`req.emoji` *(optional)* | `string ≤ 8` | An emoji to show on it |
 | &nbsp;&nbsp;&nbsp;`req.glow` *(optional)* | `string ≤ 9 /^#[0-9a-fA-F]{3,8}$/` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"plinth" \| "kiosk" \| "jukebox" \| "vending" \| "eightball"` | How it's drawn (default plinth) |
+| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"plinth" \| "kiosk" \| "jukebox" \| "vending" \| "eightball" \| "item"` | How it's drawn (default plinth); item: not on the map, in your inventory |
 
 Returns `object`
 

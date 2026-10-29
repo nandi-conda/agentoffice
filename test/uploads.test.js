@@ -222,7 +222,7 @@ test('uploads are checked, capped per person, and admins (moderators and up) can
   rt.stop();
 });
 
-test('permissions decide who may upload: the Skeleton Key is admins only, and opens booked rooms', async () => {
+test('the Skeleton Key is admins only, one key in their inventory, and booked rooms open as its carrier walks up', async () => {
   const clock = { t: Date.UTC(2026, 9, 29, 14, 0) };
   // The office's own modules too: the room's door panel keeps the booking.
   const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox(), wasm: bundledWasm(wasmFile) }), roles: { owners: ['did:plc:boss'], admins: ['did:plc:adm'] } } });
@@ -234,81 +234,55 @@ test('permissions decide who may upload: the Skeleton Key is admins only, and op
   await settle(20);
   assert.match(ada.last('galleryres').result.error, /asks for unlock \(privileged\): only admins and up/);
   const adm = await join(o, 'adm', 'did:plc:adm');
+  adm.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
   adm.msg({ t: 'gallery', op: 'upload', rid: 3, req: key });
   await settle(50);
   const item = adm.last('galleryres').result.object;
   assert.ok(item, JSON.stringify(adm.last('galleryres')));
-  assert.deepEqual([item.name, item.level, item.permissions], ['Skeleton Key', 'privileged', ['unlock']]);
+  assert.deepEqual([item.name, item.level, item.permissions, item.carried, item.x], ['Skeleton Key', 'privileged', ['unlock'], true, null]);
+  // Not on the map: one key in the admin's inventory.
+  assert.equal(o.uploaded(item.id), null);
+  const keys = (who) => (who.last('inv')?.items || []).filter((i) => i.kind === 'skeleton-key');
+  assert.deepEqual(keys(adm).map((i) => [i.name, i.emoji, i.qty, i.data.upload]), [['Skeleton Key', '🗝️', 1, item.id]]);
 
-  // Grace books the boardroom: ada is kept out.
-  const grace = await join(o, 'grace', 'did:plc:grace');
-  grace.msg({ t: 'book', op: 'create', room: 'board', start: 'now', minutes: 30, title: 'Secret plans' });
-  await until(() => grace.last('booked'));
-  const pos = (ws) => [...o.peers.values()].find((p) => p.name === ws);
-  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
-  await settle();
-  assert.match(ada.last('bounce').text, /restricted/);
-
-  // The key lists it, and opens it.
-  ada.msg({ t: 'move', x: 20.5, y: 26.5, dir: 0, moving: false, teleport: true });
-  await settle();
-  ada.msg({ t: 'use', id: item.id, action: 'use' });
-  await settle(300);
-  const row = ada.last('objui').ui.items.find((r) => r.action === 'open:board');
-  assert.ok(row && !row.disabled, JSON.stringify(ada.last('objui')));
-  assert.match(row.detail, /Secret plans/);
-  clock.t += 1000; // past the object's cooldown
-  ada.msg({ t: 'use', id: item.id, action: 'open:board' });
-  await settle(300);
-  assert.match(ada.last('objui').toast, /Boardroom is open to you/, JSON.stringify(ada.sent.filter((m) => m.t === 'objui').slice(-2)));
-  assert.match(grace.last('roomnote').text, /ada let themselves into Boardroom with Skeleton Key/);
-  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
-  await settle();
-  assert.equal(zoneAt(pos('ada').x, pos('ada').y).id, 'board');
-  rt.stop();
-});
-
-test('a skeleton key in your inventory opens booked rooms as you walk up', async () => {
-  const clock = { t: Date.UTC(2026, 9, 29, 14, 0) };
-  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox(), wasm: bundledWasm(wasmFile) }), roles: { admins: ['did:plc:adm'] } } });
-  const o = new Office({}, { runtime: rt, now: () => clock.t });
-  await o.ready;
-  const adm = await join(o, 'adm', 'did:plc:adm');
-  adm.msg({ t: 'gallery', op: 'upload', rid: 1, req: { lang: 'wasm', code: plugin('skeleton_key.wasm') } });
-  await settle(50);
-  const item = adm.last('galleryres').result.object;
-  assert.ok(item, JSON.stringify(adm.last('galleryres')));
+  // Grace books the boardroom: ada is kept out, the admin walks in.
   const grace = await join(o, 'grace', 'did:plc:grace');
   grace.msg({ t: 'book', op: 'create', room: 'board', start: 'now', minutes: 30, title: 'Secret plans' });
   await until(() => grace.last('booked'));
   const pos = (n) => [...o.peers.values()].find((p) => p.name === n);
-
-  // Ada takes a key from the object…
-  const ada = await join(o, 'ada', 'did:plc:ada');
-  ada.msg({ t: 'move', x: 20.5, y: 26.5, dir: 0, moving: false, teleport: true });
-  await settle();
-  ada.msg({ t: 'use', id: item.id, action: 'take' });
-  await until(() => ada.last('inv')?.items.some((i) => i.kind === 'skeleton-key'));
-  assert.match(ada.last('objui').toast, /pocket a skeleton key/);
-  // …and the boardroom opens as she walks in.
   ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
-  await until(() => zoneAt(pos('ada').x, pos('ada').y)?.id === 'board');
-  assert.equal(ada.last('bounce'), undefined);
-  assert.match(grace.last('roomnote').text, /ada let themselves into Boardroom with a skeleton key/);
-  assert.ok(o.bookings.find((b) => b.room === 'board').admitted.includes('did:plc:ada'));
-
-  // Handed on, the key works for Bob too; Ada keeps her place in the meeting.
-  const bob = await join(o, 'bob', 'did:plc:bob');
-  bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
   await settle();
-  assert.match(bob.last('bounce').text, /restricted/);
-  ada.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
+  assert.match(ada.last('bounce').text, /restricted/);
+  adm.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => zoneAt(pos('adm').x, pos('adm').y)?.id === 'board');
+  assert.equal(adm.last('bounce'), undefined);
+  assert.match(adm.last('objui').toast, /Boardroom is open to you/);
+  assert.match(grace.last('roomnote').text, /adm let themselves into Boardroom with Skeleton Key/);
+  assert.ok(o.bookings.find((b) => b.room === 'board').admitted.includes('did:plc:adm'));
+
+  // Handed on, the key works for Bob, a guest, too.
+  const bob = await join(o, 'bob');
+  adm.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
   bob.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
   await settle();
-  ada.msg({ t: 'inv', op: 'give', id: ada.last('inv').items.find((i) => i.kind === 'skeleton-key').id, to: 'bob' });
-  await until(() => bob.last('inv')?.items.some((i) => i.kind === 'skeleton-key'));
+  adm.msg({ t: 'inv', op: 'give', id: keys(adm)[0].id, to: 'bob' });
+  await until(() => keys(bob).length);
+  assert.equal(keys(adm).length, 0, 'there is just the one');
   bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
   await until(() => zoneAt(pos('bob').x, pos('bob').y)?.id === 'board');
+
+  // Once the upload is removed, the key fits no lock.
+  adm.msg({ t: 'gallery', op: 'remove', rid: 4, req: { id: item.id } });
+  await until(() => adm.last('galleryres')?.result.ok);
+  bob.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
+  ada.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
+  await settle();
+  bob.msg({ t: 'inv', op: 'give', id: keys(bob)[0].id, to: 'ada' });
+  await until(() => keys(ada).length);
+  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => ada.sent.filter((m) => m.t === 'bounce').length >= 2);
+  assert.match(ada.last('bounce').text, /doesn't fit any lock/);
+  assert.notEqual(zoneAt(pos('ada').x, pos('ada').y)?.id, 'board');
   rt.stop();
 });
 

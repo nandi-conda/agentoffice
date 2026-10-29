@@ -16,7 +16,7 @@ import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM } from './entities/kinds.js';
 import { str, int, num as numS, bool, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
-import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace, holdsKey } from '../public/js/items.js';
+import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace, holdsKey, SKELETON_KEY } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
@@ -1039,7 +1039,8 @@ export class Office {
   get gallery() { return this.mirror.get('gallery:main') || []; }
   uploaded(id) {
     const i = this.gallery.find((x) => x.id === id);
-    return i && { ...i, w: 1, h: 1, plugin: 'upload' };
+    // (A carried one is in someone's inventory, not on the map.)
+    return i && !i.carried ? { ...i, w: 1, h: 1, plugin: 'upload' } : null;
   }
 
   // Uploading and removing objects from the web UI: the same calls as the
@@ -1067,7 +1068,8 @@ export class Office {
     let r;
     if (key) r = await this.ref(`actor:${key}`).invApply(change);
     else {
-      const give = (change.give || []).map((i) => cleanItem(i, { from: change.from, now: this.now() })).filter(Boolean).map(({ data, ...i }) => i);
+      // (A key keeps the few bytes that say which upload it is.)
+      const give = (change.give || []).map((i) => cleanItem(i, { from: change.from, now: this.now() })).filter(Boolean).map(({ data, ...i }) => (i.kind === SKELETON_KEY ? { ...i, data } : i));
       r = applyChange(p.items || [], { take: change.take || [], give }, { slots: GUEST_SLOTS });
       if (r.items) p.items = r.items;
     }
@@ -1259,20 +1261,30 @@ export class Office {
     this.sendTo(p, { t: 'booked', ref, booking: reply.booking });
   }
 
-  // Someone carrying a skeleton key walked up to a booked room: its panel
-  // lets them in (as it does for the Skeleton Key object), then the move
-  // goes through. Moves that come in meanwhile wait; the last one is made.
+  // Someone carrying a skeleton key walked up to a booked room. The key is
+  // an upload (look `item`, with the unlock permission): its plugin is asked
+  // to `open:<room>` for them, which goes through the room's panel like any
+  // unlock, then the move goes through. Moves that come in meanwhile wait;
+  // the last one is made.
   async useKey(p, room, m, ws) {
     p.heldMove = { m, ws };
     if (p.unlocking) return;
     p.unlocking = room.id;
-    const r = await this.ref(`plugin:${panelOf(room.id)}`).act(this.who(p), 'unlock', null, { type: 'unlock', zone: room.id, data: { by: 'a skeleton key' } })
-      .then((a) => a?.reply || { error: a?.toast || 'its door panel is out of order' }, (e) => ({ error: e.message }));
+    const error = await this.turnKey(p, room).catch((e) => e.message);
     const held = p.heldMove;
     p.unlocking = null; p.heldMove = null;
     if (!this.peers.has(p.id) || !held) return;
-    if (r.error) return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: room.id, text: `🗝️ The key won't turn: ${r.error}` });
+    if (error) return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: room.id, text: `🗝️ The key won't turn: ${error}` });
     return this.move(p, held.m, held.ws, true);
+  }
+
+  // Null once they're let in, else why not.
+  async turnKey(p, room) {
+    const keys = (await this.inventory(p)).filter((s) => s.kind === SKELETON_KEY);
+    const key = keys.map((s) => this.gallery.find((i) => i.id === s.data?.upload && i.carried && i.permissions?.includes('unlock'))).find(Boolean);
+    if (!key) return 'it doesn\'t fit any lock any more (its upload was removed)';
+    const r = await this.ref(`uobj:${key.id}`).act(this.who(p), `open:${room.id}`);
+    return r?.unlock ? null : r?.toast || 'nothing happened';
   }
 
   // The panels keep their own alarms; this nudges them all now (tests, catch-up).

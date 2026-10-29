@@ -16,6 +16,10 @@ pub enum Look {
     Vending,
     /// A crystal ball.
     EightBall,
+    /// Not put on the map at all: uploading it puts one item, named and
+    /// drawn after the manifest, in the uploader's inventory. With the
+    /// `unlock` permission that item is a skeleton key.
+    Item,
 }
 
 impl Look {
@@ -26,6 +30,7 @@ impl Look {
             Look::Jukebox => "jukebox",
             Look::Vending => "vending",
             Look::EightBall => "eightball",
+            Look::Item => "item",
         }
     }
 }

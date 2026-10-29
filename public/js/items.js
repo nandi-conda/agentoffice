@@ -36,7 +36,7 @@ export const ITEMS = {
   soda: { name: 'Sparkling Water', emoji: '🥤', verb: 'drinks', consume: true, emote: 'happy' },
   cookie: { name: 'Giant Cookie', emoji: '🍪', verb: 'eats', consume: true, emote: 'happy' },
   // Booked meeting rooms open for whoever carries one (server/office.js
-  // move). Only a plugin with the unlock permission can hand one out.
+  // useKey). An admin's Skeleton Key upload makes one; no plugin can give one.
   'skeleton-key': { name: 'Skeleton Key', emoji: '🗝️', verb: 'twirls' },
 };
 

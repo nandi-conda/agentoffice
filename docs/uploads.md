@@ -54,17 +54,17 @@ upload, privileged or not.
 
 **The Skeleton Key** ([`plugins/wasm-skeleton-key`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-skeleton-key),
 built copy `public/plugins/skeleton_key.wasm`) is the privileged example:
-admins see a "the Skeleton Key" link in the 🧩 panel. **Take a key** puts a
-🗝️ Skeleton Key (item kind `skeleton-key`) in your inventory, one each.
-While you carry it, any meeting room that's booked and not yours opens as
-you walk up: you're let in as if the meeting had admitted you (until it
-ends), and the people in the meeting get a note that you let yourself in
-with a skeleton key. Keys can be handed on, put down and picked up like
-anything else; only a plugin with the `unlock` permission can make one (a
-`skeleton-key` from any other plugin's `give` is dropped). The panel also
-lists every bookable room, and **open** lets you into one from there.
-Anyone can use it once an admin has put it out, so put it somewhere
-sensible.
+admins see a "the Skeleton Key" link in the 🧩 panel. Its look is `item`,
+so uploading it puts nothing on the map: one 🗝️ Skeleton Key (item kind
+`skeleton-key`, `data.upload` naming the upload) goes into the admin's
+inventory. Whoever carries it walks into any meeting room that's booked
+and not theirs: as they reach the door the office calls the upload with
+`open:<room>`, its `unlock` lets them in as if the meeting had admitted
+them (until it ends), and the people in the meeting get a note that they
+let themselves in with the Skeleton Key. The key can be handed on, put
+down and picked up like anything else, and there's only ever the one per
+upload: no plugin can `give` a `skeleton-key`. Removing the upload (from
+the 🧩 panel) leaves a key that fits no lock.
 
 ## How they run
 
@@ -213,7 +213,8 @@ builds natively for `cargo test`.
 ### The manifest
 
 `Manifest::new(name)` with `.doc()`, `.prompt()`, `.emoji()`, `.glow()`,
-`.look(Look::Plinth | Kiosk | Jukebox | Vending | EightBall)` and
+`.look(Look::Plinth | Kiosk | Jukebox | Vending | EightBall | Item)` (`Item`:
+not put on the map, one item in the uploader's inventory instead) and
 `.actions(&[Action::new("id", "what it does").input("what to type")])` and
 `.permissions(&[Permission::Take | Feed | Notify | Unlock])` ([levels](#permission-levels)). It's
 a `const`, checked when you compile: a name over 40 characters, a glow that

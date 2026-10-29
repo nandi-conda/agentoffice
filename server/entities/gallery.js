@@ -18,10 +18,13 @@ import { PluginObject } from './plugin.js';
 import { checkUpload, fromBase64, MAX_WASM, LANGS } from '../sandbox.js';
 import { can } from '../../public/js/roles.js';
 import { PERMISSIONS, LEVELS, levelOf, uploadError } from '../../public/js/permissions.js';
+import { SKELETON_KEY } from '../../public/js/items.js';
 
 export const MAX_PER_OWNER = 3;
 export const MAX_OBJECTS = 40;
-export const LOOKS = ['plinth', 'kiosk', 'jukebox', 'vending', 'eightball'];
+export const LOOKS = ['plinth', 'kiosk', 'jukebox', 'vending', 'eightball', 'item'];
+// The look that isn't on the map: the upload is one item in its uploader's inventory.
+export const CARRIED = 'item';
 const B64_MAX = Math.ceil(MAX_WASM / 3) * 4;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const shortId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 10);
@@ -36,7 +39,8 @@ const ITEM = obj({
   name: str('Name', 40), prompt: str('What the E prompt says', 60), doc: str('What it does', 280),
   emoji: str('Shown on its plinth', 8), glow: str('Accent colour #rrggbb', 9), look: str(`How it's drawn: ${LOOKS.join(', ')}`),
   lang: str('wasm or js'), size: num('Code size in bytes', 0), version: str('First bytes of the code\'s SHA-256'),
-  x: num('Tile x', 0), y: num('Tile y', 0), zone: { type: ['string', 'null'], description: 'Zone it stands in' },
+  x: { type: ['number', 'null'], description: 'Tile x (null: carried)' }, y: { type: ['number', 'null'], description: 'Tile y (null: carried)' }, zone: { type: ['string', 'null'], description: 'Zone it stands in' },
+  carried: opt({ type: 'boolean', description: 'Look `item`: not on the map, one item in its uploader\'s inventory instead (with unlock, a skeleton key)' }),
   owner: obj({ did: str('Uploader DID'), handle: { type: ['string', 'null'] }, name: str('Uploader name') }, 'Who uploaded it'),
   createdAt: num('When, epoch ms', 0),
   permissions: arr({ type: 'string', enum: Object.keys(PERMISSIONS) }, 'What its manifest asked for beyond the basics and was granted: ' + Object.entries(PERMISSIONS).map(([p, v]) => `${p} (${v.level})`).join(', ')),
@@ -62,7 +66,7 @@ export class Gallery extends Entity {
   static api = {
     view: { doc: 'Every uploaded object on the map.', returns: arr(ITEM, 'Uploaded objects') },
     upload: {
-      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
+      doc: `Upload a plugin and place it on the map next to you (or, when its look is \`item\`, get it as one item in your inventory: with the unlock permission, a skeleton key that opens booked rooms as its carrier walks up). Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
       who: true,
       mutates: true,
       params: {
@@ -74,10 +78,10 @@ export class Gallery extends Entity {
           doc: opt(str('What it does, for the docs and the MCP tool list', 280)),
           emoji: opt(str('An emoji to show on it', 8)),
           glow: opt(str('Accent colour #rrggbb', 9, { pattern: '^#[0-9a-fA-F]{3,8}$' })),
-          look: opt({ type: 'string', enum: LOOKS, description: 'How it\'s drawn (default plinth)' }),
+          look: opt({ type: 'string', enum: LOOKS, description: 'How it\'s drawn (default plinth); item: not on the map, in your inventory' }),
         }, 'The upload'),
       },
-      returns: { type: 'object', description: '{ ok, object } with the placed object, or { error }' },
+      returns: { type: 'object', description: '{ ok, object } with the placed object (carried: the item is in your inventory), or { error }' },
     },
     remove: {
       doc: 'Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can.',
@@ -114,7 +118,9 @@ export class Gallery extends Entity {
     const refused = uploadError(who.role, permissions, name);
     if (refused) return { error: refused };
     const color = (c) => /^#[0-9a-f]{3,8}$/i.test(c || '');
-    const spot = Number.isFinite(who.x) && Number.isFinite(who.y) ? placeNear(who.x, who.y, this.items) : null;
+    const look = LOOKS.includes(req.look) ? req.look : LOOKS.includes(m.look) ? m.look : 'plinth';
+    const carried = look === CARRIED;
+    const spot = carried ? { x: null, y: null } : Number.isFinite(who.x) && Number.isFinite(who.y) ? placeNear(who.x, who.y, this.items) : null;
     if (!spot) return { error: 'no room to put it here: step into open floor and try again' };
 
     const id = `u-${shortId()}`;
@@ -124,14 +130,21 @@ export class Gallery extends Entity {
       doc: clip(req.doc, 280) || m.doc || '',
       emoji: [...clip(req.emoji, 8)].slice(0, 2).join('') || m.emoji || '🧩',
       glow: color(req.glow) ? req.glow : color(m.glow) ? m.glow : '#a78bfa',
-      look: LOOKS.includes(req.look) ? req.look : LOOKS.includes(m.look) ? m.look : 'plinth',
-      permissions, level: levelOf(permissions),
+      look, permissions, level: levelOf(permissions),
       api: m.api || {},
-      x: spot.x, y: spot.y, zone: zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
+      x: spot.x, y: spot.y, zone: carried ? null : zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
+      ...(carried ? { carried: true } : {}),
       owner: { did: who.did, handle: who.handle || null, name: who.name },
       createdAt: this.now(),
     };
     await this.ref(`uobj:${id}`).install(item, req.code.replace(/\s+/g, ''));
+    // Carried: the one item it is goes to the uploader. It names its upload,
+    // which is what it does when used (a key: the office asks it to open doors).
+    if (carried) {
+      const thing = { kind: permissions.includes('unlock') ? SKELETON_KEY : 'upload', name, emoji: item.emoji, data: { upload: id } };
+      const r = await this.world.invApply(who.id, { give: [thing], from: who.name }).catch((e) => ({ error: e.message }));
+      if (r?.error) { await this.ref(`uobj:${id}`).uninstall(); return { error: `couldn't put ${name} in your inventory: ${r.error}` }; }
+    }
     this.state.items = [...this.items, item];
     await this.save();
     await this.mirror(this.items);
@@ -157,6 +170,8 @@ export class UploadedObject extends PluginObject {
   static api = {
     view: PluginObject.api.view,
     interact: { ...PluginObject.api.interact, doc: `${PluginObject.api.interact.doc} The name is the object id (u-…) from gallery_view, whose \`api\` lists the actions the object declares.` },
+    // The office's own calls: a carried skeleton key's `open:<room>` as its carrier reaches a door.
+    act: { ...PluginObject.api.act, doc: 'The office\'s own call into the object, without the use cooldown or the walk up: a carried Skeleton Key gets `open:<room>` this way as its carrier reaches a booked door.' },
     install: { doc: 'Store the code and manifest of a new upload (from gallery:main).', params: { item: ITEM, code: str('Base64 code', B64_MAX) }, mutates: true, internal: true },
     uninstall: { doc: 'Forget the code and memory (from gallery:main).', mutates: true, internal: true },
   };

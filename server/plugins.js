@@ -175,9 +175,9 @@ export class PluginHost {
       log('warning', `plugin:${object.id}`, 'answered with notify without the notify permission: dropped');
       result.notify = [];
     }
-    // A skeleton key opens booked rooms, so only a plugin that may unlock hands one out.
-    if (!permissions.includes('unlock') && result.give.some((i) => i.kind === SKELETON_KEY)) {
-      log('warning', `plugin:${object.id}`, 'gave a skeleton key without the unlock permission: dropped');
+    // A skeleton key opens booked rooms: one comes only from an admin's upload, never a give.
+    if (result.give.some((i) => i.kind === SKELETON_KEY)) {
+      log('warning', `plugin:${object.id}`, 'gave a skeleton key: dropped');
       result.give = result.give.filter((i) => i.kind !== SKELETON_KEY);
     }
     if (result.unlock && !permissions.includes('unlock')) {
