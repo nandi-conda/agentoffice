@@ -11,7 +11,7 @@
 import { KINDS, MIRRORED } from './entities/kinds.js';
 import { BUILTIN_API, describeKind, inputSchema, paramList } from './entities/schema.js';
 import { BINDINGS, CLASSES } from './entities/bindings.js';
-import { WORLD } from './office.js';
+import { WORLD, INVENTORY } from './office.js';
 
 // Every address the office knows of, by kind ('desk' → ['desk-1', …]).
 function instancesOf(kind) {
@@ -44,6 +44,8 @@ export function describeApi({ kinds = KINDS, wrangler = null, plugins = [] } = {
     const binding = BINDINGS[kind] || null;
     return { ...d, class: Kind.name, binding, doClass: binding ? CLASSES[binding] || null : null, instances: instancesOf(kind) };
   });
+  // Not a Durable Object of its own: the World serves it, always for the caller.
+  entities.push({ kind: 'inventory', doc: INVENTORY.doc, api: INVENTORY.api, events: {}, class: 'Office', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], instances: ['me'] });
   return {
     world: { kind: 'world', address: 'world:main', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], ...WORLD },
     entities,

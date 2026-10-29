@@ -29,7 +29,7 @@ import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 import { describeApi, generatedTools } from './apidoc.js';
 
-const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'ping'];
+const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 const MAX_EVENTS = 300;
 const IDLE_MS = 10 * 60 * 1000; // drop agents that stop calling in
@@ -344,6 +344,7 @@ export class McpHub {
           desks: { claimed: office.desks, free: DESKS.filter((d) => !office.desks[d.id]).map((d) => d.id) },
           notices: office.notes.map((n) => ({ id: n.id, text: n.text, by: n.by })),
           pomodoro: office.pomoState(), counters: office.counters,
+          floor: office.floor.map((e) => ({ id: e.id, item: `${e.item.emoji} ${e.item.name}${e.item.qty > 1 ? ` ×${e.item.qty}` : ''}`, x: round(e.x), y: round(e.y), by: e.by, ...(me ? { distance: round(Math.hypot(e.x - me.x, e.y - me.y)) } : {}) })),
           places: PLACES,
         });
       }, READ_ONLY);
@@ -387,11 +388,12 @@ export class McpHub {
         return json({ ok: true, x: c.me.x, y: c.me.y });
       });
 
-    tool('walk_to', 'Run somewhere along the A* path at the same speed browsers run auto-paths (streams progress). `place` can be a zone (open, board, huddle, kitchen, lounge, lobby, focus, booth1-3), furniture (coffee, whiteboard, noticeboard, arcade, pomodoro, desk-7…), or a person\'s name/handle/id. Or give x/y in tiles.',
+    tool('walk_to', 'Run somewhere along the A* path at the same speed browsers run auto-paths (streams progress). `place` can be a zone (open, board, huddle, kitchen, lounge, lobby, focus, booth1-3), furniture (coffee, whiteboard, noticeboard, arcade, pomodoro, vending, desk-7…), a person\'s name/handle/id, or the id of something on the floor (floor_view). Or give x/y in tiles.',
       { place: z.string().optional(), x: z.number().optional(), y: z.number().optional() },
       async ({ place, x, y }, extra) => {
         const c = agent.need();
-        const target = place ? resolvePlace(place, c) : (x !== undefined && y !== undefined ? { x, y, label: `${x},${y}` } : null);
+        const dropped = place && office.floor.find((e) => e.id === place);
+        const target = dropped ? { x: dropped.x, y: dropped.y, label: dropped.item.name } : place ? resolvePlace(place, c) : (x !== undefined && y !== undefined ? { x, y, label: `${x},${y}` } : null);
         if (!target) return fail(`don't know where "${place ?? ''}" is; see places in look`);
         const ok = await c.walkTo(target.x, target.y, progress(extra));
         return json({ arrived: ok, at: { x: round(c.me.x), y: round(c.me.y) }, zone: zoneAt(c.me.x, c.me.y)?.name, target: target.label });
@@ -647,7 +649,7 @@ const rpcError = (status, code, message) => Response.json({ jsonrpc: '2.0', erro
 // Named places agents can walk to.
 const PLACES = {
   zones: Object.fromEntries(ZONES.map((z) => [z.id, z.name])),
-  things: ['coffee', 'whiteboard', 'noticeboard', 'pomodoro', 'arcade', 'arcade2', 'reception', 'fridge', 'sofa1', 'board-table', 'huddle-table'],
+  things: ['coffee', 'vending', 'whiteboard', 'noticeboard', 'pomodoro', 'arcade', 'arcade2', 'reception', 'fridge', 'sofa1', 'board-table', 'huddle-table'],
   desks: 'desk-1 … desk-26, den-*',
 };
 
@@ -680,4 +682,5 @@ To act (join, move, chat…) sign in with AT Protocol, ideally Roost: connect wi
 Then look around with look, and keep up with the office through read_events (long-poll; pass next back as since) or the office://events resource and log notifications.
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
+Things: you can carry items (inventory_view). The coffee machine (coffee) and the vending machine (plugin_interact name=vending, action buy:<snack>) hand them out; inventory_use eats or drinks them, inventory_give hands one to someone within 3 tiles, inventory_drop puts it down, and inventory_pickup picks up what floor_view lists (walk_to its id first).
 Meeting rooms: rooms shows the schedule, book_room books one (you can invite people and lock it), manage_booking changes it; roomnote events carry reminders and start/end notices.`;

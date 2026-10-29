@@ -19,6 +19,7 @@ plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball,
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map
 plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
+public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inventory.js is the panel
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in

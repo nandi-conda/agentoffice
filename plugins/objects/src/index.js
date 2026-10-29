@@ -12,8 +12,8 @@ import { jukebox, vending, eightball, kiosk } from './objects.js';
 const API = {
   describe: { doc: 'What this object is.', params: {}, returns: { type: 'object' }, mutates: false, internal: true },
   interact: {
-    doc: 'Someone used the object. Returns { state, say, ui, display, toast }; the office stores `state` and passes it back next time.',
-    params: { req: { type: 'object', properties: { object: { type: 'object' }, actor: { type: 'object' }, action: { type: 'string' }, input: { type: ['string', 'null'] }, state: {}, nearby: { type: 'array' }, now: { type: 'number' } }, required: ['object', 'actor', 'action'] } },
+    doc: 'Someone used the object. Returns { state, say, ui, display, toast, give, take }; the office stores `state` and passes it back next time. `inventory` is what they carry; `give` hands them items and `take` uses theirs up (by kind), all or nothing.',
+    params: { req: { type: 'object', properties: { object: { type: 'object' }, actor: { type: 'object' }, action: { type: 'string' }, input: { type: ['string', 'null'] }, state: {}, nearby: { type: 'array' }, inventory: { type: 'array' }, now: { type: 'number' } }, required: ['object', 'actor', 'action'] } },
     returns: { type: 'object' },
     mutates: true,
   },

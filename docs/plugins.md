@@ -87,6 +87,7 @@ export default { fetch: () => new Response('agent office plugin') };
 | `input` | Text typed into your panel's input, or `null`. At most 500 characters. |
 | `state` | Whatever you returned as `state` last time (`null` at first). |
 | `nearby` | `[{ id, name, handle }]`: people in the same area right now. |
+| `inventory` | `[{ id, kind, name, emoji, qty, data? }]`: what the person carries (read-only; change it with `give` and `take`). |
 | `now` | The office's clock, epoch ms. |
 
 ### The answer
@@ -102,6 +103,15 @@ is clipped, so a plugin can't break the page.
 | `display` | `{ label, glow, until, music }`: a label floating over the object for everyone, a `#rrggbb` accent colour, an optional epoch-ms expiry for the label, and `music: { id, at }` to play tune `id` from `public/js/music.js` (started at epoch ms `at`) to people nearby. Sent to everyone and included when people join. |
 | `wakeAt` | Epoch ms: the office calls `interact()` again then with `action: 'tick'` and `actor.kind: 'system'` (no panel goes out; `say` and `display` do). The jukebox uses it to start the next song. |
 | `ui` | The panel the person sees (below). Leave it out to close nothing and change nothing. |
+| `give` | Items for the person (≤ 5): `[{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]`. `kind` is `[a-z0-9:._-]`, up to 32 characters; prefix yours (`jukebox:token`). `verb` is what using it looks like ("eats"), `consume` uses one up each time, `emote` is shown while they use it, `data` is up to 512 bytes of JSON you get back in `inventory`. Kinds the office already knows (`coffee`, `chips`, `cookie`… in `public/js/items.js`) fill in whatever you leave out. |
+| `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. |
+
+`give` and `take` happen together, all or nothing. If the person doesn't have
+what you take, or has no room for what you give, nothing happens: no speech
+bubble, no display change, your new `state` isn't saved, and they get a toast
+saying why. So a plugin can charge for things (take a token, give a prize)
+without ever ending up half done. The vending machine gives the snack it
+dispenses: `give: [{ kind: 'cookie', name: 'Giant Cookie', emoji: '🍪' }]`.
 
 The panel is data, never HTML:
 

@@ -12,8 +12,9 @@ import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBloc
 import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
 import { LocalRuntime, parse } from './entities/runtime.js';
-import { KINDS, MIRRORED, POMO_ZONES, nextRoomEvent } from './entities/kinds.js';
-import { str, int, arr, obj, WHO, describeKind, paramList } from './entities/schema.js';
+import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
+import { str, int, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
+import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine } from '../public/js/items.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -27,12 +28,30 @@ export const WORLD = {
     presence: { doc: 'Who is in the office now.', returns: arr(WHO, 'People'), internal: true },
     deliver: { doc: 'A protocol message for an actor, to each of their open connections. Returns how many got it.', params: { key: str('Owner key'), msg: { type: 'object', description: 'Protocol message { t, ... }' } }, returns: int('Connections reached', 0), internal: true },
     summary: { doc: 'The public office summary (/api/office).', returns: obj({ online: arr(obj({}), 'People'), desks: obj({}), counters: obj({}) }), internal: true },
+    inventoryOf: { doc: 'What someone in the office carries (their actor\'s inventory, or a guest\'s for this visit). Plugin objects pass it to their plugin.', params: { peer: str('Peer id') }, returns: arr(ITEM, 'Item stacks'), internal: true },
+    invApply: { doc: 'Take and give items for someone in the office, all or nothing, and tell them. Plugin objects call it with what their plugin gives and takes.', params: { peer: str('Peer id'), change: { type: 'object', description: '{ take?, give?, from? } as actor.invApply' } }, returns: { type: 'object', description: '{ items, taken } or { error }' }, mutates: true, internal: true },
   },
   events: {
     publishes: {
       'zone:<id>': '{ type: "enter" | "exit", who } when someone walks in or out of a zone',
       office: '{ type: "join" | "leave", who } when someone comes in or goes',
     },
+  },
+};
+
+// What people carry, served by the World because only it knows where
+// everyone stands (proximity) and who's a guest. Described like an entity
+// (address inventory:me, always the caller's own) so the docs and the MCP
+// tools (inventory_view, inventory_use…) come from it. Signed-in people and
+// agents keep theirs on their actor; a guest's lasts as long as the visit.
+export const INVENTORY = {
+  doc: 'What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down where you stand, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.',
+  api: {
+    view: { doc: 'What you carry.', who: true, returns: arr(ITEM, 'Item stacks') },
+    use: { doc: 'Use one of your things: eat it, drink it, or show it off. Everyone who can hear you sees it; things like snacks are used up.', who: true, mutates: true, params: { id: str('Stack id (from inventory_view)', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now'), did: str('What it looked like') }) },
+    drop: { doc: 'Put something down where you stand. Anyone can pick it up; it is cleared away after a day.', who: true, mutates: true, params: { id: str('Stack id', 16), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: str('Floor id') }) },
+    give: { doc: 'Hand something to a person within 3 tiles.', who: true, mutates: true, params: { id: str('Stack id', 16), to: str('Their peer id, name or handle', 253), qty: opt(int('How many (default 1)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), to: str('Who got it') }) },
+    pickup: { doc: 'Pick something up off the floor (floor_view lists it). You must be within 1.5 tiles of it: walk_to it first.', who: true, mutates: true, params: { id: str('Floor id', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
   },
 };
 
@@ -43,6 +62,8 @@ const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 
 export const REPLACED = 4001;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
+// How far someone stands from a piece of furniture (its nearest edge).
+const distTo = (f, p) => Math.hypot(Math.max(f.x, Math.min(p.x, f.x + (f.w || 1))) - p.x, Math.max(f.y, Math.min(p.y, f.y + (f.h || 1))) - p.y);
 
 export class Office {
   // runtime: where the entities live (a LocalRuntime in this process by
@@ -123,6 +144,7 @@ export class Office {
   get strokes() { return this.mirror.get('whiteboard:main') || []; }
   get notes() { return this.mirror.get('noticeboard:main') || []; }
   get scores() { return this.mirror.get('arcade:main') || []; }
+  get floor() { return this.mirror.get('floor:main') || []; }
   get counters() {
     const pomodoros = POMO_ZONES.reduce((n, z) => n + (this.mirror.get(`pomodoro:${z}`)?.count || 0), 0);
     return { coffees: this.mirror.get('coffee:main')?.count || 0, pomodoros, waves: this.waves };
@@ -141,7 +163,7 @@ export class Office {
   // The World fills in `who` and `ctx`, so callers only pass the params.
   async call(p, address, method, args = []) {
     const { kind, name } = parse(address);
-    const spec = KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
+    const spec = kind === 'inventory' ? INVENTORY.api[method] : KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
     if (!spec || spec.internal) throw new Error(`${address} has no public method ${method}`);
     if ((spec.who || spec.mutates || spec.inZone || spec.near) && !p?.ready) throw new Error('join the office first');
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
@@ -152,6 +174,7 @@ export class Office {
       const cx = Math.max(f.x, Math.min(p.x, f.x + (f.w || 1))), cy = Math.max(f.y, Math.min(p.y, f.y + (f.h || 1)));
       if (Math.hypot(cx - p.x, cy - p.y) > spec.near) throw new Error(`you're too far from the ${f.name || name}: walk_to ${name} first (within ${spec.near} tiles)`);
     }
+    if (kind === 'inventory') return this.inventoryCall(p, method, args);
     if (method === 'view' && this.mirror.has(address)) return this.mirror.get(address);
     const params = paramList(spec).map((_, i) => args[i]);
     while (params.length && params.at(-1) === undefined) params.pop();
@@ -166,6 +189,8 @@ export class Office {
       presence: () => this.presence(),
       deliver: (key, msg) => this.deliver(key, msg),
       summary: () => this.summary(),
+      inventoryOf: (id) => { const p = this.peers.get(id); return p ? this.inventory(p) : []; },
+      invApply: (id, change) => { const p = this.peers.get(id); return p?.ready ? this.invApply(p, change) : { error: 'they left' }; },
     };
   }
 
@@ -221,6 +246,7 @@ export class Office {
       case 'coffee': return this.broadcast({ t: 'counters', counters: this.counters });
       case 'plugin': case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
       case 'gallery': return this.broadcast({ t: 'gallery', items: this.gallery });
+      case 'floor': return this.broadcast({ t: 'floor', items: this.floor });
       case 'pomodoro': return this.broadcastPomo();
     }
   }
@@ -280,7 +306,7 @@ export class Office {
 
   // The parts of a peer worth keeping across a Durable Object hibernation.
   snapshot(p) {
-    const { ws, cupTimer, ...rest } = p;
+    const { ws, cupTimer, emoteTimer, ...rest } = p;
     return rest;
   }
 
@@ -392,6 +418,7 @@ export class Office {
       case 'score': return this.score(p, m);
       case 'use': return this.use(p, m);
       case 'gallery': return this.galleryOp(p, m);
+      case 'inv': return this.inv(p, m);
       case 'wave': return this.wave(p, m);
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
       case 'av': return this.av(p, m);
@@ -428,6 +455,8 @@ export class Office {
     if (m.status && STATUSES.has(m.status)) p.status = m.status;
     else if (STATUSES.has(arrival?.status)) p.status = arrival.status;
     p.note = clip(m.note ?? arrival?.note ?? '', 80);
+    // A guest's things last for the visit (a reconnect keeps them); everyone else's are on their actor.
+    if (!key) p.items ||= [];
     p.ready = true;
     this.replaceOlder(p);
     this.sendTo(p, {
@@ -437,6 +466,7 @@ export class Office {
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
       bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(),
       gallery: this.gallery,
+      floor: this.floor, items: key ? arrival?.items || [] : p.items, keeps: !!key,
     });
     for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
@@ -593,12 +623,14 @@ export class Office {
   }
 
   async coffee(p) {
-    p.cup = true;
-    clearTimeout(p.cupTimer);
-    p.cupTimer = setTimeout(() => { p.cup = false; this.broadcast({ t: 'peer', id: p.id, cup: false }); }, 5 * 60000);
-    p.cupTimer.unref?.();
-    this.broadcast({ t: 'peer', id: p.id, cup: true });
+    this.holdCup(p);
     await this.ref('coffee:main').brew();
+    // Standing at the machine, you also walk off with the cup itself.
+    const machine = FURNITURE.find((f) => f.id === 'coffee');
+    if (machine && distTo(machine, p) <= 3) {
+      const r = await this.invApply(p, { give: [{ kind: 'coffee' }], from: 'Coffee machine' });
+      if (r.error) this.sendTo(p, { t: 'toast', text: `☕ No hands free for the cup: ${r.error}` });
+    }
     // Tell anyone nearby that a coffee chat is brewing.
     for (const q of this.peers.values()) {
       if (q !== p && q.ready && canHear(p, q)) this.sendTo(q, { t: 'toast', text: `☕ ${p.name} grabbed a coffee nearby. Coffee chat?` });
@@ -642,6 +674,141 @@ export class Office {
     try { result = await this.call(p, 'gallery:main', method, [m.req || {}]); }
     catch (e) { result = { error: clip(e.message, 200) }; }
     this.sendTo(p, { t: 'galleryres', rid: m.rid, result });
+  }
+
+  // ---- inventory -------------------------------------------------------------
+  // What people carry: on their actor if they have one, on the peer for the
+  // visit if they're a guest. Changes go out to each of their connections.
+  async inventory(p) {
+    const key = this.actorKey(p);
+    if (!key) return p.items || [];
+    return this.ref(`actor:${key}`).inventory();
+  }
+
+  async invApply(p, change) {
+    const key = this.actorKey(p);
+    let r;
+    if (key) r = await this.ref(`actor:${key}`).invApply(change);
+    else {
+      const give = (change.give || []).map((i) => cleanItem(i, { from: change.from, now: this.now() })).filter(Boolean).map(({ data, ...i }) => i);
+      r = applyChange(p.items || [], { take: change.take || [], give }, { slots: GUEST_SLOTS });
+      if (r.items) p.items = r.items;
+    }
+    if (r.error) return r;
+    if (key) this.deliver(key, { t: 'inv', items: r.items });
+    else this.sendTo(p, { t: 'inv', items: r.items });
+    return r;
+  }
+
+  // The inventory as the generated tools and the browser see it (INVENTORY.api).
+  // Each answers { items, … } or { error }.
+  async inventoryCall(p, method, [a, b, c] = []) {
+    if (method === 'view') return this.inventory(p);
+    if (method === 'use') return this.useItem(p, a);
+    if (method === 'drop') return this.dropItem(p, a, b);
+    if (method === 'give') return this.giveItem(p, a, b, c);
+    if (method === 'pickup') return this.pickUp(p, a);
+    throw new Error(`inventory has no method ${method}`);
+  }
+
+  // { t: 'inv', op: 'use' | 'drop' | 'give' | 'pickup', id, to?, qty? }
+  async inv(p, m) {
+    const op = ['use', 'drop', 'give', 'pickup'].includes(m.op) ? m.op : null;
+    if (!op) return;
+    const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'drop' ? [m.id, m.qty] : [m.id]);
+    if (r?.error) this.sendTo(p, { t: 'error', message: r.error });
+  }
+
+  async useItem(p, id) {
+    const s = (await this.inventory(p)).find((x) => x.id === id);
+    if (!s) return { error: 'you don\'t have that' };
+    let items = null;
+    if (s.consume) {
+      const r = await this.invApply(p, { take: [{ id, qty: 1 }] });
+      if (r.error) return r;
+      items = r.items;
+    }
+    const did = useLine(s);
+    this.act(p, did);
+    if (s.emote) this.flashEmote(p, s.emote);
+    if (ITEMS[s.kind]?.cup) this.holdCup(p);
+    return { items: items || (await this.inventory(p)), did };
+  }
+
+  async dropItem(p, id, qty) {
+    const s = (await this.inventory(p)).find((x) => x.id === id);
+    if (!s) return { error: 'you don\'t have that' };
+    const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || s.qty));
+    const r = await this.invApply(p, { take: [{ id, qty: n }] });
+    if (r.error) return r;
+    const floor = await this.ref('floor:main').place({ item: { ...s, qty: n }, x: p.x, y: p.y + 0.3, by: p.name });
+    this.act(p, `puts down ${label({ ...s, qty: n })}`);
+    return { items: r.items, floor };
+  }
+
+  async giveItem(p, id, to, qty = 1) {
+    const q = this.findPeer(to);
+    if (!q || q === p) return { error: `nobody called ${clip(to, 40)} is here` };
+    if (Math.hypot(q.x - p.x, q.y - p.y) > GIVE_RANGE) return { error: `walk over to ${q.name} first (within ${GIVE_RANGE} tiles)` };
+    const s = (await this.inventory(p)).find((x) => x.id === id);
+    if (!s) return { error: 'you don\'t have that' };
+    const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || 1));
+    const r = await this.invApply(p, { take: [{ id, qty: n }] });
+    if (r.error) return r;
+    const got = await this.invApply(q, { give: r.taken.map(({ id: _, ...i }) => i) });
+    if (got.error) {
+      // Their hands are full: it goes back to the giver.
+      const back = await this.invApply(p, { give: r.taken });
+      return { error: `${q.name} can't take it: ${got.error.replace(/^your hands are/, 'their hands are').replace(/ drop or use something first$/, '')}`, items: back.items };
+    }
+    this.sendTo(q, { t: 'toast', text: `🎁 ${p.name} gave you ${label({ ...s, qty: n })}` });
+    this.act(p, `hands ${q.name} ${label({ ...s, qty: n })}`);
+    return { items: r.items, to: q.name };
+  }
+
+  async pickUp(p, id) {
+    const e = this.floor.find((x) => x.id === id);
+    if (!e) return { error: 'that isn\'t there any more' };
+    if (Math.hypot(e.x - p.x, e.y - p.y) > PICKUP_RANGE) return { error: `walk over to the ${e.item.name} first (within ${PICKUP_RANGE} tiles)` };
+    const got = await this.ref('floor:main').remove(id);
+    if (!got) return { error: 'someone got there first' };
+    const r = await this.invApply(p, { give: [got.item] });
+    if (r.error) {
+      await this.ref('floor:main').place({ item: got.item, x: got.x, y: got.y, by: got.by });
+      return r;
+    }
+    this.act(p, `picks up ${label(got.item)}`);
+    return { items: r.items };
+  }
+
+  // Someone doing something with their things: an action line for everyone who can hear them.
+  act(p, text) {
+    const msg = { t: 'chat', id: p.id, name: p.name, text, ts: this.now(), scope: 'nearby', action: true };
+    for (const q of this.peers.values()) if (q.ready && (q === p || canHear(p, q))) this.sendTo(q, msg);
+  }
+
+  flashEmote(p, name) {
+    p.emote = name;
+    this.broadcast({ t: 'peer', id: p.id, emote: name });
+    clearTimeout(p.emoteTimer);
+    p.emoteTimer = setTimeout(() => { if (p.emote === name) { p.emote = null; this.broadcast({ t: 'peer', id: p.id, emote: null }); } }, 3000);
+    p.emoteTimer.unref?.();
+  }
+
+  holdCup(p) {
+    p.cup = true;
+    clearTimeout(p.cupTimer);
+    p.cupTimer = setTimeout(() => { p.cup = false; this.broadcast({ t: 'peer', id: p.id, cup: false }); }, 5 * 60000);
+    p.cupTimer.unref?.();
+    this.broadcast({ t: 'peer', id: p.id, cup: true });
+  }
+
+  findPeer(q) {
+    const s = String(q ?? '').toLowerCase().replace(/^@/, '');
+    if (!s) return null;
+    const ready = [...this.peers.values()].filter((x) => x.ready && x.kind !== 'freeq');
+    return this.peers.get(q)?.ready && this.peers.get(q).kind !== 'freeq' ? this.peers.get(q)
+      : ready.find((x) => x.name.toLowerCase() === s || x.name.toLowerCase().replace(/\s+/g, '') === s || x.handle?.toLowerCase() === s) || null;
   }
 
   wave(p, m) {

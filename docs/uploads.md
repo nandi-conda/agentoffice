@@ -22,6 +22,10 @@ to 128 KB; 64 KB answers; the usual 32 KB of `state`. Only the uploader can
 remove an object, plus anyone whose DID is in the office's `ADMIN_DIDS`
 (comma-separated, a Worker var or env var).
 
+Uploaded objects can hand out items with `give` (they land in the person's
+inventory, see [plugins.md](plugins.md)) but can't `take` anyone's things:
+the office drops a `take` from an upload.
+
 ## How they run
 
 The office never runs uploaded code itself. A Cloudflare Worker isn't

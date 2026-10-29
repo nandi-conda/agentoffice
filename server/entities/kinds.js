@@ -7,6 +7,7 @@ import { str, int, num as numS, bool, arr, obj, opt, WHO } from './schema.js';
 import { DESKS, ZONES, PLUGIN_OBJECTS } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
+import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, fmtTime, fmtRange } from '../../public/js/rooms.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
@@ -18,6 +19,19 @@ export const MAX_STROKES = 3000;
 export const MAX_NOTES = 40;
 const PROFILE_TTL = 10 * MIN;
 const INBOX_MAX = 30;
+
+// An item stack, as entities and the docs describe it (public/js/items.js).
+export const ITEM = obj({
+  id: str('Stack id', 16), kind: str('What it is, e.g. coffee, cookie, myplugin:badge', 32), name: str('Name', 40), emoji: str('Emoji', 8),
+  qty: int('How many', 1, 20), verb: opt(str('What using it looks like, e.g. eats', 16)), consume: opt(bool('Using it uses one up')),
+  emote: opt(str('Emote shown while using it', 16)), data: opt({ description: 'Whatever the plugin that made it keeps on it (≤ 512 bytes of JSON)' }),
+  from: opt(str('Where it came from', 40)), at: opt(int('When they got it, ms since epoch', 0)),
+}, 'An item stack');
+const CHANGE = obj({
+  take: opt(arr(obj({ id: opt(str('Stack id', 16)), kind: opt(str('Item kind', 32)), qty: opt(int('How many (default 1)', 1, 20)) }), 'Taken first, oldest stacks of a kind first', 10)),
+  give: opt(arr(ITEM, 'Then given (cleaned with cleanItem)', 10)),
+  from: opt(str('Who is handing them out, stamped on given items', 40)),
+}, 'A change to their things: all or nothing');
 
 // ---- topics ----------------------------------------------------------------
 // A pub/sub channel, itself an entity: it keeps its subscribers and fans
@@ -66,7 +80,7 @@ export class Topic extends Entity {
 // Holds the rpg.actor character, the status they had last, notes that came
 // while they were away, and (for DIDs) their AT Protocol OAuth session.
 export class Actor extends Entity {
-  static doc = 'One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. Holds the rpg.actor character, the status they had last, notes that came while they were away, and (for DIDs) their AT Protocol OAuth session. Guests get none.';
+  static doc = 'One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. Holds the rpg.actor character, the status they had last, notes that came while they were away, what they carry (their inventory), and (for DIDs) their AT Protocol OAuth session. Guests get none: what a guest carries lives on their connection in the World and goes when they do.';
   static api = {
     view: { doc: 'Whether they are in and when they were last seen.', returns: obj({ online: bool('In the office now'), lastSeen: { type: ['integer', 'null'], description: 'ms since epoch' } }), internal: true },
     profile: { doc: 'Their rpg.actor character (cached 10 minutes; the last good one if the PDS is down).', params: { opts: opt(obj({ fresh: opt(bool('Skip the cache')) }, 'Options')) }, returns: { type: ['object', 'null'], description: '{ handle, sprite, stats, displayName, description }, null without a DID' }, internal: true },
@@ -76,6 +90,8 @@ export class Actor extends Entity {
     sessionGet: { doc: 'The AT Protocol OAuth session, unless older than ttlMs.', params: { ttlMs: opt(int('Max age in ms', 0)) }, internal: true },
     sessionSet: { doc: 'Store the OAuth session.', params: { session: { type: 'object', description: 'Tokens + DPoP key' } }, mutates: true, internal: true },
     sessionDel: { doc: 'Forget the OAuth session.', mutates: true, internal: true },
+    inventory: { doc: 'What they carry.', returns: arr(ITEM, 'Item stacks'), internal: true },
+    invApply: { doc: 'Take and give items in one go, all or nothing (at most 20 stacks of 20). The World calls it for picking up, dropping, giving and using; plugins reach it through the World.', params: { change: CHANGE }, returns: obj({ items: opt(arr(ITEM, 'What they carry now')), taken: opt(arr(ITEM, 'What was taken')), error: opt(str('Why not')) }), mutates: true, internal: true },
   };
   // Internal all the way: any DID names an actor, so open reads would let
   // anyone create Durable Objects at will. Look people up with look or /api/actor.
@@ -113,7 +129,7 @@ export class Actor extends Entity {
     this.state.online = (this.state.online || 0) + 1;
     this.state.lastSeen = this.now();
     await this.save();
-    return { profile, error, status: this.state.status || null, note: this.state.note ?? null, inbox };
+    return { profile, error, status: this.state.status || null, note: this.state.note ?? null, inbox, items: this.state.items || [] };
   }
 
   async depart() {
@@ -138,6 +154,20 @@ export class Actor extends Entity {
     inbox.push({ ...data, queued: this.now() });
     this.state.inbox = inbox.slice(-INBOX_MAX);
     await this.save();
+  }
+
+  // What they carry. Every change goes through invApply, so it's all or
+  // nothing even when two things hand them stuff at once.
+  inventory() { return this.state.items || []; }
+
+  async invApply({ take = [], give = [], from = null } = {}) {
+    const now = this.now();
+    const g = give.map((i) => cleanItem(i, { from, now })).filter(Boolean);
+    const r = applyChange(this.state.items || [], { take, give: g }, { slots: MAX_SLOTS });
+    if (r.error) return { error: r.error };
+    this.state.items = r.items;
+    await this.save();
+    return r;
   }
 
   // The AT Protocol OAuth session (tokens + DPoP key), kept with the person.
@@ -602,10 +632,56 @@ export class Room extends Entity {
   }
 }
 
+// ---- the floor --------------------------------------------------------------------------
+// Things people put down, wherever they stood. Anyone can pick them up (the
+// World checks they're close enough); the cleaners take anything left a day.
+export class Floor extends Entity {
+  static doc = 'Things people dropped, where they dropped them: at most 40, each cleared away after a day. The World places and removes them (picking up needs you within 1.5 tiles); read it with floor_view.';
+  static api = {
+    view: { doc: 'Everything lying on the floor.', returns: arr(obj({ id: str('Floor id'), item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32), by: str('Who put it down'), at: int('When, ms since epoch', 0) }), 'Things on the floor') },
+    place: { doc: 'Put an item down at x, y. The oldest thing goes when the floor is full.', params: { entry: obj({ item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32), by: str('Who put it down', 32) }) }, returns: str('Floor id'), mutates: true, internal: true },
+    remove: { doc: 'Take something off the floor (first come, first served).', params: { id: str('Floor id', 16) }, returns: { type: ['object', 'null'], description: 'The entry, or null if someone got there first' }, mutates: true, internal: true },
+  };
+
+  view() { return this.state.items || []; }
+
+  async changed() {
+    await this.save();
+    await this.mirror(this.view());
+    const items = this.view();
+    await this.setAlarm(items.length ? Math.min(...items.map((e) => e.at)) + FLOOR_TTL : null);
+  }
+
+  async place({ item, x, y, by }) {
+    const clean = cleanItem(item, { now: this.now() });
+    if (!clean) return null;
+    const e = { id: shortId(), item: { ...clean, id: item.id || shortId() }, x: num(x, 0, 48), y: num(y, 0, 32), by: clip(by, 32), at: this.now() };
+    this.state.items = [...this.view(), e].slice(-FLOOR_MAX);
+    await this.changed();
+    return e.id;
+  }
+
+  async remove(id) {
+    const e = this.view().find((x) => x.id === id);
+    if (!e) return null;
+    this.state.items = this.view().filter((x) => x !== e);
+    await this.changed();
+    return e;
+  }
+
+  async alarm() {
+    const now = this.now();
+    const keep = this.view().filter((e) => now - e.at < FLOOR_TTL);
+    if (keep.length === this.view().length) return this.setAlarm(keep.length ? Math.min(...keep.map((e) => e.at)) + FLOOR_TTL : null);
+    this.state.items = keep;
+    await this.changed();
+  }
+}
+
 export const KINDS = {
   topic: Topic, actor: Actor, room: Room, desk: Desk,
   whiteboard: Whiteboard, noticeboard: NoticeBoard, arcade: Arcade, coffee: CoffeeMachine, pomodoro: Pomodoro,
-  plugin: PluginObject, gallery: Gallery, uobj: UploadedObject,
+  plugin: PluginObject, gallery: Gallery, uobj: UploadedObject, floor: Floor,
 };
 
 // Everything the World mirrors, pulled when it starts.
@@ -613,7 +689,7 @@ export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
   ...POMO_ZONES.map((z) => `pomodoro:${z}`),
-  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main',
+  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

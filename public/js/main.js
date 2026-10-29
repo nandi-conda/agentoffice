@@ -9,6 +9,8 @@ import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
+import { openInventory, nearestFloorItem } from './inventory.js';
+import { label as itemLabel } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -28,6 +30,7 @@ let objects = {}; // plugin object id -> { display, bubble } (see objects.js)
 let gallery = []; // objects people uploaded (see gallery.js)
 const galleryWait = new Map(); // request id -> resolve, for { t: 'galleryres' }
 let galleryRid = 0;
+let items = [], floor = [], keeps = false; // what you carry, what's lying around, whether yours outlast the visit
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
@@ -263,6 +266,7 @@ function onMessage(m) {
       objects = {};
       for (const [id, display] of Object.entries(m.objects || {})) objects[id] = { display };
       gallery = m.gallery || []; syncGallery(gallery);
+      items = m.items || []; floor = m.floor || []; keeps = !!m.keeps; invChanged();
       refreshChannels();
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
@@ -303,6 +307,8 @@ function onMessage(m) {
       break;
     }
     case 'desks': desks = m.desks; refreshPeople(); break;
+    case 'inv': items = m.items || []; invChanged(); break;
+    case 'floor': floor = m.items || []; modal.inv?.refresh(); break;
     // A plugin object changed how it looks, or said something to the people near it.
     case 'obj': {
       const o = (objects[m.id] ||= {});
@@ -405,6 +411,7 @@ function logChat(m) {
   const scope = m.scope === 'nearby' ? '' : `<span class="sc">${esc(m.scope === 'office' ? '📣 office' : m.scope)}</span>`;
   // Said on freeq while the office wasn't listening, caught up after a restart.
   const when = m.backfill ? `<span class="missed" title="Said on freeq while the office was away">${esc(new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> ` : '';
+  if (m.action) d.classList.add('act');
   d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
   pushLog(d);
 }
@@ -631,6 +638,32 @@ function emote(name) {
   emoteTimer = setTimeout(() => { me.emote = null; net.send({ t: 'emote', name: null }); }, 4000);
 }
 
+// ---- inventory -------------------------------------------------------------------
+const invBtn = $('.inv-btn'), invCount = $('.inv-btn .inv-count');
+function invChanged() {
+  const n = items.reduce((a, s) => a + s.qty, 0);
+  invCount.textContent = n > 99 ? '99+' : n;
+  invCount.hidden = !n;
+  modal.inv?.refresh();
+}
+function openInv() {
+  if (!me) return;
+  modal.inv = openInventory(modal, {
+    send: (m) => net.send(m), me: () => me, items: () => items, floor: () => floor,
+    peers: () => [...peers.values()], keeps: () => keeps, walkTo,
+  });
+  modal.onclose = () => (modal.inv = null);
+}
+invBtn.addEventListener('click', openInv);
+
+// What E (or the prompt button) acts on: something on the floor within
+// reach first, then furniture.
+function currentTarget() {
+  const e = nearestFloorItem(floor, me.x, me.y, 1.1);
+  if (e) return { floorItem: e.id, x: e.x, y: e.y, w: 0, h: 0 };
+  return nearestInteractable(me.x, me.y);
+}
+
 $('.help-btn').addEventListener('click', openHelp);
 function openHelp() {
   modal.open(`
@@ -650,6 +683,7 @@ function openHelp() {
       <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
       <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
+      <kbd>I</kbd><span>Your things: eat, drink, give them to someone nearby, or drop them. E picks up what's at your feet</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>+ −</kbd><span>Zoom</span>
     </div>${coarse ? '</details>' : ''}
@@ -809,6 +843,7 @@ const ownerOnline = (owner) => [...peers.values()].some((p) => (p.did || `${p.ki
 
 function promptFor(f) {
   if (!f) return null;
+  if (f.floorItem) { const e = floor.find((x) => x.id === f.floorItem); return e ? `Pick up ${itemLabel(e.item)}` : null; }
   if (f.seat) {
     if (me.seat === f.id) return 'Stand up';
     const seat = SEATS.find((s) => s.id === f.id);
@@ -838,6 +873,7 @@ function promptFor(f) {
 
 function interact(f) {
   if (!f) return;
+  if (f.floorItem) return net.send({ t: 'inv', op: 'pickup', id: f.floorItem });
   if (f.seat) {
     if (me.seat === f.id) { me.seat = null; net.send({ t: 'sit', seat: null }); return; }
     const seat = SEATS.find((s) => s.id === f.id);
@@ -859,7 +895,7 @@ function interact(f) {
     case 'coffee':
       net.send({ t: 'coffee' }); lastCoffee = performance.now(); me.cup = true;
       if (me.status === 'available') { autoStatus = 'coffee'; setStatus('coffee'); }
-      toast('☕ Fresh coffee. Your mug shows for a few minutes, so people nearby know you\'re up for a chat.');
+      toast(`☕ Fresh coffee. Your mug shows for a few minutes, so people nearby know you're up for a chat. The cup is in your things (${coarse ? '🎒' : 'I'}).`);
       break;
     case 'pomodoro': {
       const st = pomo[f.zone];
@@ -1207,7 +1243,8 @@ addEventListener('keydown', (e) => {
   if (typing()) return;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) { keys.add(key); e.preventDefault(); }
-  else if (key === 'e' || key === ' ') { interact(nearestInteractable(me.x, me.y)); e.preventDefault(); }
+  else if (key === 'e' || key === ' ') { interact(currentTarget()); e.preventDefault(); }
+  else if (key === 'i') openInv();
   else if (key === 'Enter') { focusChat(); e.preventDefault(); }
   else if (key === '\\') setSide(hud.classList.contains('side-closed'));
   else if (key === 'm') toggleMic();
@@ -1229,6 +1266,9 @@ function tapAt(sx, sy, touch = false) {
   const hit = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
   if (hit) return openProfile(hit);
   const w = R.toWorld(sx, sy);
+  // Something on the floor: walk over and pick it up.
+  const e = nearestFloorItem(floor, w.x, w.y + 0.2, touch ? 0.7 : 0.5);
+  if (e) return walkTo(e.x, e.y, { floorItem: e.id, x: e.x, y: e.y, w: 0, h: 0 });
   // Clicking a piece of furniture walks to it and uses it on arrival.
   const f = FURNITURE.find((f2) => (f2.interact || f2.seat) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
   walkTo(w.x, w.y, f);
@@ -1289,6 +1329,7 @@ canvas.addEventListener('contextmenu', (e) => { if (coarse) e.preventDefault(); 
 
 function walkTo(x, y, thenUse = null) {
   if (x === undefined || !me) return;
+  if (thenUse?.floorItem && Math.hypot(x - me.x, y - me.y) <= 1.2) return interact(thenUse);
   if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
   const tx = thenUse?.seat ? thenUse.x + 0.5 : x, ty = thenUse?.seat ? thenUse.y + 0.5 : y;
   const p = findPath(me.x, me.y, tx, ty);
@@ -1438,7 +1479,7 @@ let last = performance.now(), miniT = 0;
 const promptEl = $('.prompt');
 // The interaction prompt doubles as a button, which is how touch screens press E.
 promptEl.querySelector('kbd').textContent = coarse ? 'Tap' : 'E';
-promptEl.addEventListener('click', () => { if (me && !modal.isOpen) interact(nearestInteractable(me.x, me.y)); });
+promptEl.addEventListener('click', () => { if (me && !modal.isOpen) interact(currentTarget()); });
 // Touch devices drop to ~30 fps while nothing on screen is moving, to save battery.
 let lastDraw = 0;
 const busy = () => me.moving || gesture || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
@@ -1500,7 +1541,7 @@ function loop(t) {
     cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
     cam.y += (me.y - 0.5 - cam.y) * Math.min(1, dt * 6);
 
-    const target = modal.isOpen ? null : nearestInteractable(me.x, me.y);
+    const target = modal.isOpen ? null : currentTarget();
     const label = target && promptFor(target);
     promptEl.hidden = !label;
     if (label) promptEl.querySelector('span').textContent = label;
@@ -1516,7 +1557,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
+      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }

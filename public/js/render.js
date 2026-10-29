@@ -683,6 +683,28 @@ export function createRenderer(canvas) {
     roundRect(ctx, S(x + 0.9), S(y + 1.2), S(w - 1.8), S(h - 2.4), S(0.4)); ctx.stroke();
   }
 
+  // ---- things on the floor ---------------------------------------------------
+  // An emoji with a shadow, bobbing a little so it reads as something to pick up.
+  function drawDrop(e, st) {
+    const bob = Math.sin(st.time / 400 + e.x * 3) * 0.04;
+    ellipse(e.x, e.y, 0.24, 0.09, 'rgba(0,0,0,0.22)');
+    if (st.floorTarget === e.id) {
+      ctx.strokeStyle = 'rgba(37,99,235,0.9)'; ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]); ctx.lineDashOffset = -st.time / 60;
+      ctx.beginPath(); ctx.ellipse(S(e.x), S(e.y), S(0.36), S(0.15), 0, 0, 7); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.font = `${Math.max(10, S(0.5))}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#1c1917';
+    ctx.fillText(e.item.emoji, S(e.x), S(e.y - 0.08 + bob));
+    if (e.item.qty > 1) {
+      ctx.font = `700 ${Math.max(8, S(0.22))}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = '#1c1917';
+      ctx.fillText(`×${e.item.qty}`, S(e.x + 0.3), S(e.y + 0.05));
+    }
+    ctx.textAlign = 'left';
+  }
+
   // ---- characters --------------------------------------------------------
   function drawPeer(p, st) {
     const sheets = p.sheets;
@@ -992,6 +1014,10 @@ export function createRenderer(canvas) {
         items.push({ k: f.facing === 'up' ? f.y + 1.05 : f.y + 0.3, back: f });
       } else items.push({ k: f.seat ? f.y + 0.5 : f.type === 'panel' ? f.y + 0.7 : f.y + f.h, f });
     }
+    for (const e of st.floor || []) {
+      if (e.x < vis.x0 || e.x > vis.x1 || e.y < vis.y0 || e.y > vis.y1) continue;
+      items.push({ k: e.y, drop: e });
+    }
     for (const p of st.peers) {
       let k = p.ry + 0.2;
       if (p.seat) k = p.ry + 0.4;
@@ -1003,6 +1029,7 @@ export function createRenderer(canvas) {
       else if (it.f) drawFurniture(it.f, st);
       else if (it.back) drawChairBack(it.back);
       else if (it.p) drawPeer(it.p, st);
+      else if (it.drop) drawDrop(it.drop, st);
     }
 
     // interaction target highlight

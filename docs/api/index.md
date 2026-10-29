@@ -18,6 +18,8 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [plugin (PluginObject)](plugin.md) | An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback. |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
+| [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
+| [inventory (Office)](inventory.md) | What you carry. |
 | [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
 | [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
@@ -41,7 +43,7 @@ From `wrangler.toml`.
 
 ## MCP tools
 
-28 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+34 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -73,3 +75,9 @@ From `wrangler.toml`.
 | `gallery_remove` | signed in, in the office | [gallery.remove](gallery.md) |
 | `uobj_view` | open | [uobj.view](uobj.md) |
 | `uobj_interact` | signed in, in the office | [uobj.interact](uobj.md) |
+| `floor_view` | open | [floor.view](floor.md) |
+| `inventory_view` | signed in, in the office | [inventory.view](inventory.md) |
+| `inventory_use` | signed in, in the office | [inventory.use](inventory.md) |
+| `inventory_drop` | signed in, in the office | [inventory.drop](inventory.md) |
+| `inventory_give` | signed in, in the office | [inventory.give](inventory.md) |
+| `inventory_pickup` | signed in, in the office | [inventory.pickup](inventory.md) |

@@ -24,7 +24,7 @@ export class PluginObject extends Entity {
       doc: 'Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.',
       who: true,
       params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
-      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, via }: what the plugin answered; null when called again within 400 ms' },
+      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, via }: what the plugin answered (give: items it handed you, take: things of yours it used up); null when called again within 400 ms' },
       mutates: true,
       near: 3,
     },
@@ -70,10 +70,22 @@ export class PluginObject extends Entity {
       nearby = (await this.world.presence()).filter((q) => q.zone === zone).map((q) => ({ id: q.id, name: q.name, handle: q.handle || null }));
     } catch { /* the plugin just won't know who's around */ }
 
-    const { result, state, via } = await this.plugins.interact({
+    // What they carry goes to the plugin, which can hand things out or use them up.
+    let inventory = [];
+    try { if (who.kind !== 'system') inventory = await this.world.inventoryOf(who.id); } catch { /* it just won't see their things */ }
+
+    let { result, state, via } = await this.plugins.interact({
       object: await this.pluginObject(f, zone),
-      actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(),
+      actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory,
     });
+    // Objects people uploaded can hand things out but never take anyone's things.
+    if (f.plugin === 'upload' && result.take?.length) result = { ...result, take: [] };
+    if ((result.give?.length || result.take?.length) && who.kind !== 'system') {
+      const r = await this.world.invApply(who.id, { give: result.give, take: result.take, from: f.name }).catch((e) => ({ error: e.message }));
+      // It didn't go through (hands full, or they don't have what it wanted):
+      // nothing happened, so the object forgets this turn too.
+      if (r.error) { state = this.state.data ?? null; result = { ...result, say: null, display: null, wakeAt: null, toast: `${f.name}: ${r.error}` }; }
+    }
     this.state.data = state;
     const reached = via !== this.state.via;
     this.state.via = via;

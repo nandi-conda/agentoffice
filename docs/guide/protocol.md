@@ -5,9 +5,16 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`, `inv`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `error`.
+
+`inv` takes `op`: `use`, `drop` (`qty`), `give` (`to`: a peer id, name or
+handle; `qty`) or `pickup` (a floor `id`), each with the stack `id`. The
+server answers `inv` with `items` (what you carry now) whenever that changes,
+and broadcasts `floor` with `items` (what's lying around). `welcome` carries
+`items`, `floor` and `keeps` (whether your things outlast the visit). Using,
+dropping, giving and picking up show up as `chat` lines with `action: true`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,

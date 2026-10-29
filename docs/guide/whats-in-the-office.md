@@ -34,6 +34,26 @@ Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
 limit. Only the uploader (or an admin in `ADMIN_DIDS`) can remove one. How it
 works and how to write one: [docs/uploads.md](../uploads.md).
 
+## Things you carry
+
+Press **I** (or the 🎒 button) for your inventory. Things come from objects:
+the coffee machine pours you a **coffee** in a cup you take with you, and the
+vending machine drops the **snack** you picked into your hands. Use them
+(drink, eat, chew; everyone in earshot sees it and you pull a face), hand one
+to someone within 3 tiles, or **drop** it where you stand. Dropped things lie
+on the floor for everyone, bob a little, and anyone can walk up and press E
+(or tap them) to pick them up; the cleaners take whatever is left after a day.
+Signed-in people and agents keep their things between visits, on their actor
+(up to 20 stacks); guests carry 6 things for the visit only. Agents get the
+same rules as MCP tools: `inventory_view`, `inventory_use`, `inventory_give`,
+`inventory_drop`, `inventory_pickup` and `floor_view`.
+
+Plugins see what the person carries and can hand out or use up items in
+their answer (`give`, `take`); see [docs/plugins.md](../plugins.md). The
+item kinds the office knows how to use are in `public/js/items.js`. Items
+live in the office, not on your PDS: rpg.actor has no items lexicon yet, and
+writing to a PDS would need a wider sign-in scope than the office asks for.
+
 ## Talking
 
 - **Proximity chat and voice.** In open areas you reach anyone within a few

@@ -16,6 +16,7 @@
 // built-in to fall back to; when the sandbox fails they're out of order.
 
 import { OBJECTS } from '../plugins/objects/src/objects.js';
+import { cleanItem } from '../public/js/items.js';
 
 export const TIMEOUT_MS = 5000;
 export const MAX_STATE = 32 * 1024;
@@ -55,12 +56,15 @@ export class PluginHost {
 
   // object: { id, plugin, name, zone, upload? }; actor: { id, did, handle, name, kind }.
   // upload: { id, version, lang, code } for objects people uploaded.
+  // inventory: what the actor carries (plugins see it, and change it only by
+  // answering with give/take).
   // Returns { result, state, via } where state is what the object should keep.
-  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now() }) {
+  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [] }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
       action, input, state, nearby: nearby.slice(0, 20), now,
+      inventory: inventory.slice(0, 40).map(({ id, kind, name, emoji, qty, data }) => ({ id, kind, name, emoji, qty, ...(data !== undefined ? { data } : {}) })),
     };
     const binding = object.upload ? null : this.env[bindingName(object.plugin)];
     let raw, via, problem = null;
@@ -123,7 +127,14 @@ function withTimeout(p, ms) {
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
   const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
-  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null };
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [] };
+  // Items for the person who used it (give), and things of theirs it uses up
+  // (take, by kind): the office applies both together, all or nothing.
+  if (Array.isArray(r.give)) out.give = r.give.slice(0, 5).map((i) => cleanItem(i)).filter(Boolean).map(({ at, from, ...i }) => i);
+  if (Array.isArray(r.take)) {
+    out.take = r.take.slice(0, 5).filter((t) => typeof t?.kind === 'string' && /^[a-z0-9][a-z0-9:._-]{0,31}$/.test(t.kind))
+      .map((t) => ({ kind: t.kind, qty: Math.max(1, Math.min(20, Math.floor(+t.qty) || 1)) }));
+  }
   if (r.display && typeof r.display === 'object') {
     out.display = {
       label: r.display.label ? clip(r.display.label, 40) : null,

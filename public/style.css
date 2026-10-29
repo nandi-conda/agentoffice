@@ -375,3 +375,21 @@ input, select, textarea { font: inherit; color: inherit; }
 .gal-form .gal-glow { padding: 3px; cursor: pointer; }
 .gal-err { color: #b91c1c; margin: 0; }
 .obj-by { margin-top: 10px; }
+/* ---- inventory ---- */
+.tb.inv-btn { position: relative; font-size: 17px; }
+.inv-count { position: absolute; top: 1px; right: 1px; min-width: 15px; height: 15px; border-radius: 999px; background: var(--accent); color: #fff; font: 700 9.5px/15px Inter, system-ui; padding: 0 3px; }
+.inv-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
+.inv-row { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.inv-emoji { font-size: 24px; text-align: center; }
+.inv-name { display: flex; flex-direction: column; min-width: 0; }
+.inv-name small { font-size: 11px; }
+.inv-acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.inv-acts .btn { padding: 5px 10px; font-size: 12.5px; }
+.inv-to { grid-column: 2 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
+.inv-to::before { content: 'Give to:'; font-size: 12px; color: var(--muted); align-self: center; }
+.chat-log .m.act { font-style: italic; }
+@media (max-width: 600px) {
+  .inv-row { grid-template-columns: 30px 1fr; }
+  .inv-acts { grid-column: 1 / -1; justify-content: stretch; }
+  .inv-acts .btn { flex: 1; padding: 9px 8px; font-size: 14px; }
+}

@@ -44,6 +44,31 @@ The public office summary (/api/office).
 
 Returns `{ online, desks, counters }`
 
+## `inventoryOf(peer)`
+
+`read-only` · `internal (entity to entity)`
+
+What someone in the office carries (their actor's inventory, or a guest's for this visit). Plugin objects pass it to their plugin.
+
+| Param | Type | |
+| --- | --- | --- |
+| `peer` | `string ≤ 200` | Peer id |
+
+Returns `{ id, kind, name, emoji, qty, verb?, consume?, emote?, data?, from?, at? }[]`
+
+## `invApply(peer, change)`
+
+`mutates` · `internal (entity to entity)`
+
+Take and give items for someone in the office, all or nothing, and tell them. Plugin objects call it with what their plugin gives and takes.
+
+| Param | Type | |
+| --- | --- | --- |
+| `peer` | `string ≤ 200` | Peer id |
+| `change` | `object` | { take?, give?, from? } as actor.invApply |
+
+Returns `object`
+
 ## Events
 
 - publishes `zone:<id>`: { type: "enter" | "exit", who } when someone walks in or out of a zone

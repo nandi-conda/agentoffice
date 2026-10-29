@@ -6,7 +6,10 @@
 //
 // Every handler gets one request and returns one result (see docs/plugins.md):
 //   interact({ object, actor, action, input, state, nearby, now }, env)
-//     → { state, say, ui, display, toast }
+//     → { state, say, ui, display, toast, give, take }
+// `inventory` in the request is what the person carries; `give` hands them
+// items ([{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]) and
+// `take` uses theirs up ([{ kind, qty? }]), together, all or nothing.
 // Handlers must not keep anything in module scope: all memory goes in `state`,
 // which the office stores in the object's own Durable Object.
 
@@ -85,7 +88,7 @@ const RESTOCK_MS = 30 * 60000;
 export async function vending({ actor, action, state, now }) {
   const st = { stock: Object.fromEntries(SNACKS.map((s) => [s.id, STOCK])), sold: 0, restockAt: 0, ...state };
   if (st.restockAt && now >= st.restockAt) { for (const s of SNACKS) st.stock[s.id] = STOCK; st.restockAt = 0; }
-  let say = null, toast = null;
+  let say = null, toast = null, give;
   if (action.startsWith('buy:')) {
     const s = SNACKS.find((x) => x.id === action.slice(4));
     if (!s) return { state: st, toast: 'No such button.' };
@@ -95,6 +98,8 @@ export async function vending({ actor, action, state, now }) {
     else {
       st.stock[s.id]--; st.sold++;
       say = `${s.emoji} *clunk* ${firstName(actor)} got ${s.label.toLowerCase()}`;
+      // The snack goes in their pocket (the office knows how to eat it: see public/js/items.js).
+      give = [{ kind: s.id, name: s.label, emoji: s.emoji }];
       if (Object.values(st.stock).every((n) => n === 0)) st.restockAt = now + RESTOCK_MS;
     }
   }
@@ -103,6 +108,7 @@ export async function vending({ actor, action, state, now }) {
     state: st,
     say,
     toast,
+    give,
     display: { label: empty ? 'sold out' : null, glow: empty ? '#ef4444' : '#38bdf8' },
     ui: {
       title: '🥤 Vending machine',

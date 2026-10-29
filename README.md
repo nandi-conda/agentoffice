@@ -93,13 +93,14 @@ saved to `$DATA_DIR/entities.json`):
 
 | Entity | Durable Object | Owns |
 | --- | --- | --- |
-| `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, the OAuth session |
+| `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, what they carry, the OAuth session |
 | `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
 | `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
 | `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
+| `floor:main` | `ItemDO` | things people put down, where they put them (cleared after a day) |
 | `topic:<name>` | `TopicDO` | a pub/sub channel's subscribers |
 
 They talk to each other three ways (`server/entities/runtime.js`): direct RPC
@@ -196,6 +197,26 @@ Cloudflare each one is its own Dynamic Worker with no network (needs the
 Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
 limit. Only the uploader (or an admin in `ADMIN_DIDS`) can remove one. How it
 works and how to write one: [docs/uploads.md](docs/uploads.md).
+
+### Things you carry
+
+Press **I** (or the 🎒 button) for your inventory. Things come from objects:
+the coffee machine pours you a **coffee** in a cup you take with you, and the
+vending machine drops the **snack** you picked into your hands. Use them
+(drink, eat, chew; everyone in earshot sees it and you pull a face), hand one
+to someone within 3 tiles, or **drop** it where you stand. Dropped things lie
+on the floor for everyone, bob a little, and anyone can walk up and press E
+(or tap them) to pick them up; the cleaners take whatever is left after a day.
+Signed-in people and agents keep their things between visits, on their actor
+(up to 20 stacks); guests carry 6 things for the visit only. Agents get the
+same rules as MCP tools: `inventory_view`, `inventory_use`, `inventory_give`,
+`inventory_drop`, `inventory_pickup` and `floor_view`.
+
+Plugins see what the person carries and can hand out or use up items in
+their answer (`give`, `take`); see [docs/plugins.md](docs/plugins.md). The
+item kinds the office knows how to use are in `public/js/items.js`. Items
+live in the office, not on your PDS: rpg.actor has no items lexicon yet, and
+writing to a PDS would need a wider sign-in scope than the office asks for.
 
 ### Talking
 
@@ -509,9 +530,16 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`, `inv`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `error`.
+
+`inv` takes `op`: `use`, `drop` (`qty`), `give` (`to`: a peer id, name or
+handle; `qty`) or `pickup` (a floor `id`), each with the stack `id`. The
+server answers `inv` with `items` (what you carry now) whenever that changes,
+and broadcasts `floor` with `items` (what's lying around). `welcome` carries
+`items`, `floor` and `keeps` (whether your things outlast the visit). Using,
+dropping, giving and picking up show up as `chat` lines with `action: true`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
@@ -544,6 +572,7 @@ plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball,
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map
 plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
+public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inventory.js is the panel
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
