@@ -1587,7 +1587,7 @@ function openRoom(id) {
     modal.onclose = () => { modal.rooms = null; roomAsk.reset(); };
     const body = modal.body;
     body.querySelector('.quick')?.addEventListener('click', () => {
-      if (net.closed) { roomAsk.note = '⚠️ You're out of the office. Reload to come back and book.'; return render(); }
+      if (net.closed) { roomAsk.note = '⚠️ You\'re out of the office. Reload to come back and book.'; return render(); }
       roomAsk.start();
       net.send({ t: 'book', op: 'create', ref: 'new', room: id, start: now, end: now + quick, title: `${me.name}'s meeting` });
       render();
