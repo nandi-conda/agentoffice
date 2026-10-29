@@ -6,7 +6,7 @@ with four, all in one example plugin (`plugins/objects/`):
 
 | Object | Where | What it does |
 | --- | --- | --- |
-| 🎵 Jukebox | Lounge, by the door | Pick songs from a catalogue; they queue, play in turn, and the jukebox shows what's on. |
+| 🎵 Jukebox | Lounge, by the door | Pick songs from a catalogue; they queue and play in turn. Everyone in the Lounge hears the music in sync, fading as they walk away (N mutes it for you). |
 | 🥤 Vending machine | Kitchen, next to the counter | Free snacks with limited stock. Restocks itself 30 minutes after selling out. Sometimes a snack gets stuck. |
 | 🎱 Magic 8-ball | Lounge, by the bookshelf | Ask a yes-or-no question; everyone nearby hears the answer. |
 | 🤖 Help kiosk | Lobby | Answers questions about the office with Workers AI, or from a canned help desk without it. |
@@ -99,7 +99,8 @@ is clipped, so a plugin can't break the page.
 | `state` | Stored by the object's entity and passed back next call. Any JSON up to 32 KB; bigger state isn't saved. Leave it out to keep the old state. |
 | `say` | A speech bubble over the object, and a chat line for everyone in earshot (≤ 280 chars). |
 | `toast` | A small notification just for the person who used it (≤ 200 chars). |
-| `display` | `{ label, glow, until }`: a label floating over the object for everyone, a `#rrggbb` accent colour, and an optional epoch-ms expiry for the label. Sent to everyone and included when people join. |
+| `display` | `{ label, glow, until, music }`: a label floating over the object for everyone, a `#rrggbb` accent colour, an optional epoch-ms expiry for the label, and `music: { id, at }` to play tune `id` from `public/js/music.js` (started at epoch ms `at`) to people nearby. Sent to everyone and included when people join. |
+| `wakeAt` | Epoch ms: the office calls `interact()` again then with `action: 'tick'` and `actor.kind: 'system'` (no panel goes out; `say` and `display` do). The jukebox uses it to start the next song. |
 | `ui` | The panel the person sees (below). Leave it out to close nothing and change nothing. |
 
 The panel is data, never HTML:
@@ -193,3 +194,17 @@ or set `KIOSK_MODEL` under `[vars]` in `plugins/objects/wrangler.toml`.
 | `just plugins-deploy [name]` | Deploys all plugins, or one (`just plugins-deploy objects`). |
 | `just plugins-tail [name]` | Live logs from a plugin Worker (default `objects`). |
 | `just cf-dev-plugins` | Local dev with plugins running alongside. |
+
+## Music
+
+The jukebox's songs are made in the browser, not streamed: each tune in
+`public/js/music.js` (`TUNES`) is a tempo, key, scale, chord loop and a few
+voice choices, and the melody, bass and drums are generated from a seed, the
+same in every browser. Because the jukebox says when a song started
+(`display.music.at`), everyone near it hears the same bar. Volume fades over
+the area the jukebox stands in and a few steps past it; people in rooms don't
+hear it. Press **N** or the ♪ pill to mute it for yourself (remembered).
+
+To add a song, add a tune to `TUNES` and a track with the same `id` to
+`TRACKS` in `plugins/objects/src/objects.js`. A tune change ships with the
+office (`just deploy`); a catalogue change with the plugin.

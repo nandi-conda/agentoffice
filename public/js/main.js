@@ -1,4 +1,4 @@
-import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
+import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
 import { tracedFrame, drawTraced } from './trace.js';
@@ -8,6 +8,7 @@ import { createVoice } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
+import { createMusic } from './music.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -629,6 +630,7 @@ function openHelp() {
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
       <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
+      <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>V</kbd><span>Toggle traced-vector characters / original pixels</span>
@@ -1175,6 +1177,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'e' || key === ' ') { interact(nearestInteractable(me.x, me.y)); e.preventDefault(); }
   else if (key === 'Enter') { chatIn.focus(); e.preventDefault(); }
   else if (key === 'm') toggleMic();
+  else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
   else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
   else if (key === 'v') toggleVector();
@@ -1405,6 +1408,33 @@ let lastDraw = 0;
 const busy = () => me.moving || gesture || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
 const pomoHud = $('.pomo-hud');
 
+// ---- music from objects (the jukebox) ----------------------------------------------
+// The loudest object playing music within earshot, fading with distance;
+// music.js keeps everyone on the same beat.
+const music = createMusic();
+const musicHud = $('.music-hud');
+function toggleMusic() {
+  music.setMuted(!music.muted);
+  toast(music.muted ? '🔇 Music muted for you. Press N to bring it back.' : '🎵 Music on.');
+}
+musicHud.addEventListener('click', toggleMusic);
+function updateMusic() {
+  let want = null;
+  for (const f of FURNITURE) {
+    const m = f.plugin && objects[f.id]?.display;
+    if (!m?.music || (m.until && m.until <= serverNow())) continue;
+    const spot = { x: f.x + f.w / 2, y: f.y + f.h + 0.5 };
+    // It fills the area it stands in, and carries a little past it like a voice would.
+    const sameArea = zoneAt(me.x, me.y) === zoneAt(spot.x, spot.y);
+    if (!sameArea && !canHear(me, spot)) continue;
+    const volume = Math.max(0, Math.min(1, 1.2 - Math.hypot(me.x - spot.x, me.y - spot.y) / (sameArea ? 2.5 * HEAR_RADIUS : HEAR_RADIUS)));
+    if (volume > (want?.volume || 0)) want = { ...m.music, volume, label: m.label };
+  }
+  music.update(want, serverNow());
+  musicHud.hidden = !want;
+  if (want) musicHud.textContent = `${music.muted ? '🔇' : '🔊'} ${want.label || 'Music'}`;
+}
+
 function loop(t) {
   if (coarse && me && t - lastDraw < 30 && !busy()) { requestAnimationFrame(loop); return; }
   lastDraw = t;
@@ -1442,6 +1472,7 @@ function loop(t) {
       pomoHud.hidden = false;
       pomoHud.textContent = `${den.phase === 'focus' ? '🍅 Focus' : '🌿 Break'} ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
     } else pomoHud.hidden = true;
+    updateMusic();
     if (t - roomHudT > 500) { roomHudT = t; updateRoomHud(z); updateStage(); }
 
     R.draw({
@@ -1455,4 +1486,4 @@ function loop(t) {
 }
 
 // Debug/test hook.
-window.__office = { get me() { return me; }, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };
+window.__office = { get me() { return me; }, music, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };

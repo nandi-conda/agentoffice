@@ -49,11 +49,11 @@ export class PluginHost {
 
   // object: { id, plugin, name, zone }; actor: { id, did, handle, name, kind }.
   // Returns { result, state, via } where state is what the object should keep.
-  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [] }) {
+  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now() }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
-      action, input, state, nearby: nearby.slice(0, 20), now: this.now(),
+      action, input, state, nearby: nearby.slice(0, 20), now,
     };
     const binding = this.env[bindingName(object.plugin)];
     let raw, via;
@@ -103,14 +103,18 @@ function withTimeout(p, ms) {
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
   const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
-  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null };
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null };
   if (r.display && typeof r.display === 'object') {
     out.display = {
       label: r.display.label ? clip(r.display.label, 40) : null,
       glow: COLOR.test(r.display.glow || '') ? r.display.glow : null,
       until: Number.isFinite(r.display.until) ? r.display.until : null,
+      // Music the office plays near the object: tune `id` (public/js/music.js), started at `at` (epoch ms).
+      music: r.display.music && /^[\w-]{1,32}$/.test(r.display.music.id || '') && Number.isFinite(r.display.music.at) ? { id: r.display.music.id, at: r.display.music.at } : null,
     };
   }
+  // Ask to be called again (action 'tick') at this time, e.g. when a song ends.
+  out.wakeAt = Number.isFinite(r.wakeAt) ? r.wakeAt : null;
   const u = r.ui;
   if (u && typeof u === 'object') {
     out.ui = {

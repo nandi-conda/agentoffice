@@ -73,7 +73,7 @@ test('sanitize drops what the client can\'t safely show', () => {
   assert.equal(s.ui.buttons.length, 0);
   assert.equal(s.ui.input.maxLength, 500);
   assert.equal(s.ui.text, '<b>hi</b>'); // escaped by the client, never trusted as HTML
-  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null });
+  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null });
 });
 
 test('cleanRequest', () => {
@@ -211,4 +211,51 @@ test('kiosk skips a retired model, reads both answer shapes, and says why it is 
   assert.match(r.ui.text, /offline: no Workers AI binding/);
   r = await kiosk(req, { KIOSK_MODEL: '@cf/x/y', AI: { run: async (m) => ({ response: m }) } });
   assert.equal(r.say, '🤖 @cf/x/y');
+});
+
+// ---- jukebox music ----------------------------------------------------------------
+import { TUNES, bar } from '../public/js/music.js';
+
+test('every jukebox track has a tune, and a tune plays the same everywhere', () => {
+  for (const t of TRACKS) assert.ok(TUNES[t.id], t.id);
+  for (const id of Object.keys(TUNES)) {
+    assert.deepEqual(bar(TUNES[id], 5), bar(TUNES[id], 5));
+    assert.ok(bar(TUNES[id], 0).some((n) => n.voice === 'bass'));
+  }
+});
+
+test('jukebox: the display carries the music and asks to be woken when the song ends', async () => {
+  let r = await jukebox({ actor, action: 'play:rain', state: null, now: 1000 });
+  assert.deepEqual(r.display.music, { id: 'rain', at: 1000 });
+  assert.equal(r.wakeAt, 1000 + 3 * 60000);
+  r = await jukebox({ actor, action: 'play:coffee', state: r.state, now: 2000 });
+  r = await jukebox({ actor: { id: 'system', name: 'the office' }, action: 'tick', state: r.state, now: 1000 + 3 * 60000 });
+  assert.match(r.say, /Now playing “Second Espresso”/);
+  assert.equal(r.display.music.id, 'coffee');
+  r = await jukebox({ actor, action: 'tick', state: r.state, now: 1000 + 6 * 60000 });
+  assert.equal(r.display.music, undefined);
+  assert.equal(r.wakeAt, null);
+  assert.equal(sanitize({ display: { music: { id: '../x', at: 1 } } }).display.music, null);
+});
+
+test('the jukebox moves on by itself: the entity alarm calls the plugin with tick', async () => {
+  let clock = 1_000_000;
+  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock });
+  const o = new Office({}, { runtime: rt, now: () => clock });
+  await o.ready;
+  const a = await join(o, 'ada');
+  a.msg({ t: 'move', ...jukeboxSpot(), dir: 0, moving: false, teleport: true });
+  await settle();
+  a.msg({ t: 'use', id: 'jukebox', action: 'play:coffee' });
+  await settle();
+  clock += 500;
+  a.msg({ t: 'use', id: 'jukebox', action: 'play:rain' });
+  await settle();
+  assert.equal((await rt.ref('plugin:jukebox').inspect()).state.wakeAt, 1_000_000 + 2 * 60000);
+  clock += 2 * 60000;
+  await rt.host('plugin:jukebox').alarm();
+  await settle();
+  assert.match(a.said(), /Now playing “Rain on the Skylight”/);
+  assert.equal(a.sent.filter((m) => m.t === 'obj' && m.display?.music).at(-1).display.music.id, 'rain');
+  rt.stop();
 });

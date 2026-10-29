@@ -14,6 +14,8 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const firstName = (actor) => String(actor?.name || 'someone').split(/\s+/)[0];
 
 // ---- jukebox ----------------------------------------------------------------
+// Each track's `id` names a tune the browser synthesises (public/js/music.js),
+// so people near the jukebox hear it, in sync, quieter as they walk away.
 export const TRACKS = [
   { id: 'rain', title: 'Rain on the Skylight', artist: 'Lo-Fi Larks', mins: 3 },
   { id: 'standup', title: 'Standup at Nine', artist: 'The Async Five', mins: 4 },
@@ -30,11 +32,15 @@ export async function jukebox({ actor, action, state, now }) {
   const advance = () => {
     while (st.playing && now >= st.playing.endsAt) {
       const next = st.queue.shift();
-      st.playing = next ? { ...next, endsAt: st.playing.endsAt + next.mins * 60000 } : null;
+      const start = Math.max(st.playing.endsAt, now - 1000);
+      st.playing = next ? { ...next, endsAt: start + next.mins * 60000 } : null;
     }
   };
+  const before = st.playing?.endsAt;
   advance();
   let say = null;
+  // The office wakes the jukebox when a song ends ('tick'): announce the next one.
+  if (action === 'tick' && st.playing && st.playing.endsAt !== before) say = `♪ Now playing “${st.playing.title}” by ${st.playing.artist}, picked by ${st.playing.by}`;
   if (action.startsWith('play:')) {
     const t = TRACKS.find((x) => x.id === action.slice(5));
     if (!t) return { state: st, toast: 'That song isn\'t on this jukebox.' };
@@ -51,10 +57,13 @@ export async function jukebox({ actor, action, state, now }) {
   return {
     state: st,
     say,
-    display: st.playing ? { label: `♪ ${st.playing.title}`, glow: '#a78bfa', until: st.playing.endsAt } : { label: null },
+    display: st.playing
+      ? { label: `♪ ${st.playing.title}`, glow: '#a78bfa', until: st.playing.endsAt, music: { id: st.playing.id, at: st.playing.endsAt - st.playing.mins * 60000 } }
+      : { label: null },
+    wakeAt: st.playing ? st.playing.endsAt : null,
     ui: {
       title: '🎵 Jukebox',
-      text: st.playing ? `Now playing **${st.playing.title}** by ${st.playing.artist} (picked by ${st.playing.by}).` : 'Nothing playing. Pick a song.',
+      text: st.playing ? `Now playing **${st.playing.title}** by ${st.playing.artist} (picked by ${st.playing.by}).\nPress N (or the ♪ button) to mute it for yourself.` : 'Nothing playing. Pick a song.',
       items: TRACKS.map((t) => ({ label: t.title, detail: `${t.artist} · ${t.mins} min`, action: `play:${t.id}` })),
       list: st.queue.length ? { title: 'Up next', rows: st.queue.map((q) => `${q.title} (${q.by})`) } : null,
       buttons: st.playing ? [{ label: 'Skip', action: 'skip' }] : [],
