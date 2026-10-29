@@ -1057,7 +1057,7 @@ function openHelp() {
     <details style="margin-top:12px"><summary class="small">With a keyboard</summary>
     <div class="help-grid" style="margin-top:8px">` : ''}
       <kbd>WASD</kbd><span>Walk (or click anywhere on the floor)</span>
-      <kbd>E</kbd><span>Interact: claim a desk, desk computer, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball, help kiosk</span>
+      <kbd>E</kbd><span>Interact: claim a desk, desk computer, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball</span>
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
       <kbd>M</kbd><span>Proximity voice on / off</span>

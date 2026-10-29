@@ -11,7 +11,6 @@ people [upload](uploads.md). The office ships eight:
 | 🎵 Jukebox | Lounge, by the door | `plugins/wasm-jukebox` | Pick songs from a catalogue; they queue and play in turn. Everyone in the Lounge hears the music in sync, fading as they walk away (N mutes it for you). |
 | 🥤 Vending machine | Kitchen, next to the counter | `plugins/wasm-vending` | Free snacks with limited stock, into your inventory. Restocks itself 30 minutes after selling out. Sometimes a snack gets stuck. |
 | 🎱 Magic 8-ball | Lounge, by the bookshelf | `plugins/wasm-eightball` | Ask a yes-or-no question; everyone nearby hears the answer. |
-| 🤖 Help kiosk | Lobby | `plugins/wasm-kiosk` | Answers questions about the office with the office's language model (Workers AI), or from what it knows without one. |
 | 🏁 Office Rally | Lobby, by the sofa | `plugins/wasm-rally` | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. Watches zones. See [the rally](uploads.md#a-bigger-example-the-office-rally). |
 | ☕ Coffee machine | Kitchen | `plugins/wasm-coffee` | Pours you a coffee into your inventory and counts every cup. The office adds the mug in your hand and the coffee-chat nudge. |
 | 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
@@ -43,7 +42,7 @@ browser ──{t:'use', id, action, input}──▶ World (OfficeRoom DO, server
                                               ▼
                               sandbox: a Dynamic Worker (Cloudflare) or a worker thread (Node)
                               runs public/plugins/<name>.wasm: interact(req JSON) → answer JSON
-                                              │  { state, say, ui, display, toast, give, ask… }
+                                              │  { state, say, ui, display, toast, give, take… }
                                               ▼
               entity stores state ─▶ World: panel to you, `say` + `display` to everyone
 ```
@@ -110,8 +109,7 @@ is the JSON below.
 | `event` | `{ type: 'enter' \| 'exit', zone }` when the call is someone walking into or out of a zone you `watch` (then `action` is `enter:<zone>` or `exit:<zone>`), else `null`. |
 | `now` | The office's clock, epoch ms. |
 | `seed` | A random integer, new every call. WASM has no randomness of its own; the SDK turns it into `req.rng()`, `req.pick(&list)` and `req.chance(p)`. |
-| `reply` | `{ text, model }` or `{ error }`: the model's answer, on the second call of a turn that answered with `ask` (below). |
-| `permissions` | What the office lets this plugin do beyond the basics: `ask`, `take`, `unlock` ([permission levels](uploads.md#permission-levels)). |
+| `permissions` | What the office lets this plugin do beyond the basics: `take`, `unlock` ([permission levels](uploads.md#permission-levels)). |
 | `rooms` | `[{ id, name, booking: { title, name, until, yours } \| null }]`: the bookable rooms and what's on in each now. Only for plugins with `unlock`. |
 
 ### The answer
@@ -131,7 +129,6 @@ is clipped, so a plugin can't break the page.
 | `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. Needs the `take` permission (trusted); dropped otherwise. |
 | `unlock` | `{ room }` (an id from `rooms`): let the person who used it into that room while someone else's booking runs, as if the meeting had admitted them. The meeting is told. Needs the `unlock` permission (privileged: admins upload those); not on a `tick` or a zone event. |
 | `watch` | Zone ids (≤ 12, e.g. `['kitchen', 'lobby']`) to hear about: whenever someone walks into or out of one, the office calls you as them with `action: 'enter:<zone>'` or `'exit:<zone>'` and `event` set. Answer `[]` to stop; leave it out to keep watching what you watch. |
-| `ask` | `{ prompt, system?, maxTokens? }`: ask the office's language model (below). Needs the `ask` permission (trusted). |
 
 `give` and `take` happen together, all or nothing. If the person doesn't have
 what you take, or has no room for what you give, nothing happens: no speech
@@ -156,29 +153,6 @@ The panel is data, never HTML:
 Keep calls fast: the person is waiting, and after 5 seconds the office gives
 up. Nothing survives between calls but `state`.
 
-### Asking the office's model
-
-The sandbox has no network, so a plugin can't call an AI service itself. It
-asks the office instead: answer with `ask` (in Rust,
-`Response::new().ask(Ask::new(question).system(persona))`) and the office
-runs the model, then calls you again straight away with the same `action`
-and `input`, the `state` from your first answer, and `reply` set. Only that
-first answer's `state` is kept; everything else comes from the second. One
-ask per turn: an `ask` in the second answer is ignored.
-
-- On Cloudflare the model is **Workers AI** (the `AI` binding in
-  `wrangler.toml`). The office tries `AI_MODEL` (a `[vars]` entry, if set)
-  and then `AI_MODELS` in `server/plugins.js` in turn; Workers AI retires
-  models now and then, and the first that answers wins.
-- On Node there's a model when `CLOUDFLARE_ACCOUNT_ID` and
-  `CLOUDFLARE_AI_TOKEN` (an API token with Workers AI read access) are set:
-  the same models over Cloudflare's REST API.
-- Only plugins with the `ask` permission get an answer: office objects that
-  declare it (the kiosk), and uploads a moderator or admin put out. The rest
-  get `reply: { error }`, as does any object when the office has no model or
-  every model failed (after 20 seconds at most). The kiosk answers from what
-  it knows then, and shows the asker why underneath.
-
 ### Zone events
 
 A call from a `watch` is not someone pressing E: no panel opens (a `ui` in
@@ -201,28 +175,13 @@ state is kept per person (in their `workstation` entity) instead of per
 object, `nearby` is empty, and `say` is not broadcast: it's their own screen.
 Agents reach it with the `workstation_app` MCP tool.
 
-## Editing the kiosk
-
-The kiosk's personality and knowledge are at the top of
-`plugins/wasm-kiosk/src/lib.rs`: `PERSONA` is the system prompt and `HELP`
-is the list of facts it's given (and what it answers from without a model,
-matched by keyword). Edit them, `just plugin-build kiosk`, then
-`just deploy`. Which model answers is the office's choice (above).
-
-If it answers "I'm running in offline mode", the panel says why underneath
-(only the asker sees that line): no model, or every model failed.
-`just cf-tail` shows the full errors (`plugin:kiosk: model failed: …`).
-
 ## Local development
 
-- `just start`: the Node server. Objects run in worker threads; the kiosk
-  answers offline unless the `CLOUDFLARE_*` variables above are set.
+- `just start`: the Node server. Objects run in worker threads.
 - `just cf-dev`: the Worker in `wrangler dev`, objects in local Dynamic
-  Workers. Workers AI only runs remotely, so this leaves the `AI` binding out
-  and the kiosk answers offline.
-- `just cf-dev-ai`: the same with Workers AI (needs `just cf-login`).
+  Workers.
 - `just plugin-test`: every plugin's own tests, in Rust. `just test` covers
-  the office's side (`test/plugins.test.js`: the contract, `ask`, and each
+  the office's side (`test/plugins.test.js`: the contract and each
   shipped module running in the sandbox) and the rally in the office
   (`test/rally.test.js`).
 

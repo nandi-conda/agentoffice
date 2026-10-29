@@ -8,26 +8,19 @@
 // without HTML. Without a sandbox, or when the call fails, the object is out
 // of order.
 //
-// The sandbox has no network, so what a plugin needs from outside it asks the
-// office for in its answer. Today that's the language model: an answer with
-// `ask: { prompt, system?, maxTokens? }` makes the office run the model (the
-// `ai` service: Workers AI on Cloudflare) and call the plugin again straight
-// away with the same action and `reply: { text, model } | { error }`.
-//
-// Some answers need a permission (public/js/permissions.js): `ask` (trusted),
-// `take` (trusted) and `unlock` (privileged: into a room someone else booked).
-// The office's own objects have what their manifest declares; uploads what
-// was granted at upload, which the uploader's role decided. Without it, an
-// ask gets an error reply, a take is dropped and an unlock refused.
+// Some answers need a permission (public/js/permissions.js): `take` (trusted)
+// and `unlock` (privileged: into a room someone else booked). The office's
+// own objects have what their manifest declares; uploads what was granted at
+// upload, which the uploader's role decided. Without it, a take is dropped
+// and an unlock refused.
 
 import { log } from './logs.js';
 import { ZONES } from '../public/js/map.js';
 import { cleanItem } from '../public/js/items.js';
 import { roomById } from '../public/js/rooms.js';
-import { PERMISSIONS, cleanPermissions } from '../public/js/permissions.js';
+import { cleanPermissions } from '../public/js/permissions.js';
 
 export const TIMEOUT_MS = 5000;
-export const AI_TIMEOUT_MS = 20000;
 export const MAX_STATE = 32 * 1024;
 export const MAX_DATA = 16 * 1024;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
@@ -42,56 +35,13 @@ export function cleanRequest(m) {
   return { action, input };
 }
 
-// Workers AI models the office tries in turn (AI_MODEL in the env goes
-// first). Cloudflare retires models now and then (llama-3.1-8b-instruct went
-// on 2026-05-30), which is why there's a list: the first that answers wins.
-export const AI_MODELS = ['@cf/meta/llama-3.1-8b-instruct-fast', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'];
-
-// The `ai` service on Cloudflare: ({ system, prompt, maxTokens }) → { text, model }.
-export function workersAi(ai, { model = null } = {}) {
-  const models = model ? [model, ...AI_MODELS.filter((m) => m !== model)] : AI_MODELS;
-  // Workers AI models answer in one of two shapes.
-  const replyText = (out) => String(out?.response ?? out?.choices?.[0]?.message?.content ?? '').trim();
-  return async ({ system, prompt, maxTokens = 200 }) => {
-    const messages = [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }];
-    const errors = [];
-    for (const m of models) {
-      try {
-        const text = replyText(await ai.run(m, { messages, max_tokens: maxTokens }));
-        if (text) return { text, model: m };
-        errors.push(`${m}: empty answer`);
-      } catch (e) { errors.push(`${m}: ${e?.message || e}`); }
-    }
-    throw new Error(errors.join('; '));
-  };
-}
-
-// Workers AI over Cloudflare's REST API, for the Node server: the same
-// `run(model, input)` as the AI binding. Needs an account id and an API token
-// with Workers AI access (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_AI_TOKEN).
-export function restAi({ accountId, token, fetch: f = fetch }) {
-  return {
-    async run(model, input) {
-      const r = await f(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`, {
-        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(input),
-      });
-      const body = await r.json().catch(() => null);
-      if (!r.ok || !body?.success) throw new Error(body?.errors?.[0]?.message || `HTTP ${r.status}`);
-      return body.result;
-    },
-  };
-}
-
 export class PluginHost {
   // sandbox: runs WASM { langs, via, run(upload, req) }.
   // wasm: file → Promise<{ code, version }>, the office's own modules (bundledWasm).
-  // ai: ({ system, prompt, maxTokens }) → Promise<{ text, model }>, or null.
-  constructor({ sandbox = null, wasm = null, ai = null, timeoutMs = TIMEOUT_MS, aiTimeoutMs = AI_TIMEOUT_MS, now = () => Date.now() } = {}) {
+  constructor({ sandbox = null, wasm = null, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
     this.sandbox = sandbox;
     this.wasm = wasm;
-    this.ai = ai;
     this.timeoutMs = timeoutMs;
-    this.aiTimeoutMs = aiTimeoutMs;
     this.now = now;
     // Last problem per object, for logs and troubleshooting.
     this.problems = {};
@@ -111,22 +61,6 @@ export class PluginHost {
   async call(upload, req) {
     if (!this.sandbox?.langs.includes(upload.lang)) throw new Error(`this office can't run ${upload.lang} plugins`);
     return withTimeout(this.sandbox.run(upload, req), this.timeoutMs);
-  }
-
-  // The model's reply to a plugin's `ask`.
-  async reply(object, ask, permissions = []) {
-    if (!permissions.includes('ask')) return { error: `${object.name || 'this object'} doesn't have the ask permission (${PERMISSIONS.ask.level}: moderators can upload plugins that ask the model)` };
-    if (!this.ai) return { error: 'this office has no model' };
-    const q = { prompt: clip(ask.prompt, 2000), system: ask.system ? clip(ask.system, 4000) : null, maxTokens: Math.min(400, Math.max(1, Math.floor(+ask.maxTokens) || 200)) };
-    if (!q.prompt) return { error: 'empty question' };
-    try {
-      const r = await withTimeout(this.ai(q), this.aiTimeoutMs);
-      return { text: clip(r.text, 2000), model: r.model || null };
-    } catch (e) {
-      const error = clip(e?.message || e, 300);
-      log('error', `plugin:${object.id}`, `model failed: ${error}`);
-      return { error };
-    }
   }
 
   // object: { id, plugin, name, zone, wasm? , upload? }; actor: { id, did, handle, name, kind, role }.
@@ -156,13 +90,6 @@ export class PluginHost {
       req.permissions = permissions;
       if (permissions.includes('unlock') && rooms) req.rooms = await Promise.resolve(rooms()).catch(() => []);
       raw = await this.call(upload, req);
-      // It asked the model: keep that answer's state and call again with the reply.
-      if (raw?.ask && typeof raw.ask === 'object') {
-        const kept = 'state' in raw ? raw.state : state;
-        const reply = await this.reply(object, raw.ask, permissions);
-        const again = await this.call(upload, { ...req, state: kept, reply, seed: Math.floor(Math.random() * 2 ** 53) });
-        raw = again && typeof again === 'object' && !('state' in again) ? { ...again, state: kept } : again;
-      }
       delete this.problems[object.id];
     } catch (e) {
       problem = clip(e?.message || e, 200);

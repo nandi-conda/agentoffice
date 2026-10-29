@@ -25,7 +25,7 @@ function instancesOf(kind) {
 // tables), plus the other bindings by name ([ai], [[worker_loaders]], [assets]).
 export function parseWrangler(text) {
   const out = { durableObjects: [], other: [] };
-  const OTHER = { '[ai]': 'Workers AI', '[[worker_loaders]]': 'Worker Loader', '[assets]': 'static assets' };
+  const OTHER = { '[[worker_loaders]]': 'Worker Loader', '[assets]': 'static assets' };
   let cur = null;
   for (const line of String(text).split('\n').map((l) => l.trim())) {
     if (line.startsWith('[')) {

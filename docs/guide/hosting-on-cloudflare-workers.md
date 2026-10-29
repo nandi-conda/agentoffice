@@ -22,7 +22,7 @@ saved to `$DATA_DIR/entities.json`):
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
 | `whiteboard:main`, `arcade:main` | `ItemDO` | strokes (one key each), high scores |
-| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, kiosk, rally, coffee machine, notice board, pomodoro): its WASM plugin's state, what it shows, its wake-up alarm |
+| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, rally, coffee machine, notice board, pomodoro): its WASM plugin's state, what it shows, its wake-up alarm |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
 | `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `floor:main` | `ItemDO` | things people put down, where they put them (cleared after a day) |

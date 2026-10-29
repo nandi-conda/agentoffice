@@ -62,7 +62,7 @@ export class Gallery extends Entity {
   static api = {
     view: { doc: 'Every uploaded object on the map.', returns: arr(ITEM, 'Uploaded objects') },
     upload: {
-      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like ask and take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
+      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
       who: true,
       mutates: true,
       params: {

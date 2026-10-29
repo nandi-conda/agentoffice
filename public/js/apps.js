@@ -6,6 +6,5 @@
 // it here; the built-in apps live in public/js/workstation.js.
 
 export const WS_APPS = [
-  { id: 'ask', name: 'Ask the office', icon: '💁', plugin: 'kiosk', wasm: 'kiosk.wasm' },
   { id: 'oracle', name: 'Magic 8-Ball', icon: '🎱', plugin: 'eightball', wasm: 'eightball.wasm' },
 ];

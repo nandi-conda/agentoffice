@@ -65,13 +65,8 @@ docs-serve: _deps
 demo: _deps
     PORT={{port}} node server/index.js & server=$!; trap "kill $server" EXIT; sleep 1; node scripts/agent.mjs --url ws://localhost:{{port}}/ws
 
-# Run the Cloudflare Worker locally (Durable Objects + assets + the plugin sandbox) on :8787. Without Workers AI (it's remote-only), so the kiosk answers offline; `just cf-dev-ai` keeps it
+# Run the Cloudflare Worker locally (Durable Objects + assets + the plugin sandbox) on :8787
 cf-dev: _deps
-    sed '/^\[ai\]/,/^binding/d' wrangler.toml > wrangler.dev.toml
-    node_modules/.bin/wrangler dev -c wrangler.dev.toml --port 8787 --ip 127.0.0.1
-
-# Like cf-dev, with the kiosk's Workers AI (needs `just cf-login` or CLOUDFLARE_API_TOKEN)
-cf-dev-ai: _deps
     node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1
 
 # Deploy to Cloudflare Workers (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)

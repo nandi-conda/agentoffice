@@ -1,4 +1,4 @@
-// Panels for plugin-run objects (jukebox, vending machine, 8-ball, kiosk…).
+// Panels for plugin-run objects (jukebox, vending machine, 8-ball…).
 // A plugin never sends HTML: it sends a small description (title, text,
 // items, buttons, a list, a text input) which is rendered here, escaped.
 // Every action goes back to the server as { t: 'use', id, action, input }.

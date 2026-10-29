@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PluginHost, sanitize, cleanRequest, workersAi } from '../server/plugins.js';
+import { PluginHost, sanitize, cleanRequest } from '../server/plugins.js';
 import { checkUpload } from '../server/sandbox.js';
 import { PLUGIN_OBJECTS } from '../public/js/map.js';
 import { WS_APPS } from '../public/js/apps.js';
@@ -11,7 +11,7 @@ const juke = { id: 'jukebox', plugin: 'jukebox', name: 'Jukebox', zone: 'lounge'
 const obj = (id) => { const f = PLUGIN_OBJECTS.find((x) => x.id === id); return { id: f.id, plugin: f.plugin, name: f.name, zone: 'lounge', wasm: f.wasm }; };
 
 test('every plugin object on the map and every workstation app is a WASM module that passes the upload checks', async () => {
-  assert.ok(PLUGIN_OBJECTS.length >= 5);
+  assert.ok(PLUGIN_OBJECTS.length >= 7);
   for (const f of [...PLUGIN_OBJECTS, ...WS_APPS]) {
     assert.match(f.wasm || '', /^[\w-]+\.wasm$/, `${f.id} names its module`);
     const info = checkUpload('wasm', new Uint8Array(await wasmFile(f.wasm)));
@@ -50,46 +50,15 @@ test('oversized state is not saved', async () => {
   assert.deepEqual(r.state, { keep: true });
 });
 
-test('ask: the office runs the model and calls back with the reply, keeping the first state', async () => {
-  const calls = [], asked = [];
-  const fn = (req) => {
-    calls.push(req);
-    if (!req.reply) return { state: { q: 1 }, ask: { prompt: 'where?', system: 'be brief', maxTokens: 9999 }, say: 'ignored' };
-    return { say: req.reply.text || `offline: ${req.reply.error}` };
-  };
-  const ai = async (q) => { asked.push(q); return { text: 'kitchen', model: 'm1' }; };
-  const r = await fakePlugins(fn, { ai }).interact({ object: juke, actor, action: 'ask', input: 'where?' });
-  assert.equal(r.result.say, 'kitchen');
-  assert.deepEqual(r.state, { q: 1 }, 'the second answer left state out: the first one\'s is kept');
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].action, 'ask');
-  assert.equal(calls[1].input, 'where?');
-  assert.deepEqual(calls[1].state, { q: 1 });
-  assert.deepEqual(calls[1].reply, { text: 'kitchen', model: 'm1' });
-  assert.deepEqual(asked, [{ prompt: 'where?', system: 'be brief', maxTokens: 400 }]);
-
-  // No model, a failing one, or an upload asking: an error reply, not a crash.
-  assert.equal((await fakePlugins(fn).interact({ object: juke, actor })).result.say, 'offline: this office has no model');
-  const broken = fakePlugins(fn, { ai: async () => { throw new Error('quota'); } });
-  assert.equal((await broken.interact({ object: juke, actor })).result.say, 'offline: quota');
-  const upload = { id: 'u-1', plugin: 'upload', name: 'Up', upload: { id: 'u-1', version: 'v', lang: 'wasm', code: '' } };
-  assert.match((await fakePlugins(fn, { ai }).interact({ object: upload, actor })).result.say, /Up doesn't have the ask permission/);
-  assert.equal(asked.length, 1, 'uploads without the ask permission never reach the model');
-  // Nor do the office's own objects that don't declare it.
-  assert.match((await fakePlugins(fn, { ai, permissions: [] }).interact({ object: juke, actor })).result.say, /doesn't have the ask permission/);
-  assert.equal(asked.length, 1);
-  // An upload granted it (a moderator uploaded it) gets the model.
-  assert.equal((await fakePlugins(fn, { ai }).interact({ object: { ...upload, permissions: ['ask'] }, actor })).result.say, 'kitchen');
-  assert.equal(asked.length, 2);
-});
-
-test('workersAi tries the models in turn and reads both answer shapes', async () => {
-  const tried = [];
-  const ai = { run: async (m, input) => { tried.push(m); if (tried.length === 1) throw new Error('retired'); return { choices: [{ message: { content: ` hi (${input.messages.length}) ` } }] }; } };
-  const r = await workersAi(ai, { model: '@cf/x/first' })({ system: 's', prompt: 'p' });
-  assert.deepEqual(r, { text: 'hi (2)', model: tried[1] });
-  assert.equal(tried[0], '@cf/x/first');
-  await assert.rejects(workersAi({ run: async () => ({ response: '' }) })({ prompt: 'p' }), /empty answer/);
+test('an old answer that asks the model is just its other fields: no second call', async () => {
+  const calls = [];
+  const fn = (req) => { calls.push(req); return { state: { q: 1 }, ask: { prompt: 'where?' }, say: 'hi' }; };
+  const upload = { id: 'u-1', plugin: 'upload', name: 'Up', permissions: ['ask'], upload: { id: 'u-1', version: 'v', lang: 'wasm', code: '' } };
+  const r = await fakePlugins(fn).interact({ object: upload, actor, action: 'ask', input: 'where?' });
+  assert.equal(r.result.say, 'hi');
+  assert.deepEqual(r.state, { q: 1 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].permissions, [], 'a saved upload granted ask has nothing left of it');
 });
 
 test('display.data: plain JSON for every browser, 16 KB at most; the actor comes with their role', async () => {
@@ -125,8 +94,8 @@ test('cleanRequest', () => {
 
 // ---- the real modules (their game rules are tested in Rust: just plugin-test) ----
 
-test('the WASM objects answer in the sandbox: jukebox, vending, 8-ball, kiosk', async () => {
-  const host = wasmPlugins({ ai: async ({ system, prompt }) => ({ text: `Kitchen! (${/help kiosk/.test(system)}, ${prompt})`, model: 'fake' }) });
+test('the WASM objects answer in the sandbox: jukebox, vending, 8-ball', async () => {
+  const host = wasmPlugins();
   let r = await host.interact({ object: obj('jukebox'), actor, action: 'play:rain' });
   assert.equal(r.via, 'worker-thread');
   assert.match(r.result.say, /Now playing “Rain on the Skylight”.*Ada/);
@@ -141,13 +110,6 @@ test('the WASM objects answer in the sandbox: jukebox, vending, 8-ball, kiosk', 
 
   r = await host.interact({ object: obj('eightball'), actor, action: 'ask', input: 'Ship it?' });
   assert.match(r.result.say, /^🎱 Ada asked “Ship it\?” … /);
-
-  r = await host.interact({ object: obj('kiosk'), actor, action: 'ask', input: 'coffee?' });
-  assert.equal(r.result.say, '🤖 Kitchen! (true, coffee?)');
-  assert.deepEqual(r.state, { questions: 1 });
-  r = await wasmPlugins().interact({ object: obj('kiosk'), actor, action: 'ask', input: 'where is the coffee?' });
-  assert.match(r.result.say, /coffee machine is in the Kitchen/);
-  assert.match(r.result.ui.text, /offline: this office has no model/);
 });
 
 // ---- in the office ------------------------------------------------------------------

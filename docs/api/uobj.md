@@ -51,7 +51,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
 | &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
-| &nbsp;&nbsp;&nbsp;`item.permissions` | `"ask" \| "take" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: ask (trusted), take (trusted), unlock (privileged) |
+| &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), unlock (privileged) |
 | &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |
 | &nbsp;&nbsp;&nbsp;`item.api` | `object` | The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest. |
 | `code` | `string ≤ 699052` | Base64 code |

@@ -43,14 +43,6 @@ class_name = "TopicDO"
 tag = "v2"
 new_sqlite_classes = ["ActorDO", "RoomDO", "ItemDO", "TopicDO"]
 
-# Interactive objects (server/plugins.js, docs/plugins.md) are WASM plugins
-# in public/plugins, run in the sandbox below. The sandbox has no network, so
-# when one asks a question (the help kiosk) the office answers with Workers
-# AI. Without this binding the kiosk answers from what it knows. To try
-# another model first, set AI_MODEL under [vars].
-[ai]
-binding = "AI"
-
 # The plugin sandbox (docs/uploads.md, server/sandbox.js): every interactive
 # object, the office's own and the ones people upload, runs in its own
 # Dynamic Worker, with no network. Needs the Workers Paid plan: on the Free

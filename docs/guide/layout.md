@@ -19,7 +19,7 @@ server/entities/        entity runtime + messaging (runtime.js) and the kinds (k
 server/plugins.js       plugin objects: runs their WASM in the sandbox, answer clean-up, the model for `ask`
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
-plugins/wasm-jukebox/, wasm-vending/, wasm-eightball/, wasm-kiosk/  the office's objects (Rust WASM); built copies in public/plugins/
+plugins/wasm-jukebox/, wasm-vending/, wasm-eightball/  the office's objects (Rust WASM); built copies in public/plugins/
 plugins/wasm-rally/     the Office Rally checkpoint race (Rust WASM; zone events, alarms, medals); built copy in public/plugins/
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map

@@ -1,5 +1,5 @@
-// Interactive objects on the map (jukebox, vending machine, 8-ball, kiosk,
-// the Office Rally, the coffee machine, notice board, pomodoro…): one entity per object, address `plugin:<object id>`.
+// Interactive objects on the map (jukebox, vending machine, 8-ball, the
+// Office Rally, the coffee machine, notice board, pomodoro…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
@@ -25,7 +25,7 @@ const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, 
 
 export class PluginObject extends Entity {
   static rpc = ['interact'];
-  static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.';
+  static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.';
   static api = {
     view: { doc: 'What everyone sees on the object and how its plugin was last reached.', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'the sandbox that ran it (dynamic-worker, worker-thread), offline, or null before first use' } }) },
     interact: {

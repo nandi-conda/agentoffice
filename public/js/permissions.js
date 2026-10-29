@@ -3,8 +3,8 @@
 // Manifest::permissions); each belongs to a level, and the level decides who
 // may upload it (a capability in public/js/roles.js). The office's own
 // objects (public/plugins) get whatever they declare. At run time the office
-// only honours what was declared and granted: an `ask` without the
-// permission gets an error reply, a `take` is dropped, an `unlock` refused.
+// only honours what was declared and granted: a `take` without the
+// permission is dropped, an `unlock` refused.
 // Shared by the server, the upload panel and the docs.
 
 import { CAPS, can } from './roles.js';
@@ -16,7 +16,6 @@ export const LEVELS = {
 };
 
 export const PERMISSIONS = {
-  ask: { level: 'trusted', label: 'Ask the model', doc: 'Ask the office\'s language model (Response::ask); every question costs the office.' },
   take: { level: 'trusted', label: 'Take things', doc: 'Use up things the person carries (Response::take), all or nothing with what it gives.' },
   unlock: { level: 'privileged', label: 'Open booked rooms', doc: 'Let whoever uses it into a meeting room someone else booked (Response::unlock), past the booking. The request carries `rooms`, each bookable room and what is on in it now.' },
 };

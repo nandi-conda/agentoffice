@@ -30,11 +30,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::{handle_json, Actor, Ask, Booking, Display, Item, Object, Permission, Person, Plugin, Response, Room};
-
-/// Stands in for the office's language model: the question in, the answer
-/// (or why there's none) out.
-pub type Model = Box<dyn FnMut(&Ask) -> Result<String, String>>;
+use crate::{handle_json, Actor, Booking, Display, Item, Object, Permission, Person, Plugin, Response, Room};
 
 /// The office's limits (server/plugins.js, server/sandbox.js, public/js/items.js).
 pub mod limits {
@@ -98,8 +94,6 @@ pub struct TestOffice<P> {
     manifest: Value,
     next_id: u32,
     seed: u64,
-    model: Option<Model>,
-    asked: Vec<Ask>,
     granted: Vec<String>,
     rooms: Vec<Room>,
     unlocked: Vec<(String, String)>,
@@ -130,8 +124,6 @@ impl<P: Plugin> TestOffice<P> {
             manifest: serde_json::from_str(&P::MANIFEST.to_json()).expect("the manifest is JSON"),
             next_id: 0,
             seed: 1,
-            model: None,
-            asked: Vec::new(),
             granted: P::MANIFEST.permissions.iter().map(|p| p.as_str().to_string()).collect(),
             rooms: [("booth1", "Booth 1"), ("booth2", "Booth 2"), ("booth3", "Booth 3"), ("board", "Boardroom"), ("huddle", "Huddle Room")]
                 .into_iter().map(|(id, name)| Room { id: id.into(), name: name.into(), booking: None }).collect(),
@@ -164,16 +156,6 @@ impl<P: Plugin> TestOffice<P> {
     /// The `seed` the next call gets (each call after that gets a new one).
     /// Calls are repeatable: the same seeds every run.
     pub fn seed(&mut self, seed: u64) -> &mut Self { self.seed = seed; self }
-
-    /// Answer [`Response::ask`] with this. Without one, asks get the reply an
-    /// office without a model gives: an `error`.
-    pub fn model(&mut self, model: impl FnMut(&Ask) -> Result<String, String> + 'static) -> &mut Self {
-        self.model = Some(Box::new(model));
-        self
-    }
-
-    /// Everything the plugin asked the model, oldest first.
-    pub fn asked(&self) -> &[Ask] { &self.asked }
 
     /// Start from this state instead of none.
     pub fn with_state(mut self, state: P) -> Self {
@@ -266,10 +248,8 @@ impl<P: Plugin> TestOffice<P> {
         self.run(who, action, input)
     }
 
-    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response { self.run_with(who, action, input, None) }
-
-    fn run_with(&mut self, who: Actor, action: &str, input: Option<&str>, reply: Option<Value>) -> Response {
-        if reply.is_none() { self.now += 1000.0; }
+    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response {
+        self.now += 1000.0;
         let seed = self.seed;
         self.seed = self.seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         let event = self.event_now.take();
@@ -288,7 +268,7 @@ impl<P: Plugin> TestOffice<P> {
         let req = json!({
             "object": self.object, "actor": who, "action": action, "input": input,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
-            "event": event, "seed": seed, "reply": reply, "permissions": self.granted, "rooms": rooms,
+            "event": event, "seed": seed, "permissions": self.granted, "rooms": rooms,
         });
         let out = handle_json::<P>(&serde_json::to_vec(&req).unwrap());
         self.logs.extend(take_logs());
@@ -296,21 +276,6 @@ impl<P: Plugin> TestOffice<P> {
         let raw: Value = serde_json::from_slice(&out).expect("the answer is JSON");
         let mut r: Response = serde_json::from_value(raw.clone()).expect("the answer fits Response");
 
-        // ask: like the office, keep this answer's state, ask the model, and
-        // call again with the reply (once: a second ask is ignored).
-        if let (Some(ask), None) = (r.ask.clone(), &reply) {
-            if let Some(state) = raw.get("state") { self.save_state(state); }
-            let answer = if !self.granted.iter().any(|g| g == "ask") {
-                self.warn("the answer asks the model without the ask permission: add Permission::Ask to MANIFEST (moderators upload those)".into());
-                Err(format!("{} doesn't have the ask permission", self.object.name))
-            } else {
-                self.asked.push(ask.clone());
-                match self.model.as_mut() { Some(m) => m(&ask), None => Err("this office has no model".into()) }
-            };
-            let reply = match answer { Ok(text) => json!({ "text": text, "model": "test" }), Err(error) => json!({ "error": error }) };
-            self.event_now = event;
-            return self.run_with(who, action, input, Some(reply));
-        }
         self.check(&r);
 
         // take without the permission: dropped, like the office.

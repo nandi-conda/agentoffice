@@ -54,8 +54,8 @@ mod response;
 pub mod testing;
 
 pub use manifest::{Action, Look, Manifest, Permission};
-pub use request::{Actor, Booking, Event, Item, Object, Person, Reply, Request, Rng, Room};
-pub use response::{Ask, Button, Display, Give, Input, List, Music, Response, Row, Take, Ui, Unlock};
+pub use request::{Actor, Booking, Event, Item, Object, Person, Request, Rng, Room};
+pub use response::{Button, Display, Give, Input, List, Music, Response, Row, Take, Ui, Unlock};
 #[doc(hidden)]
 pub use serde;
 #[doc(hidden)]
@@ -63,7 +63,7 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{export_plugin, log, stamp, Action, Actor, Ask, Booking, Display, Event, Give, Input, Item, Look, Manifest, Permission, Plugin, Reply, Request, Response, Rng, Room, Row, Ui};
+    pub use crate::{export_plugin, log, stamp, Action, Actor, Booking, Display, Event, Give, Input, Item, Look, Manifest, Permission, Plugin, Request, Response, Rng, Room, Row, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }

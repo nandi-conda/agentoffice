@@ -1,6 +1,5 @@
 // The office's WASM objects for tests: the bundled modules in public/plugins,
-// run in worker threads like the Node server runs them. `ai` stands in for
-// Workers AI.
+// run in worker threads like the Node server runs them.
 import { readFile } from 'node:fs/promises';
 import { PluginHost } from '../../server/plugins.js';
 import { NodeSandbox } from '../../server/sandbox-node.js';
@@ -8,8 +7,8 @@ import { bundledWasm } from '../../server/sandbox.js';
 
 export const wasmFile = (f) => readFile(new URL(`../../public/plugins/${f}`, import.meta.url));
 
-export function wasmPlugins({ ai = null, timeoutMs = 4000 } = {}) {
-  return new PluginHost({ sandbox: new NodeSandbox({ timeoutMs }), wasm: bundledWasm(wasmFile), ai, timeoutMs });
+export function wasmPlugins({ timeoutMs = 4000 } = {}) {
+  return new PluginHost({ sandbox: new NodeSandbox({ timeoutMs }), wasm: bundledWasm(wasmFile), timeoutMs });
 }
 
 // A sandbox that runs a JS function instead of WASM, to test the office's side.
@@ -24,8 +23,8 @@ export async function until(check, ms = 4000) {
   throw new Error('timed out');
 }
 
-// A host whose objects all run fn(req) (state, ask and all), no WASM involved.
-// `permissions`: what the office's objects declare (default ask and take).
-export function fakePlugins(fn, { permissions = ['ask', 'take'], ...opts } = {}) {
+// A host whose objects all run fn(req) (state and all), no WASM involved.
+// `permissions`: what the office's objects declare (default take).
+export function fakePlugins(fn, { permissions = ['take'], ...opts } = {}) {
   return new PluginHost({ sandbox: fakeSandbox(fn), wasm: async () => ({ code: '', version: 'fake', permissions }), ...opts });
 }

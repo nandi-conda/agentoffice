@@ -18,7 +18,7 @@ Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, 
 
 `mutates` · `caller filled in by the World` · MCP tool **`gallery_upload`**
 
-Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like ask and take: moderators; privileged ones like unlock: admins). At most 3 per person.
+Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like take: moderators; privileged ones like unlock: admins). At most 3 per person.
 
 | Param | Type | |
 | --- | --- | --- |

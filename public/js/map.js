@@ -122,7 +122,6 @@ add({ type: 'sofa', id: 'lobby-sofa', x: 2, y: 28, w: 3, h: 1, solid: true, faci
 add({ type: 'plant', id: 'p-lob1', x: 1, y: 20, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lob2', x: 11, y: 20, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lob3', x: 11, y: 29, w: 1, h: 1, solid: true });
-add({ type: 'kiosk', id: 'kiosk', x: 10, y: 22, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'kiosk', wasm: 'kiosk.wasm', name: 'Help kiosk', prompt: 'Ask the help kiosk' });
 // Office Rally: a checkpoint race that starts and ends here. A WASM plugin
 // (plugins/wasm-rally, built into public/plugins/rally.wasm) run in the sandbox.
 add({ type: 'rally', id: 'rally', x: 9, y: 27, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'rally', wasm: 'rally.wasm', name: 'Office Rally', prompt: 'Join the rally' });

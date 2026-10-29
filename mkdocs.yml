@@ -59,7 +59,6 @@ nav:
       - "wasm: Magic 8-ball": api/upload-magic-8-ball.md
       - "upload: Guestbook": api/upload-guestbook.md
       - "wasm: Jukebox": api/upload-jukebox.md
-      - "wasm: Help kiosk": api/upload-help-kiosk.md
       - "wasm: Notice board": api/upload-notice-board.md
       - "wasm: Pomodoro timer": api/upload-pomodoro-timer.md
       - "wasm: Office Rally": api/upload-office-rally.md

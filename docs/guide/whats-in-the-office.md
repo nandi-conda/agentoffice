@@ -2,7 +2,7 @@
 
 | Area | What it's for |
 | --- | --- |
-| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. A **help kiosk** that answers questions about the office, and the **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
+| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. The **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
 | **Open Office** | 26 desks. Walk up to one and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
@@ -13,15 +13,12 @@
 
 ## Interactive objects (plugins)
 
-The jukebox, vending machine, magic 8-ball, help kiosk and the **Office
-Rally** flag are WASM plugins: Rust crates in `plugins/wasm-*` built with the
+The jukebox, vending machine, magic 8-ball and the **Office Rally** flag are WASM plugins: Rust crates in `plugins/wasm-*` built with the
 agentoffice-plugin crate into `public/plugins/*.wasm`, and run in the same
 sandbox as uploaded objects (a Dynamic Worker on Cloudflare, a worker thread
 on Node). Each is an item entity that hands the module who used it, what they
 picked and the object's saved state, and gets back new state, a speech
-bubble, a label and a small panel. The sandbox has no network, so the kiosk
-asks the office for its answer (`ask`), and the office runs Workers AI. The
-rally asks the office to `watch` the route's zones (walking into one calls it
+bubble, a label and a small panel. The rally asks the office to `watch` the route's zones (walking into one calls it
 back), runs on the object's Durable Object alarms and hands out medals.
 Writing your own: [docs/plugins.md](../plugins.md).
 

@@ -7,7 +7,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
-import { PluginHost, workersAi } from '../server/plugins.js';
+import { PluginHost } from '../server/plugins.js';
 import { DynamicSandbox, bundledWasm } from '../server/sandbox.js';
 import { captureConsole, setLogSink, forwarder } from '../server/logs.js';
 import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
@@ -23,7 +23,7 @@ export class DORuntime {
     // office's own read from the static assets (public/plugins), uploads from
     // their entity. Both run in Dynamic Workers through the Worker Loader
     // binding (LOADER, Workers Paid); without one they're out of order and
-    // uploads are refused. Their `ask` goes to Workers AI (the AI binding).
+    // uploads are refused.
     this.services = {
       loadActor: env.OFFLINE ? null : loadActor,
       plugins: new PluginHost({
@@ -33,7 +33,6 @@ export class DORuntime {
           if (!r.ok) throw new Error(`${r.status}`);
           return r.arrayBuffer();
         }) : null,
-        ai: env.AI ? workersAi(env.AI, { model: env.AI_MODEL }) : null,
       }),
       // Owners and admins to start with (OWNER_DIDS, ADMIN_DIDS): public/js/roles.js.
       roles: bootstrapRoles(env),

@@ -1,10 +1,10 @@
 # plugin (PluginObject)
 
-An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.
+An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 8: `pomodoro`, `kiosk`, `rally`, `noticeboard`, `coffee`, `vending`, `jukebox`, `eightball`
+- 7: `pomodoro`, `rally`, `noticeboard`, `coffee`, `vending`, `jukebox`, `eightball`
 
 ## `view()`
 

@@ -36,16 +36,13 @@ impl Look {
 ///
 /// | permission | level | uploaded by |
 /// |---|---|---|
-/// | [`Ask`](Permission::Ask) | trusted | moderators and up |
 /// | [`Take`](Permission::Take) | trusted | moderators and up |
 /// | [`Unlock`](Permission::Unlock) | privileged | admins and owners |
 ///
-/// Without the permission the office ignores that part of your answer: an
-/// ask gets a reply with an `error`, a take is dropped, an unlock refused.
+/// Without the permission the office ignores that part of your answer: a
+/// take is dropped, an unlock refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Permission {
-    /// Ask the office's language model ([`Response::ask`](crate::Response::ask)).
-    Ask,
     /// Use up things the person carries ([`Response::take`](crate::Response::take)).
     Take,
     /// Let whoever uses it into a meeting room someone else booked
@@ -57,7 +54,6 @@ pub enum Permission {
 impl Permission {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Permission::Ask => "ask",
             Permission::Take => "take",
             Permission::Unlock => "unlock",
         }
@@ -65,7 +61,7 @@ impl Permission {
     /// `basic` never appears: it's what a plugin with no permissions is.
     pub const fn level(self) -> &'static str {
         match self {
-            Permission::Ask | Permission::Take => "trusted",
+            Permission::Take => "trusted",
             Permission::Unlock => "privileged",
         }
     }

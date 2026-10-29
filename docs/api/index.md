@@ -13,7 +13,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
 | [whiteboard (Whiteboard)](whiteboard.md) | The Boardroom whiteboard. |
 | [arcade (Arcade)](arcade.md) | The Byte Snake arcade cabinet and its top 20. |
-| [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). |
+| [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
@@ -26,7 +26,6 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wasm: Magic 8-ball](upload-magic-8-ball.md) | Ask a yes-or-no question and shake it. |
 | [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
 | [wasm: Jukebox](upload-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another for everyone nearby, and the jukebox shows what's on. |
-| [wasm: Help kiosk](upload-help-kiosk.md) | Ask where things are or how the office works. |
 | [wasm: Notice board](upload-notice-board.md) | Sticky notes for the office, newest first (40 at most). |
 | [wasm: Pomodoro timer](upload-pomodoro-timer.md) | A shared focus timer for everyone in the Deep Work Den: focus, break, focus… until someone stops it. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
@@ -45,7 +44,6 @@ From `wrangler.toml`.
 | `ITEM` | Durable Object | `ItemDO` |
 | `TOPIC` | Durable Object | `TopicDO` |
 | `ASSETS` | static assets | |
-| `AI` | Workers AI | |
 | `LOADER` | Worker Loader | |
 
 ## Roles

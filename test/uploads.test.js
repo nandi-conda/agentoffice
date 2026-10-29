@@ -57,21 +57,21 @@ test('a module carries its manifest in a custom section (the agentoffice-plugin 
   assert.equal(m2.glow, '');
   assert.deepEqual(Object.keys(m2.api), ['ok']);
   assert.equal(cleanManifest('nope'), null);
-  assert.deepEqual(cleanManifest({ permissions: ['unlock', 'root', 'ask', 'ask'] }).permissions, ['ask', 'unlock']);
+  assert.deepEqual(cleanManifest({ permissions: ['unlock', 'root', 'ask', 'take', 'take'] }).permissions, ['take', 'unlock']);
   assert.deepEqual(checkUpload('wasm', GUESTBOOK).manifest.permissions, []);
 });
 
 test('permission levels: the highest permission decides who may upload', () => {
   assert.equal(levelOf([]), 'basic');
   assert.equal(levelOf(['take']), 'trusted');
-  assert.equal(levelOf(['ask', 'unlock']), 'privileged');
+  assert.equal(levelOf(['take', 'unlock']), 'privileged');
   assert.equal(uploadError('member', []), null);
-  assert.match(uploadError('member', ['ask']), /only moderators and up/);
-  assert.equal(uploadError('moderator', ['ask', 'take']), null);
+  assert.match(uploadError('member', ['take']), /only moderators and up/);
+  assert.equal(uploadError('moderator', ['take']), null);
   assert.match(uploadError('moderator', ['unlock'], 'Key'), /^Key asks for unlock \(privileged\): only admins and up/);
   assert.equal(uploadError('admin', ['unlock']), null);
-  assert.equal(uploadError('owner', ['unlock', 'ask']), null);
-  assert.match(uploadError('banned', ['ask']), /only/);
+  assert.equal(uploadError('owner', ['unlock', 'take']), null);
+  assert.match(uploadError('banned', ['take']), /only/);
 });
 
 test('runWasm speaks the JSON ABI (the guestbook example)', async () => {
@@ -231,11 +231,6 @@ test('permissions decide who may upload: the Skeleton Key is admins only, and op
   ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: key });
   await settle(20);
   assert.match(ada.last('galleryres').result.error, /asks for unlock \(privileged\): only admins and up/);
-  // The kiosk asks the model: trusted, moderators and up.
-  ada.msg({ t: 'gallery', op: 'upload', rid: 2, req: { lang: 'wasm', code: plugin('kiosk.wasm') } });
-  await settle(20);
-  assert.match(ada.last('galleryres').result.error, /asks for ask \(trusted\): only moderators and up/);
-
   const adm = await join(o, 'adm', 'did:plc:adm');
   adm.msg({ t: 'gallery', op: 'upload', rid: 3, req: key });
   await settle(50);
