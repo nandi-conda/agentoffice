@@ -1852,7 +1852,7 @@ setInterval(() => {
 // ---- loop -----------------------------------------------------------------------------
 const cam = { x: SPAWN.x, y: SPAWN.y };
 let last = performance.now(), miniT = 0;
-const promptEl = $('.prompt');
+const promptEl = $('.prompt'), promptText = promptEl.querySelector('span');
 // The interaction prompt doubles as a button, which is how touch screens press E.
 promptEl.querySelector('kbd').textContent = coarse ? 'Tap' : 'E';
 promptEl.addEventListener('click', () => { if (me && !modal.isOpen) interact(currentTarget()); });
@@ -1932,7 +1932,7 @@ function loop(t) {
     const target = modal.isOpen ? null : currentTarget();
     const label = target && promptFor(target);
     promptEl.hidden = !label;
-    if (label) promptEl.querySelector('span').textContent = label;
+    if (label && promptText.textContent !== label) promptText.textContent = label;
 
     if (z?.id === 'focus' && den && den.phase !== 'idle') {
       const left = Math.max(0, den.endsAt - serverNow());
@@ -1946,7 +1946,16 @@ function loop(t) {
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
       target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
+      promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null,
     });
+    // The prompt rides on the object it's about; without a spot it waits at the bottom of the map.
+    const at = label && R.promptAt;
+    promptEl.classList.toggle('anchored', !!at);
+    if (at) {
+      const c = canvas.getBoundingClientRect();
+      promptEl.style.transform = `translate(${Math.round(c.left + at.x)}px, ${Math.round(c.top + at.y)}px)`;
+      promptEl.style.setProperty('--tail', `${Math.round(at.tail)}px`);
+    } else promptEl.style.transform = '';
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
   requestAnimationFrame(loop);

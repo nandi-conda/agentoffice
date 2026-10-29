@@ -864,7 +864,9 @@ export function createRenderer(canvas) {
   // Lays out a row of pills. anchor: 'center' puts the row's bottom centre at
   // (x, y); 'left' puts its top-left there. Tries `nudges` steps upward on a
   // collision and returns the placed rect, or null when there was no room.
-  function placeRow(pills, x, y, { anchor = 'center', nudges = 2, force = false, alpha = 1, maxW = Infinity } = {}) {
+  // With `spots`, a function (w, h) -> candidate top-left corners, the row goes
+  // in the first spot that collides with neither a placed label nor `avoid`.
+  function placeRow(pills, x, y, { anchor = 'center', nudges = 2, force = false, alpha = 1, maxW = Infinity, spots = null, avoid = [] } = {}) {
     const h = Math.round(18 * lsc), gap = Math.round(4 * lsc);
     let ws = pills.map(pillWidth);
     // Too wide for its space: drop trailing pills, then clip the first one.
@@ -875,6 +877,12 @@ export function createRenderer(canvas) {
       ws = [Math.min(ws[0], maxW)];
     }
     const w = ws.reduce((a, b) => a + b + gap, -gap);
+    if (spots) {
+      const free = (r) => !hits(r) && !avoid.some((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
+      const spot = spots(w, h).map(([sx, sy]) => ({ x: Math.round(sx), y: Math.round(sy), w, h })).find(free);
+      if (!spot) return null;
+      [x, y] = [spot.x, spot.y]; anchor = 'left'; nudges = 0;
+    }
     let rx = Math.round(anchor === 'center' ? x - w / 2 : x), ry = Math.round(anchor === 'center' ? y - h : y);
     if (rx + w < 0 || rx > vw || ry + h < 0 || ry > vh) return null;
     let i = 0;
@@ -957,13 +965,13 @@ export function createRenderer(canvas) {
 
   // Each area's name in its top-left corner, with the booking state of a
   // bookable room and the freeq channel it's bridged to alongside.
-  function drawZoneLabel(z, st) {
+  function drawZoneLabel(z, st, obstacles) {
     if (z.id === 'booths' || z.label === false) return;
-    const a = toScreen(z.x0 + 0.15, z.y0 + 0.15), b = toScreen(z.x1 + 0.85, z.y1 + 0.6);
-    // Stick to the visible part of the area, so its name stays in view while you're in it.
-    const x = Math.max(a.x, 8), y = Math.max(a.y, 8);
-    if (x > b.x - 40 || y > b.y - 20) return;
-    const maxW = b.x - x;
+    const a = toScreen(z.x0 + 0.1, z.y0 + 0.1), b = toScreen(z.x1 + 0.9, z.y1 + 0.9);
+    // Only the visible part of the area counts, so its name stays in view while you're in it.
+    const x0 = Math.max(a.x, 8), y0 = Math.max(a.y, 8), x1 = Math.min(b.x, vw - 8), y1 = Math.min(b.y, vh - 8);
+    if (x1 - x0 < 40 || y1 - y0 < 20) return;
+    const maxW = x1 - x0;
     const pills = [];
     const room = z.bookable && ROOMS.find((r) => r.id === z.id);
     const small = z.x1 - z.x0 < 4;
@@ -980,7 +988,46 @@ export function createRenderer(canvas) {
     const fq = st.freeq?.[z.id];
     // The count is who's drawn here, so it always matches the avatars.
     if (fq) { const n = fq.here ?? fq.members; pills.push({ text: `${fq.channel}${n ? ` · ${n}` : ''}`, bg: PILL.freeq }); }
-    placeRow(pills, x, y, { anchor: 'left', nudges: 0, maxW, alpha: 0.92 });
+    // Free floor or wall only: scan the area from its top-left, row by row, for
+    // a spot clear of furniture, people and other labels. No room, no label.
+    const step = Math.max(12, view.T / 2);
+    const spots = (w, h) => {
+      const out = [];
+      for (let y = y0; y + h <= y1; y += step) for (let x = x0; x + w <= x1; x += step) out.push([x, y]);
+      return out;
+    };
+    placeRow(pills, x0, y0, { maxW, alpha: 0.92, spots, avoid: obstacles });
+  }
+
+  // Screen boxes of everything an area label must not cover.
+  function labelObstacles(st) {
+    const out = [];
+    for (const f of FURNITURE) {
+      if (f.type === 'rug') continue;
+      const hgt = HEIGHTS[f.type] ?? 0.4;
+      const p = toScreen(f.x - 0.05, f.y - hgt - 0.05), q = toScreen(f.x + f.w + 0.05, f.y + f.h + 0.05);
+      if (q.x < 0 || p.x > vw || q.y < 0 || p.y > vh) continue;
+      out.push({ x: p.x, y: p.y, w: q.x - p.x, h: q.y - p.y });
+    }
+    for (const p of st.peers) {
+      const t = toScreen(p.rx - 0.45, p.ry - 1.5), u = toScreen(p.rx + 0.45, p.ry + 0.25);
+      out.push({ x: t.x, y: t.y, w: u.x - t.x, h: u.y - t.y });
+    }
+    return out;
+  }
+
+  // The interaction prompt is a DOM button (so it stays tappable); the renderer
+  // only finds it a spot just above the target object and keeps labels off it.
+  let promptAt = null;
+  function placePrompt(st) {
+    promptAt = null;
+    const f = st.target, size = st.promptSize;
+    if (!f || !size?.w) return;
+    const top = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - (f.type === 'jukebox' ? 0.6 : 0.1));
+    const x = Math.max(6, Math.min(vw - size.w - 6, top.x - size.w / 2));
+    const y = Math.max(6, Math.min(vh - size.h - 6, top.y - size.h - 10));
+    placed.push({ x, y, w: size.w, h: size.h + 8 });
+    promptAt = { x, y, tail: Math.max(14, Math.min(size.w - 14, top.x - x)) };
   }
 
   function drawLabelLayer(st) {
@@ -988,6 +1035,7 @@ export function createRenderer(canvas) {
     // Labels shrink more slowly than the map, down to a legible floor.
     lsc = Math.max(0.7, Math.min(1.3, Math.sqrt(view.k / dpr)));
     far = view.k / dpr < 0.5;
+    placePrompt(st);
     const me = st.peers.find((p) => p.id === st.meId);
     const later = [];
     const byDist = (x, y) => (me ? Math.hypot(me.rx - x, me.ry - y) : 0);
@@ -997,7 +1045,8 @@ export function createRenderer(canvas) {
     const others = st.peers.filter((q) => q !== me).sort((a, b) => talking(a) - talking(b) || byDist(a.rx, a.ry) - byDist(b.rx, b.ry));
     for (const p of others) drawPeerLabel(p, st, me, later);
     for (const f of FURNITURE) drawObjectLabel(f, st, me, later);
-    for (const z of ZONES) drawZoneLabel(z, st);
+    const obstacles = labelObstacles(st);
+    for (const z of ZONES) drawZoneLabel(z, st, obstacles);
     for (const fn of later) fn();
   }
 
@@ -1113,6 +1162,8 @@ export function createRenderer(canvas) {
     if (st.target) {
       const f = st.target;
       const hgt = HEIGHTS[f.type] ?? 0.4;
+      ctx.fillStyle = `rgba(96,165,250,${0.12 + 0.06 * Math.sin(st.time / 250)})`;
+      roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.fill();
       ctx.strokeStyle = 'rgba(37,99,235,0.9)'; ctx.lineWidth = 2;
       ctx.setLineDash([5, 4]); ctx.lineDashOffset = -st.time / 60;
       roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.stroke();
@@ -1145,7 +1196,7 @@ export function createRenderer(canvas) {
     return best;
   }
 
-  return { resize, draw, fitZoom, get size() { return { w: vw, h: vh }; }, toWorld, toScreen, hitPeer, get dpr() { return dpr; } };
+  return { resize, draw, fitZoom, get promptAt() { return promptAt; }, get size() { return { w: vw, h: vh }; }, toWorld, toScreen, hitPeer, get dpr() { return dpr; } };
 }
 
 export const EMOJI = {
