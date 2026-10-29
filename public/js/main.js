@@ -2290,8 +2290,12 @@ canvas.addEventListener('pointerleave', () => { if (placing) placing.hover = nul
 // ambient touches (plants swaying, blinking) tick at ~8 fps, and at ~4 fps
 // (30 fps while moving) when the window isn't focused.
 let lastDraw = 0;
+// Someone else counts as moving only while their moves keep arriving: a
+// "moving" flag left over from someone who dropped mid-step would otherwise
+// keep the office at full frame rate forever.
+const stirring = (p) => p !== me && (Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01 || (p.moving && performance.now() - (p.track?.at(-1)?.t || 0) < 600));
 const busy = () => me.moving || gesture || stick || Math.abs(me.x + camOff.x - cam.x) + Math.abs(me.y - 0.5 + camOff.y - cam.y) > 0.01
-  || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
+  || [...peers.values()].some(stirring);
 function frameGap() {
   if (!me) return 0;
   const focused = document.hasFocus();
