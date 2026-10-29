@@ -1,6 +1,6 @@
 # inventory (Office)
 
-What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.
+What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), throw them away, put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.
 
 - address `inventory:<name>`
 - Durable Object binding `OFFICE` (class `OfficeRoom`)
@@ -54,6 +54,19 @@ Hand something to a person within 3 tiles.
 | `qty` *(optional)* | `integer 1–20` | How many (default 1) |
 
 Returns `{ items, to }`
+
+## `destroy(who, id, qty?)`
+
+`mutates` · `caller filled in by the World` · MCP tool **`inventory_destroy`**
+
+Throw something away for good: it is gone, not put down anywhere, and nobody gets it back. Works anywhere.
+
+| Param | Type | |
+| --- | --- | --- |
+| `id` | `string ≤ 16` | Stack id |
+| `qty` *(optional)* | `integer 1–20` | How many (default all of the stack) |
+
+Returns `{ items }`
 
 ## `pickup(who, id)`
 

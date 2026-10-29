@@ -51,12 +51,13 @@ export const WORLD = {
 // tools (inventory_view, inventory_use…) come from it. Signed-in people and
 // agents keep theirs on their actor; a guest's lasts as long as the visit.
 export const INVENTORY = {
-  doc: 'What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.',
+  doc: 'What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), throw them away, put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.',
   api: {
     view: { doc: 'What you carry.', who: true, returns: arr(ITEM, 'Item stacks') },
     use: { doc: 'Use one of your things: eat it, drink it, or show it off. Everyone who can hear you sees it; things like snacks are used up.', who: true, mutates: true, params: { id: str('Stack id (from inventory_view)', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now'), did: str('What it looked like') }) },
     place: { doc: 'Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying there, not a booked room you\'re kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Anyone can pick it up; it is cleared away after a day.', who: true, mutates: true, params: { id: str('Stack id', 16), x: opt(numS('Tile x (any point in the tile)', 0, 48)), y: opt(numS('Tile y', 0, 32)), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: str('Floor id'), x: numS('Where it landed: tile centre x', 0, 48), y: numS('Tile centre y', 0, 32) }) },
     give: { doc: 'Hand something to a person within 3 tiles.', who: true, mutates: true, params: { id: str('Stack id', 16), to: str('Their peer id, name or handle', 253), qty: opt(int('How many (default 1)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), to: str('Who got it') }) },
+    destroy: { doc: 'Throw something away for good: it is gone, not put down anywhere, and nobody gets it back. Works anywhere.', who: true, mutates: true, params: { id: str('Stack id', 16), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
     pickup: { doc: 'Pick something up off the floor (floor_view lists it). You must be within 1.5 tiles of it: walk_to it first.', who: true, mutates: true, params: { id: str('Floor id', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
   },
 };
@@ -1088,14 +1089,15 @@ export class Office {
     if (method === 'place') return this.placeItem(p, a, b, c, d);
     if (method === 'give') return this.giveItem(p, a, b, c);
     if (method === 'pickup') return this.pickUp(p, a);
+    if (method === 'destroy') return this.destroyItem(p, a, b);
     throw new Error(`inventory has no method ${method}`);
   }
 
-  // { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup', id, x?, y?, to?, qty? }
+  // { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup' | 'destroy', id, x?, y?, to?, qty? }
   async inv(p, m) {
-    const op = ['use', 'place', 'give', 'pickup'].includes(m.op) ? m.op : null;
+    const op = ['use', 'place', 'give', 'pickup', 'destroy'].includes(m.op) ? m.op : null;
     if (!op) return;
-    const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'place' ? [m.id, m.x, m.y, m.qty] : [m.id]);
+    const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'place' ? [m.id, m.x, m.y, m.qty] : op === 'destroy' ? [m.id, m.qty] : [m.id]);
     if (r?.error) this.sendTo(p, { t: 'error', message: r.error });
   }
 
@@ -1137,6 +1139,17 @@ export class Office {
     const floor = await this.ref('floor:main').place({ item: { ...s, qty: n }, ...at, by: p.name });
     this.act(p, `puts down ${label({ ...s, qty: n })}`);
     return { items: r.items, floor, ...at };
+  }
+
+  // Gone for good: taken out of their hands and not put anywhere.
+  async destroyItem(p, id, qty) {
+    const s = (await this.inventory(p)).find((i) => i.id === id);
+    if (!s) return { error: 'you don\'t have that' };
+    const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || s.qty));
+    const r = await this.invApply(p, { take: [{ id, qty: n }] });
+    if (r.error) return r;
+    this.act(p, `throws away ${label({ ...s, qty: n })}`);
+    return { items: r.items };
   }
 
   async giveItem(p, id, to, qty = 1) {

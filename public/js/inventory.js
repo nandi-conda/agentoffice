@@ -1,7 +1,7 @@
 // The inventory panel: what you carry, what's lying on the floor near you,
 // and what you can do with each. A modal on desktop; on phones the modal is
 // a bottom sheet (style.css). Every action goes to the server as
-// { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup', id, x?, y?, to?, qty? }, and
+// { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup' | 'destroy', id, x?, y?, to?, qty? }, and
 // the server answers with { t: 'inv', items } (see server/office.js).
 
 import { PICKUP_RANGE, GIVE_RANGE, GUEST_SLOTS, MAX_SLOTS, label, useButton } from './items.js';
@@ -12,6 +12,7 @@ const NEAR_FLOOR = 6; // tiles: floor things worth listing
 // ctx: { send, me(), items(), floor(), peers(), keeps(), walkTo(x, y, then), place(stack) }
 export function openInventory(modal, ctx) {
   let giving = null; // stack id whose "give to…" row is open (or says nobody's near)
+  let trashing = null; // stack id whose "throw away?" confirm row is open
   // Who you could hand something to right now. Asked again on every click, so
   // someone who walked up after the panel opened counts.
   const nearby = () => {
@@ -37,7 +38,11 @@ export function openInventory(modal, ctx) {
             <button class="btn primary inv-use">${esc(useButton(s))}</button>
             <button class="btn inv-give${people.length ? '' : ' far'}" title="${people.length ? 'Hand it to someone next to you' : `Nobody within ${GIVE_RANGE} tiles`}">Give</button>
             <button class="btn ghost inv-place" title="Then click a spot near you">Place</button>
+            <button class="btn ghost inv-trash" title="Throw it away for good" aria-label="Throw away ${esc(s.name)}">🗑️</button>
           </span>
+          ${trashing === s.id ? `<span class="inv-to inv-confirm"><span class="muted small">Throw away ${s.qty > 1 ? 'how many' : 'for good'}? Nobody gets it back.</span>${s.qty > 1
+            ? `<button class="btn danger inv-trash-go" data-qty="1">1</button><button class="btn danger inv-trash-go" data-qty="${s.qty}">All ${s.qty}</button>`
+            : '<button class="btn danger inv-trash-go" data-qty="1">Throw away</button>'}<button class="btn ghost inv-trash-no">Keep</button></span>` : ''}
           ${giving === s.id ? `<span class="inv-to">${people.length
             ? `<span class="muted small">Give to</span>${people.map((p) => `<button class="btn ghost inv-to-btn" data-to="${esc(p.id)}">${esc(p.name)}</button>`).join('')}`
             : `<span class="muted small">Nobody's within ${GIVE_RANGE} tiles. Walk up to someone, then press Give again.</span>`}</span>` : ''}
@@ -56,9 +61,21 @@ export function openInventory(modal, ctx) {
     modal.body.querySelectorAll('.inv-place').forEach((b) => b.addEventListener('click', () => ctx.place(items.find((s) => s.id === row(b).dataset.id))));
     modal.body.querySelectorAll('.inv-give').forEach((b) => b.addEventListener('click', () => {
       const id = row(b).dataset.id, now = nearby();
+      trashing = null;
       if (now.length === 1) { giving = null; ctx.send({ t: 'inv', op: 'give', id, to: now[0].id }); return render(); }
       giving = giving === id ? null : id;
       render();
+    }));
+    modal.body.querySelectorAll('.inv-trash').forEach((b) => b.addEventListener('click', () => {
+      const id = row(b).dataset.id;
+      trashing = trashing === id ? null : id;
+      giving = null;
+      render();
+    }));
+    modal.body.querySelectorAll('.inv-trash-no').forEach((b) => b.addEventListener('click', () => { trashing = null; render(); }));
+    modal.body.querySelectorAll('.inv-trash-go').forEach((b) => b.addEventListener('click', () => {
+      ctx.send({ t: 'inv', op: 'destroy', id: row(b).dataset.id, qty: +b.dataset.qty });
+      trashing = null;
     }));
     modal.body.querySelectorAll('.inv-to-btn').forEach((b) => b.addEventListener('click', () => { ctx.send({ t: 'inv', op: 'give', id: row(b).dataset.id, to: b.dataset.to }); giving = null; }));
     modal.body.querySelectorAll('.inv-pick').forEach((b) => b.addEventListener('click', () => {

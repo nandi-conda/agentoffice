@@ -240,3 +240,19 @@ test('inventory over the generated API: view, use, place and pickup with proximi
   await assert.rejects(() => o.call(null, 'inventory:me', 'view'), /join the office/);
   assert.equal((await o.call(null, 'floor:main', 'view')).length, 1);
 });
+
+test('throwing things away: some of a stack or all of it, gone for good', async () => {
+  const o = new Office();
+  await o.ready;
+  const a = await join(o, 'Ada');
+  const p = o.peers.get(a.id);
+  await o.invApply(p, { give: [{ kind: 'gum', qty: 3 }] });
+  const [gum] = a.items();
+  a.ws.msg({ t: 'inv', op: 'destroy', id: gum.id, qty: 1 }); await settle();
+  assert.equal(a.items()[0].qty, 2);
+  assert.match(a.ws.last('chat').text, /throws away/);
+  const r = await o.call(p, 'inventory:me', 'destroy', [gum.id]);
+  assert.deepEqual(r.items, [], 'no qty throws away the whole stack');
+  assert.equal(o.floor.length, 0, 'nothing lands on the floor');
+  assert.match((await o.call(p, 'inventory:me', 'destroy', [gum.id])).error, /don't have that/);
+});

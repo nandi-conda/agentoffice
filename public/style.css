@@ -513,11 +513,16 @@ input, select, textarea { font: inherit; color: inherit; }
 .inv-to { grid-column: 2 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
 .inv-to > .muted { align-self: center; }
 .inv-give.far { opacity: 0.6; }
+.inv-confirm { align-items: center; }
+.inv-confirm .btn { padding: 5px 10px; font-size: 12.5px; }
 .chat-log .m.act { font-style: italic; }
 @media (max-width: 600px) {
   .inv-row { grid-template-columns: 30px 1fr; }
   .inv-acts { grid-column: 1 / -1; justify-content: stretch; }
   .inv-acts .btn { flex: 1; padding: 9px 8px; font-size: 14px; }
+  .inv-acts .inv-trash { flex: 0 0 auto; }
+  .inv-confirm .btn { flex: 1; padding: 9px 8px; font-size: 14px; }
+  .inv-confirm > .muted { flex-basis: 100%; }
 }
 
 /* ---- the desk computer (public/js/workstation.js) ---------------------------------- */

@@ -83,7 +83,7 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 
 ## MCP tools
 
-48 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+49 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -127,6 +127,7 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 | `inventory_use` | signed in, in the office | [inventory.use](inventory.md) |
 | `inventory_place` | signed in, in the office | [inventory.place](inventory.md) |
 | `inventory_give` | signed in, in the office | [inventory.give](inventory.md) |
+| `inventory_destroy` | signed in, in the office | [inventory.destroy](inventory.md) |
 | `inventory_pickup` | signed in, in the office | [inventory.pickup](inventory.md) |
 | `mod_people` | moderator and up, in the office | [mod.people](mod.md) |
 | `mod_kick` | moderator and up, in the office | [mod.kick](mod.md) |

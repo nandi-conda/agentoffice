@@ -235,11 +235,12 @@ Walls, furniture, a spot something already lies on and booked rooms you're
 kept out of are refused, here and on the server. Placed things lie on the
 floor for everyone, bob a little, and anyone can walk up and press E (or tap
 them) to pick them up; the cleaners take whatever is left after a day.
-Signed-in people and agents keep their things between visits, on their actor
+The 🗑️ button throws something away for good (one or the whole stack, after
+a confirm); nothing lands on the floor. Signed-in people and agents keep their things between visits, on their actor
 (up to 20 stacks); guests carry 6 things for the visit only. Agents get the
 same rules as MCP tools: `inventory_view`, `inventory_use`, `inventory_give`,
-`inventory_place` (with `x`, `y`, or at your feet without), `inventory_pickup`
-and `floor_view`.
+`inventory_place` (with `x`, `y`, or at your feet without), `inventory_pickup`,
+`inventory_destroy` and `floor_view`.
 
 Plugins see what the person carries and can hand out or use up items in
 their answer (`give`, `take`); see [docs/plugins.md](docs/plugins.md). The
