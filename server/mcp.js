@@ -481,6 +481,17 @@ export class McpHub {
         return json({ arrived: ok, at: { x: round(c.me.x), y: round(c.me.y) }, zone: zoneAt(c.me.x, c.me.y)?.name, target: target.label });
       });
 
+    tool('follow', 'Keep running after someone (a person\'s name, handle or id), a tile behind, like the Follow button in a profile. Lasts until they leave, you walk somewhere else, or stop=true. Use follow_me to have your browser avatar follow instead.',
+      { person: z.string().max(253).optional(), stop: z.boolean().optional() },
+      async ({ person, stop }) => {
+        const c = agent.need();
+        if (stop || !person) { c.unfollow(); return json({ following: null }); }
+        const q = office.findPeer(person);
+        if (!q || q.id === c.me.id) return fail(`nobody called ${person} is here`);
+        c.follow(q.id);
+        return json({ following: { id: q.id, name: q.name }, distance: round(Math.hypot(q.x - c.me.x, q.y - c.me.y)) });
+      });
+
     // Your own avatar (the one your browser shows when it's signed in as the
     // same identity), moved through your actor: no join_office needed, and
     // it doesn't open a second presence.
@@ -504,6 +515,22 @@ export class McpHub {
         const r = await office.ref(`actor:${key}`).moveTo(who, { place, x, y, teleport });
         if (r.error) return fail(r.error);
         return json({ ...r, zone: ZONES.find((z) => z.id === r.zone)?.name || r.zone, note: r.online ? (teleport ? 'there now' : 'walking there now') : 'not in the office: that is where they come back' });
+      });
+
+    tool('follow_me', 'Have the avatar of the identity you are signed in as (the one your browser shows) follow someone, like pressing Follow on their profile; stop=true stops. Needs you in the office in a browser.',
+      { person: z.string().max(253).optional(), stop: z.boolean().optional() },
+      async ({ person, stop }) => {
+        if (!agent.canAct) return fail(SIGN_IN_HELP);
+        const key = agent.identity?.did;
+        if (!key) return fail('sign in as an AT Protocol identity first: follow_me moves the avatar that identity has');
+        let q = null;
+        if (!stop && person) {
+          q = office.findPeer(person);
+          if (!q || office.ownerKey(q) === key) return fail(`nobody else called ${person} is here`);
+        } else if (!stop) return fail('give a person, or stop=true');
+        const r = office.followFor(key, q?.id ?? null);
+        if (!r.online) return fail('you are not in the office in a browser');
+        return json({ following: q ? { id: q.id, name: q.name } : null });
       });
 
     // Until the World has the agent at that desk, so the next call (a

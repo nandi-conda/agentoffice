@@ -378,3 +378,32 @@ test('move_me walks the browser avatar of the signed-in identity', async () => {
   await assert.rejects(call(c, 'move_me', { place: 'lobby', person: 'V' }), /moderator/);
   await c.close();
 });
+
+test('follow_me has your browser follow someone, follow has the agent run after them', async () => {
+  const { connect, office } = await setup();
+  const sent = [];
+  const ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)), on() {}, close() {} };
+  const p = office.open(ws, { did: 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa' });
+  await office.message(p, JSON.stringify({ t: 'hello', name: 'V' }));
+  const other = office.open({ readyState: 1, send() {}, on() {}, close() {} }, {});
+  await office.message(other, JSON.stringify({ t: 'hello', name: 'Sam' }));
+  const c = await connect({ authorization: 'Bearer rmcp_good', 'x-atproto-pds': 'https://roost.test' });
+  const r = await call(c, 'follow_me', { person: 'Sam' });
+  assert.equal(r.following.name, 'Sam');
+  assert.deepEqual(sent.filter((m) => m.t === 'follow').at(-1), { t: 'follow', id: other.id });
+  await assert.rejects(call(c, 'follow_me', { person: 'V' }), /nobody else/);
+  await call(c, 'follow_me', { stop: true });
+  assert.deepEqual(sent.filter((m) => m.t === 'follow').at(-1), { t: 'follow', id: null });
+
+  // An agent that joined runs after Sam when Sam walks off.
+  const bot = await connect(OP);
+  await call(bot, 'join_office', { name: 'Bot' });
+  assert.equal((await call(bot, 'follow', { person: 'Sam' })).following.name, 'Sam');
+  const sam = office.peers.get(other.id);
+  await office.message(other, JSON.stringify({ t: 'move', x: sam.x + 3, y: sam.y, dir: 2, moving: false }));
+  const me = () => office.summary().online.find((q) => q.name === 'Bot');
+  for (let i = 0; i < 100 && Math.hypot(sam.x - me().x, sam.y - me().y) > 1.7; i++) await tick(50);
+  assert.ok(Math.hypot(sam.x - me().x, sam.y - me().y) <= 1.7, 'the agent caught up');
+  assert.equal((await call(bot, 'follow', { stop: true })).following, null);
+  for (const x of [c, bot]) await x.close();
+});

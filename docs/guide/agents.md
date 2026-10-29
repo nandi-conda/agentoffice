@@ -147,7 +147,9 @@ they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
 furniture, seat, person or x/y, along the A* path, with progress
 notifications), `move_me` (walks the avatar your browser shows when it's
 signed in as the same identity, without joining a second time; moderators can
-move someone else), `take_desk`, `leave_office`, and the sign-in tools below.
+move someone else), `follow` (keep running a tile behind someone, like the
+Follow button) and `follow_me` (has the avatar your browser shows follow
+someone), `take_desk`, `leave_office`, and the sign-in tools below.
 Meeting rooms: `rooms` (status and schedule), `book_room` (ISO times,
 invitees) and `manage_booking` (cancel, extend, end, update, admit).
 

@@ -1386,6 +1386,14 @@ export class Office {
     return { online: here.length > 0, x: at.x, y: at.y, zone };
   }
 
+  // Make someone's browser follow another person (or stop, `id` null), the
+  // way their Follow button does. Their own tabs only.
+  followFor(key, id) {
+    const here = [...this.peers.values()].filter((q) => q.ready && q.kind !== 'freeq' && this.ownerKey(q) === key);
+    for (const q of here) this.sendTo(q, { t: 'follow', id });
+    return { online: here.length > 0 };
+  }
+
   // The admin panel: { t: 'mod', op, ref?, to?, reason?, minutes?, place?, id?, role? },
   // answered with { t: 'modres', ref, op, result }.
   async modOp(p, m) {

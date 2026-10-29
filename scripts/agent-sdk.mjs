@@ -80,7 +80,7 @@ export class AgentClient extends EventEmitter {
     // Channel rooms off the hallway reshape the map; paths need to know.
     if (m.t === 'welcome' || m.t === 'wing') { this.wing = (m.t === 'wing' ? m.rooms : m.wing) || []; applyWing(this.wing); }
     // A booked room turned us away (or showed us out): stop walking, stand where the server says.
-    if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y }); }
+    if (m.t === 'bounce' && this.me) { this.walkId++; this.following = null; Object.assign(this.me, { x: m.x, y: m.y }); }
     // Something in the office (a room, a plugin, a moderator) walks us somewhere.
     if (m.t === 'walk' && this.me) this.walkTo(m.x, m.y).catch(() => {});
     const wait = m.ref !== undefined && this.pending.get(m.ref);
@@ -100,7 +100,8 @@ export class AgentClient extends EventEmitter {
 
   // Run along the shared A* path at the browsers' auto-path speed. A newer walkTo
   // cancels an older one. `onStep(done, total)` reports progress.
-  async walkTo(x, y, onStep = null) {
+  async walkTo(x, y, onStep = null, { following = false } = {}) {
+    if (!following) this.following = null;
     const id = ++this.walkId;
     const path = findPath(this.me.x, this.me.y, x, y);
     if (!path) return false;
@@ -127,6 +128,25 @@ export class AgentClient extends EventEmitter {
     const p = this.peers.get(id);
     if (p) await this.walkTo(p.x, p.y);
   }
+
+  // Keep running after someone, a tile short of them, like the browser's
+  // Follow button. Stops when they leave, on unfollow(), or on any other walk.
+  follow(id) {
+    this.following = id;
+    const tick = async () => {
+      if (this.following !== id) return;
+      const t = this.peers.get(id);
+      if (!t || !this.me || this.ws?.readyState !== 1) { if (this.following === id) this.following = null; return; }
+      if (Math.hypot(t.x - this.me.x, t.y - this.me.y) > 1.6) {
+        const path = findPath(this.me.x, this.me.y, t.x, t.y);
+        if (path && path.length > 2) await this.walkTo(path.at(-2).x, path.at(-2).y, null, { following: true });
+      }
+      if (this.following === id) setTimeout(tick, 700);
+    };
+    tick();
+  }
+
+  unfollow() { this.following = null; }
 
   freeDesk(prefix = 'desk-') {
     const taken = new Set(Object.keys(this.desks));

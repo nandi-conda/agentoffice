@@ -496,6 +496,14 @@ function onMessage(m) {
       if (m.text) toast(esc(localize(m.text)));
       break;
     }
+    // Your MCP session (follow_me) has you follow someone, or stop.
+    case 'follow': {
+      const t = m.id && peers.get(m.id);
+      path = null; walkTarget = null; pendingUse = null;
+      follow = t && t !== me ? m.id : null;
+      if (follow) toast(`Following ${esc(t.name)}`, [['Stop', () => { follow = null; }]], 5000);
+      break;
+    }
     case 'toast': toast(esc(localize(m.text))); if (m.ws) { chime('break'); station.poke(); } break;
     case 'wsr': station.onReply(m); break;
     // How the freeq bridge is doing for you: a line in the chat log, and a toast when something failed.
