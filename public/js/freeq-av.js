@@ -38,6 +38,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
   let selfTile = null; // our own camera, in the stage, while it's on
   let screenPub = null; // a second one for our screen: `{broadcast}/screen`, as freeq's app does
   let screenOff = null; // unhooks the "Stop sharing" watch
+  let screenTile = null; // our own screen, in the stage, while we share it
   let cam = false, muted = false, deaf = false;
   const failed = new Set(); // rooms where joining failed: WebRTC there until we come back
   const watches = new Map(); // broadcast path -> { el, tile }
@@ -96,6 +97,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     screenPub.setAttribute('url', '');
     screenPub.remove();
     screenPub = null;
+    screenTile?.remove(); screenTile = null;
   }
 
   // Share our screen on its own broadcast, video only (muted before `source`
@@ -106,12 +108,18 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     await loadMoq();
     if (!joined) return false;
     const el = screenPub = document.createElement('moq-publish');
-    el.hidden = true;
     el.setAttribute('url', dialUrl());
     el.setAttribute('name', `${pathOf(joined.session, joined.nick, instance)}/screen`);
     pinH264(el);
     el.setAttribute('muted', ''); el.muted = true;
-    stage.append(el);
+    // Its <video> child is the element's own preview: our "Your screen" tile.
+    el.append(Object.assign(document.createElement('video'), { muted: true, autoplay: true, playsInline: true }));
+    const tile = screenTile = document.createElement('div');
+    tile.className = 'tile screen self fq';
+    tile.innerHTML = '<span class="tag">Your screen</span><button class="grow-btn" title="Enlarge">⤢</button>';
+    tile.querySelector('.grow-btn').onclick = () => tile.classList.toggle('big');
+    tile.prepend(el);
+    (selfTile || head) ? (selfTile || head).after(tile) : stage.prepend(tile);
     el.setAttribute('source', 'screen');
     // The capture shows up on el.video.source ({ video, audio } for screens);
     // its track ending is the browser's own "Stop sharing" button.
@@ -183,7 +191,10 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
       }
       if (r.screen) {
         const status = el.broadcast?.status;
-        const show = (st) => { tile.classList.toggle('waiting', st !== 'live'); onChange(); };
+        const show = (st) => {
+          if (st === 'live' && tile.classList.contains('waiting')) toast(`🖥️ ${esc(r.nick)} is sharing their screen on the call.`, [], 3000);
+          tile.classList.toggle('waiting', st !== 'live'); onChange();
+        };
         show(status?.peek?.());
         w.off = status?.subscribe?.(show) || null;
       }

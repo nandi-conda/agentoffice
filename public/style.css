@@ -356,6 +356,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tile.screen video, .tile.big video { object-fit: contain; }
 .tile.self video { transform: scaleX(-1); }
+.tile.screen.self video { transform: none; }
 .tile .tag { position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; }
 .tile .grow-btn { position: absolute; right: 6px; top: 6px; border: 0; background: rgba(0,0,0,0.55); color: #fff; border-radius: 6px; width: 26px; height: 26px; cursor: pointer; }
 .tile.cam.fq { width: 140px; }
