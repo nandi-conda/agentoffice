@@ -11,12 +11,21 @@ const NEAR_FLOOR = 6; // tiles: floor things worth listing
 
 // ctx: { send, me(), items(), floor(), peers(), keeps(), walkTo(x, y, then), place(stack) }
 export function openInventory(modal, ctx) {
-  let giving = null; // stack id whose "give to…" row is open
+  let giving = null; // stack id whose "give to…" row is open (or says nobody's near)
+  // Who you could hand something to right now. Asked again on every click, so
+  // someone who walked up after the panel opened counts.
+  const nearby = () => {
+    const me = ctx.me();
+    return ctx.peers().filter((p) => p.id !== me.id && p.kind !== 'freeq' && Math.hypot(p.x - me.x, p.y - me.y) <= GIVE_RANGE);
+  };
+  const who = () => nearby().map((p) => p.id).join();
+  let seen = '';
   const render = () => {
+    seen = who();
     const me = ctx.me(), items = ctx.items();
     const dist = (o) => Math.hypot(o.x - me.x, o.y - me.y);
     const near = ctx.floor().map((e) => ({ e, d: dist(e) })).filter((x) => x.d <= NEAR_FLOOR).sort((a, b) => a.d - b.d);
-    const people = ctx.peers().filter((p) => p.id !== me.id && p.kind !== 'freeq' && dist(p) <= GIVE_RANGE);
+    const people = nearby();
     const slots = ctx.keeps() ? MAX_SLOTS : GUEST_SLOTS;
     modal.body.innerHTML = `
       <h2>🎒 Your things <span class="muted small">${items.length}/${slots}</span></h2>
@@ -26,10 +35,12 @@ export function openInventory(modal, ctx) {
           <span class="inv-name"><b>${esc(s.name)}</b>${s.qty > 1 ? ` <span class="muted">×${s.qty}</span>` : ''}${s.from ? `<small class="muted">from the ${esc(s.from)}</small>` : ''}</span>
           <span class="inv-acts">
             <button class="btn primary inv-use">${esc(useButton(s))}</button>
-            <button class="btn inv-give" ${people.length ? '' : 'disabled title="Nobody within 3 tiles"'}>Give</button>
+            <button class="btn inv-give${people.length ? '' : ' far'}" title="${people.length ? 'Hand it to someone next to you' : `Nobody within ${GIVE_RANGE} tiles`}">Give</button>
             <button class="btn ghost inv-place" title="Then click a spot near you">Place</button>
           </span>
-          ${giving === s.id ? `<span class="inv-to">${people.map((p) => `<button class="btn ghost inv-to-btn" data-to="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</span>` : ''}
+          ${giving === s.id ? `<span class="inv-to">${people.length
+            ? `<span class="muted small">Give to</span>${people.map((p) => `<button class="btn ghost inv-to-btn" data-to="${esc(p.id)}">${esc(p.name)}</button>`).join('')}`
+            : `<span class="muted small">Nobody's within ${GIVE_RANGE} tiles. Walk up to someone, then press Give again.</span>`}</span>` : ''}
         </li>`).join('')}</ul>`
         : '<p class="muted small">Nothing yet. Grab a coffee in the Kitchen, get a snack from the vending machine, or pick up something someone left lying around.</p>'}
       ${near.length ? `<h3>On the floor nearby</h3><ul class="inv-list">${near.map(({ e, d }) => `
@@ -44,8 +55,8 @@ export function openInventory(modal, ctx) {
     // Placing picks a spot on the map (main.js placement mode).
     modal.body.querySelectorAll('.inv-place').forEach((b) => b.addEventListener('click', () => ctx.place(items.find((s) => s.id === row(b).dataset.id))));
     modal.body.querySelectorAll('.inv-give').forEach((b) => b.addEventListener('click', () => {
-      const id = row(b).dataset.id;
-      if (people.length === 1) return ctx.send({ t: 'inv', op: 'give', id, to: people[0].id });
+      const id = row(b).dataset.id, now = nearby();
+      if (now.length === 1) { giving = null; ctx.send({ t: 'inv', op: 'give', id, to: now[0].id }); return render(); }
       giving = giving === id ? null : id;
       render();
     }));
@@ -59,7 +70,8 @@ export function openInventory(modal, ctx) {
   };
   modal.open('', 'inv-modal');
   render();
-  return { refresh: render };
+  // Called every frame: redraw when someone walks into or out of reach.
+  return { refresh: render, tick() { if (who() !== seen) render(); } };
 }
 
 // The floor thing within reach of (x, y), nearest first.

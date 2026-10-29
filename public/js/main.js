@@ -1794,7 +1794,7 @@ registerApp({
   mount(body) {
     const inv = openInventory({ body, open() {}, close() {} }, invCtx);
     let seen = [items, floor];
-    return { tick() { if (seen[0] !== items || seen[1] !== floor) { seen = [items, floor]; inv.refresh(); } } };
+    return { tick() { if (seen[0] !== items || seen[1] !== floor) { seen = [items, floor]; inv.refresh(); } else inv.tick(); } };
   },
 });
 
@@ -2213,6 +2213,7 @@ function updateMusic() {
 function loop(t) {
   if (coarse && me && t - lastDraw < 30 && !busy()) { requestAnimationFrame(loop); return; }
   lastDraw = t;
+  modal.inv?.tick();
   // Walk in steps of at most 50 ms so a slow frame rate doesn't slow you down
   // (or tunnel you through walls); a stall over a quarter second is dropped.
   const dt = Math.min(0.25, (t - last) / 1000); last = t;
