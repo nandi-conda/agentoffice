@@ -1100,7 +1100,8 @@ export class Office {
   // { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup' | 'destroy', id, x?, y?, to?, qty? }
   async inv(p, m) {
     const op = ['use', 'place', 'give', 'pickup', 'destroy'].includes(m.op) ? m.op : null;
-    if (!op) return;
+    // Never silent: a browser newer than the server would otherwise click into nothing.
+    if (!op) return this.sendTo(p, { t: 'error', message: `this office can't ${clip(String(m.op ?? 'do that'), 20)} things yet (reload, or the server needs a deploy)` });
     const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'place' ? [m.id, m.x, m.y, m.qty] : op === 'destroy' ? [m.id, m.qty] : [m.id]);
     if (r?.error) this.sendTo(p, { t: 'error', message: r.error });
   }
