@@ -234,7 +234,7 @@ builds natively for `cargo test`.
 ### The manifest
 
 `Manifest::new(name)` with `.doc()`, `.prompt()`, `.emoji()`, `.glow()`,
-`.look(Look::Kiosk | Arcade | Jukebox | Vending | EightBall | Coffee | Flag | Item)`
+`.look(Look::Kiosk | Arcade | Jukebox | Vending | EightBall | Coffee | Flag | Whiteboard | … | Computer | Item)`
 or `.sprite(Sprite::new(&rows).colors(&[('b', "#7c2d12"), …]))` and
 `.actions(&[Action::new("id", "what it does").input("what to type")])` and
 `.permissions(&[Permission::Take | Feed | Notify | Unlock])` ([levels](#permission-levels)). It's
@@ -248,7 +248,14 @@ custom section.
 **Looks.** Every look is a real object, drawn with the same art as the
 office's own: `Kiosk` (a screen showing your emoji, the default), `Arcade`
 (a cabinet in your glow colour), `Jukebox`, `Vending`, `EightBall`,
-`Coffee`, `Flag` (the rally's chequered flag). Or draw your own:
+`Coffee`, `Flag` (the rally's chequered flag), `Whiteboard`, `NoticeBoard`,
+`Pomodoro`, `Bell`, `DoorPanel`, and `Computer`: a desk computer. Walking
+up to one and pressing E opens the workstation (the desks' window manager,
+notes, todos, shell…) running your plugin as its program, through the same
+methods `plugins/wasm-workstation` answers (`desktop`, `noteSave`, `run`, …
+as the action, params as `data`, answered with `Response::reply` or
+`fail`). Each person gets a state of their own on it, apart from the notes
+they keep at the desks. Or draw your own:
 `.sprite(Sprite::new(&rows).colors(&palette))` is pixel art up to 16 columns
 by 24 rows, one character per pixel, `.` see-through, every other character
 a colour from the palette (16 rows stand about as tall as a jukebox); the

@@ -8,6 +8,11 @@
 // actor, keeps the window layout, gathers what the shell prints about the
 // office, and runs the apps that are plugins of their own.
 //
+// The same workstation opens at a computer someone uploaded and put in a
+// room (look `computer`): it runs that upload's program instead, on a state
+// of its own for each person (`computers[<id>]`), so an upload never sees
+// the notes you keep at the desks.
+//
 // The address is never chosen by the caller: the World names it after
 // whoever is calling (`self` in the api), so nobody can read or create
 // someone else's. Guests get a throwaway one that lives with their
@@ -26,6 +31,8 @@ let offline = null;
 // The program, and the parts of the state that are its.
 const PROGRAM = { id: 'workstation', plugin: 'workstation', name: 'workstation', wasm: 'workstation.wasm' };
 const DATA = ['notes', 'todos', 'links', 'timer'];
+// Uploaded computers someone used, each with its own state; the oldest goes past this.
+export const MAX_COMPUTERS = 5;
 
 const NOTE = obj({ id: str('Note id'), title: str('Title', 80), text: str('Text', LIMITS.noteText), updated: int('ms since epoch', 0) });
 const TODO = obj({ id: str('Todo id'), text: str('What to do', 200), done: bool('Done'), at: int('Added, ms since epoch', 0) });
@@ -95,15 +102,45 @@ export class Workstation extends Entity {
   }
 
   async programTurn(who, method, args, alarm) {
-    const state = Object.fromEntries(DATA.filter((k) => this.state[k] != null).map((k) => [k, this.state[k]]));
-    const r = await this.plugins.program({ object: { ...PROGRAM, zone: who.zone || null }, actor: who, method, args, state, now: this.now() });
-    const was = this.state.timer?.endsAt ?? null;
-    if (r.state !== state) {
-      for (const k of DATA) { if (r.state?.[k] != null) this.state[k] = r.state[k]; else delete this.state[k]; }
+    const at = who.computer?.id || null;
+    const slot = at ? ((this.state.computers ||= {})[at] ||= {}) : this.state;
+    const state = Object.fromEntries(DATA.filter((k) => slot[k] != null).map((k) => [k, slot[k]]));
+    const object = at ? await this.computer(who.computer) : PROGRAM;
+    const r = await this.plugins.program({ object: { ...object, zone: who.zone || null }, actor: who, method, args, state, now: this.now() });
+    const was = this.wakeAt();
+    if (r.state !== state || at) {
+      for (const k of DATA) { if (r.state?.[k] != null) slot[k] = r.state[k]; else delete slot[k]; }
+      if (at) { slot.used = this.now(); this.trimComputers(); }
       await this.save();
     }
-    if (alarm || r.wakeAt !== was) await this.setAlarm(r.wakeAt);
+    const next = this.wakeAt();
+    if (alarm || next !== was) await this.setAlarm(next);
     return r;
+  }
+
+  // The program an uploaded computer runs, kept while its version holds.
+  async computer({ id, version }) {
+    this.programs ||= new Map();
+    let p = this.programs.get(id);
+    if (!p || p.upload.version !== version) {
+      const code = await this.ref(`uobj:${id}`).program();
+      if (!code) throw new Error('that computer isn\'t standing in a room any more');
+      p = { id, plugin: 'upload', name: code.name || 'computer', upload: { id: code.id, version: code.version, lang: code.lang, code: code.code } };
+      this.programs.set(id, p);
+    }
+    return p;
+  }
+
+  trimComputers() {
+    const list = Object.entries(this.state.computers || {}).sort((a, b) => (b[1].used || 0) - (a[1].used || 0));
+    for (const [id] of list.slice(MAX_COMPUTERS)) delete this.state.computers[id];
+  }
+
+  // When the next timer rings: the desks' or any computer's.
+  wakeAt() {
+    const all = [this.state.timer, ...Object.values(this.state.computers || {}).map((c) => c.timer)];
+    const ends = all.map((t) => t?.endsAt).filter(Number.isFinite);
+    return ends.length ? Math.min(...ends) : null;
   }
 
   async exec(who, method, args) {
@@ -133,10 +170,17 @@ export class Workstation extends Entity {
   // The timer is due: the program rings it, and the owner gets its toast,
   // now or when they're next in.
   async alarm() {
-    if (!this.state.timer) return;
-    const { toast } = await this.program(OFFICE, 'tick', null, { alarm: true });
-    if (!toast || this.state.guest) return;
-    await this.tell(`actor:${this.name}`, 'deliver', { t: 'toast', text: toast, ws: 'timer' });
+    const due = (t) => Number.isFinite(t?.endsAt) && t.endsAt <= this.now();
+    const where = [...(due(this.state.timer) ? [null] : []),
+      ...Object.entries(this.state.computers || {}).filter(([, c]) => due(c.timer)).map(([id]) => id)];
+    for (const id of where) {
+      const at = id ? { computer: { id, version: this.programs?.get(id)?.upload.version ?? null } } : {};
+      let toast = null;
+      try { ({ toast } = await this.program({ ...OFFICE, ...at }, 'tick', null, { alarm: true })); }
+      catch { if (id) delete this.state.computers[id]?.timer; } // that computer is gone: so is its timer
+      if (toast && !this.state.guest) await this.tell(`actor:${this.name}`, 'deliver', { t: 'toast', text: toast, ws: 'timer' });
+    }
+    await this.setAlarm(this.wakeAt());
   }
 
   async prefs(who, prefs) {

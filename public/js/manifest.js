@@ -17,7 +17,7 @@ const MAX_ACTIONS = 24;
 export const LOOKS = {
   kiosk: 'Screen kiosk with its emoji', arcade: 'Arcade cabinet', jukebox: 'Jukebox', vending: 'Vending machine',
   eightball: 'Crystal ball', coffee: 'Coffee machine', rally: 'Chequered flag', whiteboard: 'Whiteboard', board: 'Notice board',
-  pomodoro: 'Focus timer', reception: 'Desk bell', panel: 'Door panel', sprite: 'Its own drawing', item: 'An item in my inventory',
+  pomodoro: 'Focus timer', reception: 'Desk bell', panel: 'Door panel', computer: 'Desk computer', sprite: 'Its own drawing', item: 'An item in my inventory',
 };
 export const DEFAULT_LOOK = 'kiosk';
 export const CARRIED = 'item';
@@ -25,7 +25,22 @@ export const lookOf = (look) => (LOOKS[look] ? look : DEFAULT_LOOK);
 export const SPRITE_W = 16, SPRITE_H = 24;
 // Looks whose object opens one of the browser's own surfaces instead of a
 // plain panel (main.js interact), for the office's objects and uploads alike.
-export const SURFACES = { whiteboard: 'whiteboard', board: 'noticeboard', coffee: 'coffee' };
+export const SURFACES = { whiteboard: 'whiteboard', board: 'noticeboard', coffee: 'coffee', computer: 'computer' };
+
+// A placed upload that looks like a desk computer works like one: standing
+// next to it (as close as you'd be to an object you press E on) opens a
+// workstation that runs its program. The nearest one within reach, or null.
+export const COMPUTER = 'computer';
+export const COMPUTER_REACH = 1.6;
+export function computerAt(items, x, y) {
+  let best = null, bd = COMPUTER_REACH;
+  for (const it of items || []) {
+    if (it.look !== COMPUTER || it.carried || !Number.isFinite(it.x)) continue;
+    const d = Math.hypot(Math.max(it.x, Math.min(x, it.x + 1)) - x, Math.max(it.y, Math.min(y, it.y + 1)) - y);
+    if (d < bd) { bd = d; best = it; }
+  }
+  return best;
+}
 
 const clip = (s, n) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n) : '');
 

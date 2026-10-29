@@ -78,19 +78,19 @@ export class PluginHost {
     return withTimeout(this.sandbox.run(upload, req, opts), this.timeoutMs);
   }
 
-  // One of the office's own modules run as a program, not an object someone
-  // walks up to: the desk computer (server/entities/workstation.js) calls a
-  // method with its params as JSON `data` (not held to the 16 KB an action's
-  // data gets), and the module answers with `reply` or `error` (SDK:
-  // Request::data_as, Response::reply / fail). Only modules the office
-  // ships (object.wasm), never uploads, and nothing beyond the basics: an
-  // answer's give, take or unlock is ignored. They keep more than objects
-  // on the map (a workstation with its notes), up to MAX_PROGRAM_STATE.
+  // A module run as a program, not an object someone walks up to: the desk
+  // computer (server/entities/workstation.js) calls a method with its params
+  // as JSON `data` (not held to the 16 KB an action's data gets), and the
+  // module answers with `reply` or `error` (SDK: Request::data_as,
+  // Response::reply / fail). The office's own (object.wasm) at the desks, or
+  // an uploaded computer's (object.upload), which only ever sees the state
+  // it kept itself. Nothing beyond the basics: an answer's give, take or
+  // unlock is ignored. They keep more than objects on the map (a
+  // workstation with its notes), up to MAX_PROGRAM_STATE.
   // Returns { reply, state, wakeAt, toast, via }; throws the module's error,
   // or that it's out of order.
   async program({ object, actor, method, args = null, state = null, now = this.now() }) {
     const name = object.name || object.plugin;
-    if (!object.wasm || object.upload) throw new Error('only the office\'s own modules run as programs');
     const req = {
       object: { id: object.id, kind: object.plugin, name, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind, role: actor.role || null },

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
 import { DESKS, SPAWN } from '../public/js/map.js';
 import { describeApi, generatedTools } from '../server/apidoc.js';
-import { wasmPlugins } from './support/plugins.js';
+import { wasmPlugins, wasmFile, until } from './support/plugins.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -191,4 +191,48 @@ test('the program is WASM: saved workstations load, a big one fits, and without 
   await toDesk(bob);
   await assert.rejects(ws(bob, 'desktop'), /workstation is out of order/);
   off.runtime.stop();
+});
+
+test('an uploaded workstation stands as a computer you can use, with its own state per person', async () => {
+  let now = 1_000_000;
+  const o = new Office({}, { now: () => now, plugins: wasmPlugins() });
+  const ada = await join(o, 'ada', { did: 'did:plc:ada' });
+  await toDesk(ada);
+  await ws(ada, 'noteSave', { text: 'desk note' });
+  await walkAway(ada);
+
+  // Uploaded with no look of its own: the manifest makes it a computer.
+  const code = (await wasmFile('workstation.wasm')).toString('base64');
+  ada.ws.msg({ t: 'gallery', op: 'upload', rid: 1, req: { lang: 'wasm', code } });
+  const res = await until(() => ada.ws.last('galleryres'));
+  assert.equal(res.result.ok, true, JSON.stringify(res.result));
+  const pc = res.result.object;
+  assert.equal(pc.look, 'computer');
+
+  // Next to it counts as being at a desk: it runs that upload, on a state of
+  // its own, so the desk's notes stay out of it.
+  const d = await ws(ada, 'desktop');
+  assert.equal(d.notes.length, 0);
+  await ws(ada, 'noteSave', { text: 'computer note' });
+  await ws(ada, 'todoAdd', 'from the computer');
+  assert.match((await ws(ada, 'run', 'notes')).out, /computer note/);
+  const t = await ws(ada, 'timerStart', { minutes: 5, label: 'Short' });
+  assert.equal(t.endsAt, now + 5 * 60000);
+  const station = o.runtime.host('workstation:did:plc:ada');
+  assert.equal(station.entity.state.computers[pc.id].notes[0].text, 'computer note');
+  assert.equal(station.entity.state.notes.length, 1, 'the desk keeps its own');
+
+  // Its timer rings like the desk's.
+  now += 5 * 60000;
+  await station.alarm();
+  assert.match(ada.ws.last('toast').text, /Short: your 5-minute timer is up/);
+  assert.equal(station.entity.state.computers[pc.id].timer, undefined);
+
+  // Back at a desk: the desk's notes.
+  await toDesk(ada);
+  assert.deepEqual((await ws(ada, 'desktop')).notes.map((n) => n.text), ['desk note']);
+  // Away from both: nothing.
+  ada.ws.msg({ t: 'move', x: 20.5, y: 26.5, teleport: true }); await tick();
+  await assert.rejects(ws(ada, 'desktop'), /walk up to a desk/);
+  o.runtime.stop();
 });

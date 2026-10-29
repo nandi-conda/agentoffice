@@ -22,6 +22,7 @@ import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
 import { ROLES, GRANTABLE, atLeast, rank, effectiveRole, roleLabel, can } from '../public/js/roles.js';
 import { placed, asItem, CARRIED } from './entities/gallery.js';
+import { computerAt } from '../public/js/manifest.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -318,7 +319,9 @@ export class Office {
       const key = this.actorKey(p);
       if (key) { address = `${kind}:${key}`; name = key; } else target = this.guestStation(p, kind);
     }
-    if (spec.atDesk && !this.deskOf(p)) throw new Error('walk up to a desk first (take_desk, or walk_to desk-N)');
+    // At a desk, or at an uploaded computer (whose program it then runs).
+    const computer = spec.atDesk && !this.deskOf(p) ? this.computerOf(p) : null;
+    if (spec.atDesk && !this.deskOf(p) && !computer) throw new Error('walk up to a desk first (take_desk, or walk_to desk-N)');
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
     if (spec.near) {
       // Same rule as the browser: walk up to it (its nearest edge) first.
@@ -333,7 +336,8 @@ export class Office {
     const params = paramList(spec).map((_, i) => args[i]);
     while (params.length && params.at(-1) === undefined) params.pop();
     if (spec.ctx) params.length = paramList(spec).length;
-    const all = [...(spec.who ? [this.who(p)] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : [])];
+    const who = spec.who ? { ...this.who(p), ...(computer ? { computer: { id: computer.id, version: computer.version } } : {}) } : null;
+    const all = [...(spec.who ? [who] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : [])];
     if (target) return structuredClone(await target.invoke(method, structuredClone(all)));
     if (kind === 'gallery' && method === 'upload') return this.uploadObject(p, all[0], args[0] || {}, args[1] || {});
     return this.ref(address)[method](...all);
@@ -353,6 +357,8 @@ export class Office {
 
   // The desk whose chair p stands at, if any.
   deskOf(p) { return p ? deskAt(p.x, p.y)?.id || null : null; }
+  // The uploaded computer p stands next to, if any (look `computer`).
+  computerOf(p) { return p ? computerAt(this.gallery, p.x, p.y) : null; }
 
   // A guest has no actor, so their workstation lives with their connection
   // and is gone when they leave (or when a hibernating Worker wakes).

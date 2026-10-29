@@ -12,6 +12,7 @@ import { openObject } from './objects.js';
 import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
+import { computerAt } from './manifest.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
 import { label as itemLabel, placeTiles, holdsKey, GIVE_RANGE } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, restrictedAt, doorTiles, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
@@ -1455,6 +1456,8 @@ function interact(f) {
       if (me.status === 'available') { autoStatus = 'coffee'; setStatus('coffee'); }
       break;
     case 'noticeboard': openNotes(f); break;
+    // An uploaded desk computer: the workstation, running its program.
+    case 'computer': openStation(); break;
     case 'room': openRoom(f.zone); break;
     case 'sign': openSign(f.zone); break;
     case 'plugin': {
@@ -1908,13 +1911,14 @@ function screenFeed(z) {
 // ---- the desk computer ---------------------------------------------------------------
 // public/js/workstation.js draws it; the World and your Workstation entity keep it.
 const deskOf = (p) => (p ? deskAt(p.x, p.y)?.id || null : null);
-const atDesk = () => !!deskOf(me);
+// At a desk, or next to an uploaded computer (it runs that upload's program).
+const atDesk = () => !!deskOf(me) || !!(me && computerAt(gallery, me.x, me.y));
 const myScreen = Object.assign(document.createElement('video'), { muted: true, autoplay: true, playsInline: true });
 const station = createWorkstation({
   send: (m) => net.send(m),
   office: {
     me: () => me, bookings: () => bookings, serverNow, toast,
-    deskId: () => deskOf(me),
+    deskId: () => deskOf(me) || (me && computerAt(gallery, me.x, me.y)?.name.toLowerCase().replace(/[^\w-]+/g, '-')) || null,
     openSchedule: () => openSchedule(),
     closeStation: () => station.close(),
     share: {

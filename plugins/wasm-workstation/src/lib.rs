@@ -426,14 +426,15 @@ fn v(x: impl Serialize) -> Value { serde_json::to_value(x).unwrap_or(Value::Null
 
 impl Plugin for Workstation {
     const MANIFEST: Manifest = Manifest::new("Workstation")
-        .doc("The program on the desk computers: your notes, todo list, bookmarks, a focus timer and the office shell. The office runs it for whoever sits at a desk; placed on the floor it only says so.")
-        .prompt("Look at the screen")
-        .emoji("🖥️");
+        .doc("The program on the desk computers: your notes, todo list, bookmarks, a focus timer and the office shell. Uploaded, it stands as a computer of its own: walk up to it and press E.")
+        .prompt("Use the computer")
+        .emoji("🖥️")
+        .look(Look::Computer);
 
     fn interact(&mut self, req: &Request) -> Response {
         let res = match req.action.as_str() {
-            // Someone found a copy on the floor: it's the desks' program.
-            "use" => Response::new().ui(Ui::new("🖥️ Workstation").text("This is the program the desk computers run. Sit at any desk and press **E** to open your own: notes, todos, bookmarks, a focus timer and the office shell.")),
+            // Only an office that can't open the computer gets here.
+            "use" => Response::new().ui(Ui::new("🖥️ Workstation").text("This is a desk computer. Walk up to it and press **E** to open it: notes, todos, bookmarks, a focus timer and the office shell.")),
             "tick" => match self.ring(req.now as i64) { Some(t) => Response::new().toast(t), None => Response::new() },
             _ => match self.call(req) { Ok(v) => Response::new().reply(v), Err(e) => Response::fail(e) },
         };

@@ -232,6 +232,8 @@ export class UploadedObject extends PluginObject {
     act: { ...PluginObject.api.act, doc: 'The office\'s own call into the object, without the use cooldown or the walk up: a carried Skeleton Key gets `open:<room>` this way as its carrier reaches a booked door.' },
     install: { doc: 'Store the code and manifest of a new upload (from gallery:main).', params: { item: ITEM, code: str('Base64 code', B64_MAX) }, mutates: true, internal: true },
     uninstall: { doc: 'Forget the code and memory (from gallery:main).', mutates: true, internal: true },
+    program: { doc: 'The code a workstation runs at this object while it stands in a room as a computer (look `computer`); null otherwise.', internal: true,
+      returns: { type: ['object', 'null'], description: '{ id, version, lang, code, name }' } },
     moved: { doc: 'Where it is now (from gallery:main, when it\'s picked up or put down).', params: { item: ITEM }, mutates: true, internal: true },
   };
 
@@ -243,6 +245,15 @@ export class UploadedObject extends PluginObject {
   async pluginObject(f, zone) {
     this.code ??= await this.host.storage.get('code');
     return { id: f.id, plugin: 'upload', name: f.name, zone, permissions: f.permissions || [], upload: { id: f.id, version: f.version, lang: f.lang, code: this.code } };
+  }
+
+  // What a workstation opened at this computer runs: its code, while it
+  // stands in a room as a computer.
+  async program() {
+    const m = this.state.meta;
+    if (!m || m.look !== 'computer' || !placed(m)) return null;
+    this.code ??= await this.host.storage.get('code');
+    return this.code ? { id: m.id, version: m.version, lang: m.lang, code: this.code, name: m.name } : null;
   }
 
   async install(item, code) {

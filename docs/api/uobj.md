@@ -71,7 +71,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
 | &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, computer, sprite, item |
 | &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |
@@ -93,6 +93,14 @@ Store the code and manifest of a new upload (from gallery:main).
 
 Forget the code and memory (from gallery:main).
 
+## `program()`
+
+`read-only` · `internal (entity to entity)`
+
+The code a workstation runs at this object while it stands in a room as a computer (look `computer`); null otherwise.
+
+Returns `object | null`
+
 ## `moved(item)`
 
 `mutates` · `internal (entity to entity)`
@@ -108,7 +116,7 @@ Where it is now (from gallery:main, when it's picked up or put down).
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
 | &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, computer, sprite, item |
 | &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |

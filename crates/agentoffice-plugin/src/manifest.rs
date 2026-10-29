@@ -36,6 +36,10 @@ pub enum Look {
     Bell,
     /// A room's door panel: lit with the booking state of the room it stands in.
     DoorPanel,
+    /// A desk computer: standing next to it opens a workstation that runs
+    /// your plugin as its program (each person gets their own state on it),
+    /// like the desks run the office's own workstation.
+    Computer,
     /// Your own pixel art: set by [`Manifest::sprite`].
     Sprite,
     /// Not put on the map when uploaded: it starts as one item, named and
@@ -59,6 +63,7 @@ impl Look {
             Look::Pomodoro => "pomodoro",
             Look::Bell => "reception",
             Look::DoorPanel => "panel",
+            Look::Computer => "computer",
             Look::Sprite => "sprite",
             Look::Item => "item",
         }

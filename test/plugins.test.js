@@ -35,7 +35,10 @@ test('the office\'s own programs: method and args in, reply or error out, more s
   assert.deepEqual(calls[0].permissions, []);
   assert.equal(calls[0].action, 'noteSave');
   await assert.rejects(host.program({ object: desk, actor, method: 'bad', state: { a: 1 } }), /no such note/);
-  await assert.rejects(host.program({ object: { ...desk, upload: { id: 'u-x', lang: 'wasm', code: '' } }, actor, method: 'desktop' }), /only the office's own/);
+  // An uploaded computer's program: its own code, still nothing beyond the basics.
+  await host.program({ object: { id: 'u-x', plugin: 'upload', name: 'Computer', permissions: ['take'], upload: { id: 'u-x', lang: 'wasm', code: '' } }, actor, method: 'desktop' });
+  assert.equal(calls.at(-1).object.id, 'u-x');
+  assert.deepEqual(calls.at(-1).permissions, []);
   await assert.rejects(new PluginHost().program({ object: desk, actor, method: 'desktop' }), /workstation is out of order/);
 });
 

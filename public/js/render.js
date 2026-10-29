@@ -25,7 +25,7 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, rally: 1.5, sprite: 1, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, computer: 1.1, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, rally: 1.5, sprite: 1, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 // How tall an object stands: an uploaded one with its own pixels is as tall
@@ -257,6 +257,7 @@ export function createRenderer(canvas) {
       case 'vending': return drawVending(f, st);
       case 'eightball': return drawEightBall(f, st);
       case 'kiosk': return drawKiosk(f, st);
+      case 'computer': return drawComputer(f, st);
       case 'rally': return drawRally(f, st);
       case 'sprite': return drawSprite(f, st);
       case 'whiteboard': return drawWhiteboard(f, st);
@@ -610,6 +611,27 @@ export function createRenderer(canvas) {
     ctx.fillStyle = '#0f172a'; ctx.font = `700 ${S(0.17)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('8', S(x + 0.5 + wob), S(cy + 0.01));
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
+  // An uploaded desk computer: a little desk with a monitor that shows the
+  // workstation's desktop while someone has it open.
+  function drawComputer(f, st) {
+    const { x, y } = f;
+    const hgt = HEIGHTS.desk;
+    box(x + 0.04, y + 0.2, 0.92, 0.75, hgt, '#f5f3ef', '#b8ab9a', 0.05);
+    const top = y + 0.2 - hgt;
+    ctx.fillStyle = '#334155'; ctx.fillRect(S(x + 0.46), S(top + 0.3), S(0.08), S(0.16));
+    ctx.fillStyle = '#1f2937'; roundRect(ctx, S(x + 0.12), S(top - 0.3), S(0.76), S(0.6), S(0.05)); ctx.fill();
+    const g = ctx.createLinearGradient(S(x + 0.16), S(top - 0.26), S(x + 0.84), S(top + 0.26));
+    g.addColorStop(0, '#1e3a8a'); g.addColorStop(1, f.glow || '#7c3aed');
+    ctx.fillStyle = g; ctx.fillRect(S(x + 0.16), S(top - 0.26), S(0.68), S(0.52));
+    if (f.emoji) {
+      ctx.font = `${S(0.26)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(f.emoji, S(x + 0.5), S(top));
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
+    ctx.fillStyle = '#d6d3d1'; roundRect(ctx, S(x + 0.22), S(top + 0.5), S(0.56), S(0.14), S(0.03)); ctx.fill();
+    st.lights.push({ x: x + 0.5, y: y + 0.6, r: 1, c: 'rgba(167,139,250,0.35)' });
   }
 
   function drawKiosk(f, st) {
