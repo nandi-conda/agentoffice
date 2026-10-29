@@ -59,3 +59,7 @@ Store the code and manifest of a new upload (from gallery:main).
 `mutates` · `internal (entity to entity)`
 
 Forget the code and memory (from gallery:main).
+
+## Events
+
+- subscribes `zone:<id>`: enter / exit, for the zones its plugin asked to watch (answer `watch`): calls the plugin with action `enter:<zone>` / `exit:<zone>` as that person

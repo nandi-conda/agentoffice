@@ -213,10 +213,10 @@ binding is missing or fails, the object falls back to a built-in copy, so the
 office (and the Node server) works without it. Writing your own:
 [docs/plugins.md](docs/plugins.md).
 
-The **Office Rally** (`plugins/rally/`) is the bigger example: a checkpoint
-race whose plugin keeps its racers, rounds and all-time board in its own
-Durable Object, asks the office to `watch` the route's zones (so walking into
-one calls it back), runs on the office's alarms, and hands out medals.
+The **Office Rally** flag is a WASM plugin (`plugins/wasm-rally/`, Rust): a
+checkpoint race that asks the office to `watch` the route's zones (walking
+into one calls it back), runs on the object's Durable Object alarms, keeps
+its all-time board in the object's state and hands out medals.
 
 ### Uploaded objects
 
@@ -859,7 +859,7 @@ server/plugins.js       plugin objects: service binding calls, answer clean-up, 
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
 plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
-plugins/rally/          example plugin Worker with its own Durable Object: the Office Rally checkpoint race
+plugins/wasm-rally/     the Office Rally checkpoint race (Rust WASM; zone events, alarms, medals); built copy in public/plugins/
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map
 plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/

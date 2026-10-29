@@ -10,7 +10,8 @@ const juke = { id: 'jukebox', plugin: 'jukebox', name: 'Jukebox', zone: 'lounge'
 test('every plugin object on the map has a built-in fallback', () => {
   assert.ok(PLUGIN_OBJECTS.length >= 4);
   const host = new PluginHost();
-  for (const f of PLUGIN_OBJECTS) assert.equal(host.status([f.plugin])[f.plugin].via, 'builtin', f.id);
+  // The office's own WASM objects (the rally) run in the sandbox instead: test/rally.test.js.
+  for (const f of PLUGIN_OBJECTS.filter((x) => !x.wasm)) assert.equal(host.status([f.plugin])[f.plugin].via, 'builtin', f.id);
 });
 
 test('binding names', () => {

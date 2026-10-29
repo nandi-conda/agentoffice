@@ -23,10 +23,10 @@ binding is missing or fails, the object falls back to a built-in copy, so the
 office (and the Node server) works without it. Writing your own:
 [docs/plugins.md](../plugins.md).
 
-The **Office Rally** (`plugins/rally/`) is the bigger example: a checkpoint
-race whose plugin keeps its racers, rounds and all-time board in its own
-Durable Object, asks the office to `watch` the route's zones (so walking into
-one calls it back), runs on the office's alarms, and hands out medals.
+The **Office Rally** flag is a WASM plugin (`plugins/wasm-rally/`, Rust): a
+checkpoint race that asks the office to `watch` the route's zones (walking
+into one calls it back), runs on the object's Durable Object alarms, keeps
+its all-time board in the object's state and hands out medals.
 
 ## Uploaded objects
 

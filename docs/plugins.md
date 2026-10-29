@@ -2,8 +2,9 @@
 
 Some things in the office get their behaviour from a separate Cloudflare
 Worker, a **plugin**, instead of from the office's own code. The office ships
-with four in one example plugin (`plugins/objects/`), and a bigger one in its
-own (`plugins/rally/`):
+with four, all in one example plugin (`plugins/objects/`), plus the Office
+Rally, a WASM plugin (`plugins/wasm-rally/`, see
+[Uploading your own objects](uploads.md#a-bigger-example-the-office-rally)):
 
 | Object | Where | What it does |
 | --- | --- | --- |
@@ -11,7 +12,7 @@ own (`plugins/rally/`):
 | 🥤 Vending machine | Kitchen, next to the counter | Free snacks with limited stock. Restocks itself 30 minutes after selling out. Sometimes a snack gets stuck. |
 | 🎱 Magic 8-ball | Lounge, by the bookshelf | Ask a yes-or-no question; everyone nearby hears the answer. |
 | 🤖 Help kiosk | Lobby | Answers questions about the office with Workers AI, or from a canned help desk without it. |
-| 🏁 Office Rally | Lobby, by the sofa | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. Its state lives in the plugin's own Durable Object. |
+| 🏁 Office Rally | Lobby, by the sofa | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. A WASM plugin that watches zones. |
 
 Walk up to one and press **E** (or tap the prompt). A panel opens; what you
 pick goes to the plugin, and what it says appears as a speech bubble over the
@@ -108,7 +109,7 @@ is clipped, so a plugin can't break the page.
 | `ui` | The panel the person sees (below). Leave it out to close nothing and change nothing. |
 | `give` | Items for the person (≤ 5): `[{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]`. `kind` is `[a-z0-9:._-]`, up to 32 characters; prefix yours (`jukebox:token`). `verb` is what using it looks like ("eats"), `consume` uses one up each time, `emote` is shown while they use it, `data` is up to 512 bytes of JSON you get back in `inventory`. Kinds the office already knows (`coffee`, `chips`, `cookie`… in `public/js/items.js`) fill in whatever you leave out. |
 | `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. |
-| `watch` | Zone ids (≤ 12, e.g. `['kitchen', 'lobby']`) to hear about: whenever someone walks into or out of one, the office calls you as them with `action: 'enter:<zone>'` or `'exit:<zone>'` and `event` set. Answer `[]` to stop; leave it out to keep watching what you watch. Uploaded objects can't watch. |
+| `watch` | Zone ids (≤ 12, e.g. `['kitchen', 'lobby']`) to hear about: whenever someone walks into or out of one, the office calls you as them with `action: 'enter:<zone>'` or `'exit:<zone>'` and `event` set. Answer `[]` to stop; leave it out to keep watching what you watch. |
 
 `give` and `take` happen together, all or nothing. If the person doesn't have
 what you take, or has no room for what you give, nothing happens: no speech
@@ -146,56 +147,6 @@ arrive. Under the hood the object's entity subscribes to the World's
 and unsubscribes when you answer `[]`. The office makes one plugin call per
 object at a time, in order, so events and button presses never race each
 other for your state.
-
-### Keeping your own state in a Durable Object
-
-`state` is fine for small things, but it's capped at 32 KB and the office
-holds it. A plugin can keep its memory in a Durable Object of its own
-instead: the `WorkerEntrypoint` the office binds to stays stateless and
-routes each call to `env.MY_DO.get(env.MY_DO.idFromName(req.object.id))`,
-one Durable Object per object on the map. A Durable Object runs one call at
-a time while it only touches its own storage, so every turn is atomic, and
-it can store as many keys as it likes (one per player, per round, …). Don't
-return `state` at all; the office then keeps nothing.
-
-The Office Rally (`plugins/rally/`) does exactly this:
-
-```js
-// plugins/rally/src/index.js
-export class RallyRoom extends DurableObject {
-  interact(req) { return new Game(this.ctx.storage).interact(req); }
-}
-export class Rally extends WorkerEntrypoint {
-  interact(req) { const ns = this.env.RALLY; return ns.get(ns.idFromName(req.object.id)).interact(req); }
-}
-```
-
-with the Durable Object declared in the plugin's own `wrangler.toml`
-(`[[durable_objects.bindings]]` and a `new_sqlite_classes` migration). The
-game (`src/rally.js`) is written against the Durable Object storage API
-(`get`, `put`, `delete`, `list({ prefix })`) and keeps `round`,
-`racer:<id>`, `stats:<person>` and `history` keys. For the office's
-built-in fallback the same class runs over a small in-memory store that is
-saved as the object's `state` (`rally()` in the same file), so the rally
-works on the Node server too, with the board capped at 100 people.
-
-How a race goes, and which part of the contract does what:
-
-1. **Join** (`action: 'join'`): the first racer starts a 20-second
-   countdown, answered as `wakeAt`.
-2. **Start** (the `tick` at `wakeAt`, or `start`): the plugin picks the
-   route and answers `watch: [...route zones]` plus a `wakeAt` for the
-   one-minute warning, then one for the end.
-3. **Checkpoints** (`enter:<zone>` events): the next zone on your route
-   counts, anything else is ignored; you get a toast with the next one.
-4. **Finish** (`enter:lobby` after the last checkpoint): your place and time
-   go to everyone (`say`), and the first three get a medal (`give`).
-5. **Time** (everyone home, or the last `tick`): results go into each
-   racer's all-time stats and the history, and the plugin answers
-   `watch: []`.
-
-Agents play it over MCP: `plugin_interact` with name `rally` and the
-actions above, and `walk_to` the zones.
 
 ### Wiring it into the office
 
@@ -270,8 +221,8 @@ or set `KIOSK_MODEL` under `[vars]` in `plugins/objects/wrangler.toml`.
   `just cf-login`, because Workers AI only runs remotely.
 - `just start`: the Node server, built-ins only.
 - `just test` covers the contract, the fallbacks and the four example objects
-  (`test/plugins.test.js`), and the rally from game rules to medals in the
-  office (`test/rally.test.js`).
+  (`test/plugins.test.js`), and the rally flag running its WASM in the office
+  (`test/rally.test.js`).
 
 ## Recipes
 
@@ -279,7 +230,7 @@ or set `KIOSK_MODEL` under `[vars]` in `plugins/objects/wrangler.toml`.
 | --- | --- |
 | `just deploy` | Deploys every plugin in `plugins/`, then the office. |
 | `just plugins-deploy [name]` | Deploys all plugins, or one (`just plugins-deploy objects`). |
-| `just plugins-tail [name]` | Live logs from a plugin Worker (default `objects`; `just plugins-tail rally` for the rally). |
+| `just plugins-tail [name]` | Live logs from a plugin Worker (default `objects`). |
 | `just cf-dev-plugins` | Local dev with plugins running alongside. |
 
 ## Music

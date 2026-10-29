@@ -17,7 +17,7 @@ import { readManifest } from '../public/js/manifest.js';
 // Plugin Workers import cloudflare:workers, which only exists on Workers; a
 // stand-in base class is all it takes to read their static descriptions.
 registerHooks({
-  resolve: (spec, ctx, next) => (spec === 'cloudflare:workers' ? { url: 'data:text/javascript,export class WorkerEntrypoint {} export class DurableObject {}', shortCircuit: true } : next(spec, ctx)),
+  resolve: (spec, ctx, next) => (spec === 'cloudflare:workers' ? { url: 'data:text/javascript,export class WorkerEntrypoint {}', shortCircuit: true } : next(spec, ctx)),
 });
 
 // Each [[services]] binding: the plugin Worker it points at (found by name
@@ -55,7 +55,7 @@ async function uploadDocs() {
   const out = [];
   for (const f of (await readdir(path.join(root, 'public/plugins')).catch(() => [])).filter((f) => f.endsWith('.wasm')).sort()) {
     const m = readManifest(await readFile(path.join(root, 'public/plugins', f)));
-    if (m?.name) out.push({ ...m, file: `public/plugins/${f}`, source: sources[f.replace(/\.wasm$/, '')] || 'plugins/' });
+    if (m?.name) out.push({ ...m, file: `public/plugins/${f}`, source: sources[f.replace(/\.wasm$/, '')] || 'plugins/', objects: PLUGIN_OBJECTS.filter((o) => o.wasm === f).map((o) => o.id) });
   }
   return out;
 }

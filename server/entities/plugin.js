@@ -17,7 +17,7 @@ const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, 
 
 export class PluginObject extends Entity {
   static rpc = ['interact'];
-  static doc = 'An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback.';
+  static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour comes from a plugin Worker over a service binding (with a built-in fallback), or from a WASM module the office ships in public/plugins, run in the uploads sandbox.';
   static api = {
     view: { doc: 'What everyone sees on the object and how its plugin was last reached.', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'binding, builtin, offline, or null before first use' } }) },
     interact: {
@@ -44,8 +44,14 @@ export class PluginObject extends Entity {
   get object() { return PLUGIN_OBJECTS.find((f) => f.id === this.name); }
   get plugins() { return this.services.plugins || (builtins ||= new PluginHost()); }
 
-  // The object as the PluginHost gets it (uploads add their code).
-  async pluginObject(f, zone) { return { id: f.id, plugin: f.plugin, name: f.name, zone }; }
+  // The object as the PluginHost gets it. Uploads add their code, and so do
+  // the office's own WASM objects (`wasm` on the map object, the file in
+  // public/plugins, read through services.wasm), which run in the same sandbox.
+  async pluginObject(f, zone) {
+    const o = { id: f.id, plugin: f.plugin, name: f.name, zone };
+    const w = f.wasm && (await this.services.wasm?.(f.wasm).catch((e) => { this.log('error', `can't read ${f.wasm}: ${e.message}`); return null; }));
+    return w ? { ...o, upload: { id: f.id, version: w.version, lang: 'wasm', code: w.code } } : o;
+  }
 
   // What everyone sees (a label, a glow), and how the plugin was last reached.
   view() { return { display: this.state.display || null, via: this.state.via || null }; }
@@ -109,9 +115,8 @@ export class PluginObject extends Entity {
       object: await this.pluginObject(f, zone),
       actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory, event,
     });
-    // Objects people uploaded can hand things out but never take anyone's
-    // things, and don't get to follow people around the office.
-    if (f.plugin === 'upload' && (result.take?.length || result.watch)) result = { ...result, take: [], watch: null };
+    // Objects people uploaded can hand things out but never take anyone's things.
+    if (f.plugin === 'upload' && result.take?.length) result = { ...result, take: [] };
     if ((result.give?.length || result.take?.length) && who.kind !== 'system') {
       const r = await this.world.invApply(who.id, { give: result.give, take: result.take, from: f.name }).catch((e) => ({ error: e.message }));
       // It didn't go through (hands full, or they don't have what it wanted):

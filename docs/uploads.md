@@ -151,7 +151,9 @@ nothing changes).
 | `on_use(&mut self, req) -> Response` | someone walks up and presses E | nothing |
 | `on_action(&mut self, req) -> Response` | someone picks an action on your panel (`req.action`, `req.input`) | a toast: unknown action |
 | `on_tick(&mut self, req) -> Response` | the wake-up call you asked for with `.wake_at(ms)` (`actor.kind` is `system`; no panel goes out) | nothing |
-| `panel(&self, req) -> Option<Ui>` | after `on_use` / `on_action`, when the answer has no `ui` | none |
+| `on_enter(&mut self, zone, req) -> Response` | `req.actor` walked into a zone you watch (`.watch([...])`); no panel opens, a `toast` goes to them, `say`/`display`/`give`/`wake_at` work as usual | nothing |
+| `on_exit(&mut self, zone, req) -> Response` | `req.actor` walked out of a zone you watch | nothing |
+| `panel(&self, req) -> Option<Ui>` | after `on_use` / `on_action`, when the answer has no `ui` (never for ticks or zone events) | none |
 | `display(&self) -> Option<Display>` | after every call, when the answer has no `display` | none |
 | `interact(&mut self, req) -> Response` | every call: does the dispatch above | override it to dispatch yourself |
 
@@ -161,8 +163,8 @@ builds natively for `cargo test`.
 
 | Piece | What it gives you |
 | --- | --- |
-| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `now`. |
-| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`. `Response::error(msg)` is just a toast. |
+| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event), `now`. |
+| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`. `Response::error(msg)` is just a toast. |
 | `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
 | `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. Uploads can't `take`, so there's no `Take`. |
 | `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
@@ -214,10 +216,43 @@ mod tests {
 
 It also has `act(who, action)`, `sign_in(who, handle)`, `agent(who)`,
 `carry(who, kind, qty)`, `with_state(…)`, `inventory(who)`, `display()`,
-`logs()`, `advance(ms)` and `tick()` (jump to your `wake_at` and make the
-office's `tick` call). `just plugin-build` then runs the built module once
+`logs()`, `advance(ms)`, `tick()` (jump to your `wake_at` and make the
+office's `tick` call), and `walk_in(who, zone)` / `walk_out(who, zone)`
+with `watching()` (the zone event, delivered only if you watch that zone,
+like the office). `just plugin-build` then runs the built module once
 in the same Node sandbox `just start` uses, so you see the real thing
 answer.
+
+### A bigger example: the Office Rally
+
+The rally flag in the Lobby is a WASM plugin too
+([`plugins/wasm-rally`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-rally),
+built into `public/plugins/rally.wasm`): a checkpoint race that leans on
+everything the object's Durable Object does for a plugin.
+
+1. **Join** (`join`): the first racer starts a 20-second countdown, answered
+   as `.wake_at(start)`. The office's alarm calls `on_tick` then.
+2. **Start** (that tick, or `start`): it shuffles three checkpoints from the
+   clock, adds the Lobby, and answers `.watch(route)`. The object's entity
+   subscribes to those zones' enter/exit topics (pub/sub between Durable
+   Objects) and turns each walk-in into an `on_enter` call. It also asks to
+   be woken at one minute left, then at the end.
+3. **Checkpoints** (`on_enter`): the next zone on your route counts, others
+   are ignored; you get a toast with the next one.
+4. **Finish** (`on_enter("lobby")` after the last one): your place and time
+   go to everyone, and the first three get a medal with `.give(…)`, applied
+   to their inventory all or nothing.
+5. **Time** (everyone home, or the last tick): results go into the all-time
+   board and the history in its state, and it answers `.unwatch()`.
+
+The office runs one call per object at a time, so a walk-in and a button
+press never race each other for the state. Agents play it over MCP with
+`plugin_interact` (name `rally`) and `walk_to`.
+
+The office's own WASM objects are listed in `public/js/map.js` with a
+`wasm` file (`wasm: 'rally.wasm'`) and run in the same sandbox as uploads,
+so on Cloudflare they need the Worker Loader binding too; the code is read
+from the static assets (`ASSETS`). `just plugin-build rally` rebuilds it.
 
 ## The raw ABI (any language)
 

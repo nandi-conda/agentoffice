@@ -14,10 +14,11 @@
 // `object.upload` and run in the sandbox instead (server/sandbox.js): a
 // Dynamic Worker on Cloudflare, a worker thread on Node. They have no
 // built-in to fall back to; when the sandbox fails they're out of order.
+// So do the office's own WASM objects on the map (`wasm: 'rally.wasm'` in
+// public/js/map.js, e.g. the Office Rally), whose code ships in public/plugins.
 
 import { log } from './logs.js';
 import { OBJECTS } from '../plugins/objects/src/objects.js';
-import { rally } from '../plugins/rally/src/rally.js';
 import { ZONES } from '../public/js/map.js';
 import { cleanItem } from '../public/js/items.js';
 
@@ -28,7 +29,7 @@ const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
 export const MAX_WATCH = 12;
 // Every object the office can run without its plugin Worker.
-export const BUILTINS = { ...OBJECTS, rally };
+export const BUILTINS = { ...OBJECTS };
 
 export const bindingName = (plugin) => `PLUGIN_${String(plugin).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 

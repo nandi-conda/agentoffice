@@ -48,6 +48,7 @@ pub mod limits {
     pub const INPUT: usize = 500;
     pub const SLOTS: usize = 20;
     pub const STACK: u32 = 20;
+    pub const WATCH: usize = 12;
 }
 
 thread_local! {
@@ -84,6 +85,8 @@ pub struct TestOffice<P> {
     inventories: HashMap<String, Vec<Item>>,
     display: Option<Display>,
     wake_at: Option<f64>,
+    watching: Vec<String>,
+    event_now: Option<Value>,
     said: Vec<String>,
     logs: Vec<String>,
     warnings: Vec<String>,
@@ -108,6 +111,8 @@ impl<P: Plugin> TestOffice<P> {
             inventories: HashMap::new(),
             display: None,
             wake_at: None,
+            watching: Vec::new(),
+            event_now: None,
             said: Vec::new(),
             logs: Vec::new(),
             warnings: Vec::new(),
@@ -177,6 +182,22 @@ impl<P: Plugin> TestOffice<P> {
 
     pub fn advance(&mut self, ms: f64) -> &mut Self { self.now += ms; self }
 
+    /// `name` walks into `zone`. Like the office, the plugin only hears about
+    /// it if it watches that zone; returns `None` when it doesn't.
+    pub fn walk_in(&mut self, name: &str, zone: &str) -> Option<Response> { self.event(name, "enter", zone) }
+
+    /// `name` walks out of `zone` (only heard when watched).
+    pub fn walk_out(&mut self, name: &str, zone: &str) -> Option<Response> { self.event(name, "exit", zone) }
+
+    fn event(&mut self, name: &str, kind: &str, zone: &str) -> Option<Response> {
+        if !self.watching.iter().any(|z| z == zone) { return None; }
+        let who = self.actor(name);
+        self.event_now = Some(json!({ "type": kind, "zone": zone }));
+        let mut r = self.run(who, &format!("{kind}:{zone}"), None);
+        r.ui = None; // the office opens no panel for an event
+        Some(r)
+    }
+
     fn call(&mut self, name: &str, action: &str, input: Option<&str>) -> Response {
         assert!(valid_action(action), "the office only sends action ids like [\\w:.-]{{1,64}}, not {action:?}");
         let who = self.actor(name);
@@ -190,6 +211,7 @@ impl<P: Plugin> TestOffice<P> {
         let req = json!({
             "object": self.object, "actor": who, "action": action, "input": input,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
+            "event": self.event_now.take(),
         });
         let out = handle_json::<P>(&serde_json::to_vec(&req).unwrap());
         self.logs.extend(take_logs());
@@ -213,6 +235,10 @@ impl<P: Plugin> TestOffice<P> {
         if let Some(s) = &r.say { self.said.push(s.clone()); }
         if let Some(d) = &r.display { self.display = Some(d.clone()); }
         if let Some(at) = r.wake_at { self.wake_at = Some(at); }
+        if let Some(w) = &r.watch {
+            if w.len() > limits::WATCH { self.warn(format!("watch lists {} zones; the office follows {} at most", w.len(), limits::WATCH)); }
+            self.watching = w.iter().take(limits::WATCH).cloned().collect();
+        }
         if who.is_system() { r.ui = None; }
         r
     }
@@ -302,6 +328,8 @@ impl<P: Plugin> TestOffice<P> {
     pub fn display(&self) -> Option<&Display> { self.display.as_ref() }
     /// When the plugin asked to be woken.
     pub fn wake_at(&self) -> Option<f64> { self.wake_at }
+    /// The zones the plugin watches now.
+    pub fn watching(&self) -> &[String] { &self.watching }
     /// Lines the plugin logged with [`crate::log`].
     pub fn logs(&self) -> &[String] { &self.logs }
     /// Things the office would clip or drop. Empty in a well-behaved plugin.

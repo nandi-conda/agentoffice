@@ -52,7 +52,7 @@ mod response;
 pub mod testing;
 
 pub use manifest::{Action, Look, Manifest};
-pub use request::{Actor, Item, Object, Person, Request};
+pub use request::{Actor, Event, Item, Object, Person, Request};
 pub use response::{Button, Display, Give, Input, List, Music, Response, Row, Ui};
 #[doc(hidden)]
 pub use serde;
@@ -61,7 +61,7 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{export_plugin, log, Action, Actor, Display, Give, Input, Item, Look, Manifest, Plugin, Request, Response, Row, Ui};
+    pub use crate::{export_plugin, log, Action, Actor, Display, Event, Give, Input, Item, Look, Manifest, Plugin, Request, Response, Row, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }
@@ -75,7 +75,8 @@ use serde_json::Value;
 /// state still loads.
 ///
 /// Override what you need. [`interact`](Plugin::interact) sends `use` to
-/// [`on_use`](Plugin::on_use), `tick` to [`on_tick`](Plugin::on_tick) and
+/// [`on_use`](Plugin::on_use), `tick` to [`on_tick`](Plugin::on_tick), zone
+/// events to [`on_enter`](Plugin::on_enter) / [`on_exit`](Plugin::on_exit) and
 /// every other action to [`on_action`](Plugin::on_action), then fills in
 /// the panel from [`panel`](Plugin::panel) and the label from
 /// [`display`](Plugin::display) when the answer left them out.
@@ -101,6 +102,18 @@ pub trait Plugin: Serialize + DeserializeOwned + Default {
         Response::new()
     }
 
+    /// `req.actor` walked into `zone`, one you asked to watch
+    /// ([`Response::watch`]). No panel opens: a `toast` goes to them, and
+    /// `say`, `display`, `give` and `wake_at` work as usual.
+    fn on_enter(&mut self, _zone: &str, _req: &Request) -> Response {
+        Response::new()
+    }
+
+    /// `req.actor` walked out of `zone`, one you watch.
+    fn on_exit(&mut self, _zone: &str, _req: &Request) -> Response {
+        Response::new()
+    }
+
     /// The panel for whoever is using it, after on_use or on_action.
     fn panel(&self, _req: &Request) -> Option<Ui> {
         None
@@ -114,12 +127,18 @@ pub trait Plugin: Serialize + DeserializeOwned + Default {
 
     /// The whole call. Override it to do your own dispatch.
     fn interact(&mut self, req: &Request) -> Response {
-        let mut res = match req.action.as_str() {
-            "use" => self.on_use(req),
-            "tick" => self.on_tick(req),
-            _ => self.on_action(req),
+        let mut res = if let Some(zone) = req.entered() {
+            self.on_enter(zone, req)
+        } else if let Some(zone) = req.exited() {
+            self.on_exit(zone, req)
+        } else {
+            match req.action.as_str() {
+                "use" => self.on_use(req),
+                "tick" => self.on_tick(req),
+                _ => self.on_action(req),
+            }
         };
-        if res.ui.is_none() && !req.is_tick() {
+        if res.ui.is_none() && !req.is_tick() && req.event.is_none() {
             res.ui = self.panel(req);
         }
         if res.display.is_none() {

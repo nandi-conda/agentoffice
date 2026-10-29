@@ -193,13 +193,16 @@ function sections(api) {
     events: [],
   })), ...(api.uploads || []).map((u) => ({
     id: `upload-${u.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
-    title: `upload: ${u.name}`,
+    title: `${u.objects?.length ? "wasm" : "upload"}: ${u.name}`,
     doc: `${u.doc}${u.prompt ? ` People see it as “${u.prompt}”.` : ''}`,
-    where: [
+    where: u.objects?.length ? [
+      `a WASM plugin the office ships: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from; it runs in the uploads sandbox`,
+      `on the map as ${u.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${u.objects.map((o) => `\`${o}\``).join(', ')}, action = one of these)`,
+    ] : [
       `an example upload: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from`,
       'put it on the map from the 🧩 panel ("try the example") or with `gallery_upload`, then use it with the MCP tool `uobj_interact` (name = its `u-…` id from `gallery_view`, action = one of these, input = the typed text)',
     ],
-    methods: pluginMethods(u.api).map((m) => ({ ...m, flags: ['an action: uobj_interact { action, input }'] })),
+    methods: pluginMethods(u.api).map((m) => ({ ...m, flags: [u.objects?.length ? 'an action: plugin_interact { action }' : 'an action: uobj_interact { action, input }'] })),
     events: [],
   }))];
 }

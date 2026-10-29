@@ -76,6 +76,17 @@ impl Item {
     }
 }
 
+/// Someone walked into or out of a zone you watch ([`Response::watch`]).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Event {
+    /// `enter` or `exit`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The zone id (`kitchen`, `lounge`…).
+    pub zone: String,
+}
+
 /// One call of your plugin. Your state isn't in here: it's your plugin
 /// itself (`&mut self`).
 #[derive(Clone, Debug, Default)]
@@ -92,6 +103,9 @@ pub struct Request {
     pub nearby: Vec<Person>,
     /// What the person carries (read-only; hand things out with `give`).
     pub inventory: Vec<Item>,
+    /// Set when the call is a zone you watch, not someone pressing E: the
+    /// actor walked in or out (action `enter:<zone>` / `exit:<zone>`).
+    pub event: Option<Event>,
     /// The office's clock, epoch ms.
     pub now: f64,
 }
@@ -103,6 +117,14 @@ impl Request {
     pub fn is_use(&self) -> bool { self.action == "use" }
     /// The wake-up call you asked for with `wake_at`.
     pub fn is_tick(&self) -> bool { self.action == "tick" }
+    /// The zone the actor just walked into, when this call is that event.
+    pub fn entered(&self) -> Option<&str> {
+        self.event.as_ref().filter(|e| e.kind == "enter").map(|e| e.zone.as_str())
+    }
+    /// The zone the actor just walked out of, when this call is that event.
+    pub fn exited(&self) -> Option<&str> {
+        self.event.as_ref().filter(|e| e.kind == "exit").map(|e| e.zone.as_str())
+    }
     /// The part after `prefix:`: for action `play:rain`, `req.arg("play")` is `Some("rain")`.
     pub fn arg(&self, prefix: &str) -> Option<&str> {
         self.action.strip_prefix(prefix)?.strip_prefix(':')
@@ -132,6 +154,7 @@ pub(crate) struct RawRequest {
     pub state: Value,
     pub nearby: Vec<Person>,
     pub inventory: Vec<Item>,
+    pub event: Option<Event>,
     pub now: f64,
 }
 
@@ -142,7 +165,7 @@ impl RawRequest {
             object: self.object, actor: self.actor,
             action: self.action.unwrap_or_else(|| "use".into()),
             input: self.input, fresh,
-            nearby: self.nearby, inventory: self.inventory, now: self.now,
+            nearby: self.nearby, inventory: self.inventory, event: self.event, now: self.now,
         })
     }
 }

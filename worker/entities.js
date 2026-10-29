@@ -8,7 +8,7 @@ import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
 import { PluginHost } from '../server/plugins.js';
-import { DynamicSandbox } from '../server/sandbox.js';
+import { DynamicSandbox, bundledWasm } from '../server/sandbox.js';
 import { captureConsole, setLogSink, forwarder } from '../server/logs.js';
 import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
 
@@ -26,6 +26,12 @@ export class DORuntime {
     this.services = {
       loadActor: env.OFFLINE ? null : loadActor,
       plugins: new PluginHost({ env, sandbox: env.LOADER ? new DynamicSandbox(env.LOADER) : null }),
+      // The office's own WASM objects (the rally flag), from the static assets.
+      wasm: env.ASSETS ? bundledWasm(async (file) => {
+        const r = await env.ASSETS.fetch(`https://assets.local/plugins/${file}`);
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.arrayBuffer();
+      }) : null,
       // Owners and admins to start with (OWNER_DIDS, ADMIN_DIDS): public/js/roles.js.
       roles: bootstrapRoles(env),
     };

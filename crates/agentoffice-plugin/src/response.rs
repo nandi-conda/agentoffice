@@ -38,6 +38,11 @@ pub struct Response {
     /// Epoch ms: the office calls you again then with action `tick`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wake_at: Option<f64>,
+    /// Zones to hear about (≤ 12): the office calls [`Plugin::on_enter`] /
+    /// [`Plugin::on_exit`] as people walk in and out. `Some(vec![])` stops;
+    /// `None` keeps whatever you watch now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch: Option<Vec<String>>,
 }
 
 impl Response {
@@ -52,6 +57,13 @@ impl Response {
     pub fn ui(mut self, ui: Ui) -> Self { self.ui = Some(ui); self }
     pub fn give(mut self, item: Give) -> Self { self.give.push(item); self }
     pub fn wake_at(mut self, at: f64) -> Self { self.wake_at = Some(at); self }
+    /// Watch these zones (and only these) from now on.
+    pub fn watch<Z: Into<String>>(mut self, zones: impl IntoIterator<Item = Z>) -> Self {
+        self.watch = Some(zones.into_iter().map(Into::into).collect());
+        self
+    }
+    /// Stop watching zones.
+    pub fn unwatch(mut self) -> Self { self.watch = Some(Vec::new()); self }
 }
 
 /// What everyone sees on the object: a floating label and an accent colour.

@@ -8,6 +8,9 @@ compatibility_flags = ["nodejs_compat"]
 # (/ws, /api/*, /healthz) fall through to the Worker.
 [assets]
 directory = "public"
+# The office's own WASM objects (public/plugins/*.wasm, e.g. the rally flag)
+# are read from here by the entities that run them.
+binding = "ASSETS"
 
 [[durable_objects.bindings]]
 name = "OFFICE"
@@ -64,12 +67,6 @@ entrypoint = "EightBall"
 binding = "PLUGIN_KIOSK"
 service = "agentoffice-objects"
 entrypoint = "Kiosk"
-
-# Office Rally (plugins/rally): its own Worker, with its own Durable Object.
-[[services]]
-binding = "PLUGIN_RALLY"
-service = "agentoffice-rally"
-entrypoint = "Rally"
 
 # Uploaded objects (docs/uploads.md, server/sandbox.js): each plugin people
 # upload runs in its own Dynamic Worker, with no network. Needs the Workers

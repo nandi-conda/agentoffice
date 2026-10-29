@@ -18,6 +18,7 @@ import { FreeqBridge, FREEQ_URL } from './freeq.js';
 import { LocalRuntime } from './entities/runtime.js';
 import { PluginHost } from './plugins.js';
 import { NodeSandbox } from './sandbox-node.js';
+import { bundledWasm } from './sandbox.js';
 import { KINDS } from './entities/kinds.js';
 import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
 
@@ -92,8 +93,10 @@ async function fileStore(name, ttlMs) {
 // saved together in DATA_DIR/entities.json; on Workers each is a Durable Object.
 let entityData = {};
 try { entityData = JSON.parse(await readFile(ENTITIES_FILE, 'utf8')); } catch { /* first run */ }
+// The office's own WASM objects on the map (the rally flag): public/plugins/<file>.
+const wasmFiles = bundledWasm((file) => readFile(path.join(PUBLIC, 'plugins', file)));
 const actorLoader = process.env.OFFLINE ? null : loadActor;
-const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), roles: bootstrapRoles(process.env) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
+const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), wasm: wasmFiles, roles: bootstrapRoles(process.env) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
 
 // Each person's OAuth session is kept by their actor entity, so a restart
 // (or `just dev` reloading) doesn't lose it while their cookie still says

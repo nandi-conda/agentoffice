@@ -1,6 +1,6 @@
 # plugin (PluginObject)
 
-An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback.
+An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour comes from a plugin Worker over a service binding (with a built-in fallback), or from a WASM module the office ships in public/plugins, run in the uploads sandbox.
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
