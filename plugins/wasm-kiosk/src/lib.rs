@@ -61,7 +61,8 @@ impl Plugin for Kiosk {
         .emoji("🤖")
         .glow("#22d3ee")
         .look(Look::Kiosk)
-        .actions(&[Action::new("ask", "Ask it something").input("A question (≤ 300 characters)")]);
+        .actions(&[Action::new("ask", "Ask it something").input("A question (≤ 300 characters)")])
+        .permissions(&[Permission::Ask]);
 
     fn on_action(&mut self, req: &Request) -> Response {
         if !req.is("ask") { return Response::error(format!("The kiosk doesn't know how to {}", req.action)); }

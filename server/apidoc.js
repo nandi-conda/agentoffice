@@ -13,6 +13,7 @@ import { BUILTIN_API, describeKind, inputSchema, paramList } from './entities/sc
 import { BINDINGS, CLASSES } from './entities/bindings.js';
 import { WORLD, INVENTORY, MOD } from './office.js';
 import { CAPS, ROLES } from '../public/js/roles.js';
+import { levelOf, levelRole } from '../public/js/permissions.js';
 
 // Every address the office knows of, by kind ('desk' → ['desk-1', …]).
 function instancesOf(kind) {
@@ -183,13 +184,13 @@ function sections(api) {
     id: `upload-${u.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
     title: `${u.objects?.length ? "wasm" : "upload"}: ${u.name}`,
     doc: `${u.doc}${u.prompt ? ` People see it as “${u.prompt}”.` : ''}`,
-    where: u.objects?.length ? [
+    where: (u.objects?.length ? [
       `a WASM plugin the office ships: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from; it runs in the plugin sandbox`,
       `on the map as ${u.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${u.objects.map((o) => `\`${o}\``).join(', ')}, action = one of these)`,
     ] : [
       `an example upload: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from`,
       'put it on the map from the 🧩 panel ("try the example") or with `gallery_upload`, then use it with the MCP tool `uobj_interact` (name = its `u-…` id from `gallery_view`, action = one of these, input = the typed text)',
-    ],
+    ]).concat(u.permissions?.length ? [`permissions: ${u.permissions.map((p) => `\`${p}\``).join(', ')}, so it's ${levelOf(u.permissions)}${u.objects?.length ? '' : `: ${levelRole(levelOf(u.permissions))}s and up can upload it`} (see uploads.md, permission levels)`] : []),
     methods: pluginMethods(u.api).map((m) => ({ ...m, flags: [u.objects?.length ? 'an action: plugin_interact { action }' : 'an action: uobj_interact { action, input }'] })),
     events: [],
   }))];

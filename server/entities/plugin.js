@@ -8,6 +8,7 @@ import { Entity } from './runtime.js';
 import { str, obj, opt } from './schema.js';
 import { PLUGIN_OBJECTS, zoneAt } from '../../public/js/map.js';
 import { PluginHost } from '../plugins.js';
+import { ROOMS, activeBooking, isHolder } from '../../public/js/rooms.js';
 
 const COOLDOWN_MS = 400;
 let offline = null; // a host with no sandbox, when the runtime didn't pass one
@@ -23,7 +24,7 @@ export class PluginObject extends Entity {
       doc: 'Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.',
       who: true,
       params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
-      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, watch, via }: what the plugin answered (give: items it handed you, take: things of yours it used up, watch: the zones it now follows); null when called again within 400 ms' },
+      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, watch, unlock, via }: what the plugin answered (give: items it handed you, take: things of yours it used up, watch: the zones it now follows, unlock: { room } it let you into); null when called again within 400 ms' },
       mutates: true,
       near: 3,
     },
@@ -88,6 +89,15 @@ export class PluginObject extends Entity {
     this.state.watch = zones;
   }
 
+  // The bookable rooms and what's on in each now, for plugins with the unlock permission.
+  async rooms(who) {
+    const now = this.now();
+    return Promise.all(ROOMS.map(async (r) => {
+      const b = activeBooking(await this.ref(`room:${r.id}`).view().catch(() => []), r.id, now);
+      return { id: r.id, name: r.name, booking: b ? { title: b.title, name: b.name, until: b.end, yours: isHolder(b, who) } : null };
+    }));
+  }
+
   run(who, action, input, event = null) {
     const turn = this.queue.then(() => this.turn(who, action, input, event));
     this.queue = turn.catch(() => {});
@@ -110,9 +120,15 @@ export class PluginObject extends Entity {
     let { result, state, via } = await this.plugins.interact({
       object: await this.pluginObject(f, zone),
       actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory, event,
+      rooms: () => this.rooms(who),
     });
-    // Objects people uploaded can hand things out but never take anyone's things.
-    if (f.plugin === 'upload' && result.take?.length) result = { ...result, take: [] };
+    // Into a booked room (the host already checked the unlock permission):
+    // only for someone using it, not a wake-up call or a zone event.
+    if (result.unlock) {
+      const r = who.kind === 'system' || event ? { error: 'only someone using it can be let in' }
+        : await this.ref(`room:${result.unlock.room}`).unlock(who, f.name).catch((e) => ({ error: e.message }));
+      if (r.error) result = { ...result, unlock: null, toast: `${f.name}: ${r.error}` };
+    }
     if ((result.give?.length || result.take?.length) && who.kind !== 'system') {
       const r = await this.world.invApply(who.id, { give: result.give, take: result.take, from: f.name }).catch((e) => ({ error: e.message }));
       // It didn't go through (hands full, or they don't have what it wanted):

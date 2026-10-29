@@ -4,6 +4,7 @@ Ask where things are or how the office works. It answers with the office's langu
 
 - a WASM plugin the office ships: `public/plugins/kiosk.wasm`, built from `plugins/wasm-kiosk` with the agentoffice-plugin crate, whose manifest these actions come from; it runs in the plugin sandbox
 - on the map as `plugin:kiosk`: use it with the MCP tool `plugin_interact` (name `kiosk`, action = one of these)
+- permissions: `ask`, so it's trusted (see uploads.md, permission levels)
 
 ## `ask(input)`
 

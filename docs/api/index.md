@@ -30,6 +30,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wasm: Jukebox](upload-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another for everyone nearby, and the jukebox shows what's on. |
 | [wasm: Help kiosk](upload-help-kiosk.md) | Ask where things are or how the office works. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
+| [upload: Skeleton Key](upload-skeleton-key.md) | Opens any meeting room that's booked and not yours. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
 
 ## Bindings
@@ -77,6 +78,8 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 | `roles.grant` | admin |
 | `people.ban` | admin |
 | `logs` | admin |
+| `plugins.trusted` | moderator |
+| `plugins.privileged` | admin |
 
 ## MCP tools
 

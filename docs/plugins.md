@@ -98,6 +98,8 @@ is the JSON below.
 | `now` | The office's clock, epoch ms. |
 | `seed` | A random integer, new every call. WASM has no randomness of its own; the SDK turns it into `req.rng()`, `req.pick(&list)` and `req.chance(p)`. |
 | `reply` | `{ text, model }` or `{ error }`: the model's answer, on the second call of a turn that answered with `ask` (below). |
+| `permissions` | What the office lets this plugin do beyond the basics: `ask`, `take`, `unlock` ([permission levels](uploads.md#permission-levels)). |
+| `rooms` | `[{ id, name, booking: { title, name, until, yours } \| null }]`: the bookable rooms and what's on in each now. Only for plugins with `unlock`. |
 
 ### The answer
 
@@ -113,9 +115,10 @@ is clipped, so a plugin can't break the page.
 | `wakeAt` | Epoch ms: the office calls you again then with `action: 'tick'` and `actor.kind: 'system'` (no panel goes out; `say` and `display` do). The jukebox uses it to start the next song. |
 | `ui` | The panel the person sees (below). Leave it out to close nothing and change nothing. |
 | `give` | Items for the person (≤ 5): `[{ kind, name, emoji, qty?, verb?, consume?, emote?, data? }]`. `kind` is `[a-z0-9:._-]`, up to 32 characters; prefix yours (`jukebox:token`). `verb` is what using it looks like ("eats"), `consume` uses one up each time, `emote` is shown while they use it, `data` is up to 512 bytes of JSON you get back in `inventory`. Kinds the office already knows (`coffee`, `chips`, `cookie`… in `public/js/items.js`) fill in whatever you leave out. |
-| `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. Not for uploads. |
+| `take` | Things of theirs to use up (≤ 5): `[{ kind, qty? }]`, oldest first. Needs the `take` permission (trusted); dropped otherwise. |
+| `unlock` | `{ room }` (an id from `rooms`): let the person who used it into that room while someone else's booking runs, as if the meeting had admitted them. The meeting is told. Needs the `unlock` permission (privileged: admins upload those); not on a `tick` or a zone event. |
 | `watch` | Zone ids (≤ 12, e.g. `['kitchen', 'lobby']`) to hear about: whenever someone walks into or out of one, the office calls you as them with `action: 'enter:<zone>'` or `'exit:<zone>'` and `event` set. Answer `[]` to stop; leave it out to keep watching what you watch. |
-| `ask` | `{ prompt, system?, maxTokens? }`: ask the office's language model (below). |
+| `ask` | `{ prompt, system?, maxTokens? }`: ask the office's language model (below). Needs the `ask` permission (trusted). |
 
 `give` and `take` happen together, all or nothing. If the person doesn't have
 what you take, or has no room for what you give, nothing happens: no speech
@@ -157,8 +160,9 @@ ask per turn: an `ask` in the second answer is ignored.
 - On Node there's a model when `CLOUDFLARE_ACCOUNT_ID` and
   `CLOUDFLARE_AI_TOKEN` (an API token with Workers AI read access) are set:
   the same models over Cloudflare's REST API.
-- Only the office's own objects get an answer. An upload that asks gets
-  `reply: { error }`, as does any object when the office has no model or
+- Only plugins with the `ask` permission get an answer: office objects that
+  declare it (the kiosk), and uploads a moderator or admin put out. The rest
+  get `reply: { error }`, as does any object when the office has no model or
   every model failed (after 20 seconds at most). The kiosk answers from what
   it knows then, and shows the asker why underneath.
 

@@ -30,7 +30,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::{handle_json, Actor, Ask, Display, Item, Object, Person, Plugin, Response};
+use crate::{handle_json, Actor, Ask, Booking, Display, Item, Object, Permission, Person, Plugin, Response, Room};
 
 /// Stands in for the office's language model: the question in, the answer
 /// (or why there's none) out.
@@ -99,6 +99,9 @@ pub struct TestOffice<P> {
     seed: u64,
     model: Option<Model>,
     asked: Vec<Ask>,
+    granted: Vec<String>,
+    rooms: Vec<Room>,
+    unlocked: Vec<(String, String)>,
     plugin: std::marker::PhantomData<P>,
 }
 
@@ -128,9 +131,34 @@ impl<P: Plugin> TestOffice<P> {
             seed: 1,
             model: None,
             asked: Vec::new(),
+            granted: P::MANIFEST.permissions.iter().map(|p| p.as_str().to_string()).collect(),
+            rooms: [("booth1", "Booth 1"), ("booth2", "Booth 2"), ("booth3", "Booth 3"), ("board", "Boardroom"), ("huddle", "Huddle Room")]
+                .into_iter().map(|(id, name)| Room { id: id.into(), name: name.into(), booking: None }).collect(),
+            unlocked: Vec::new(),
             plugin: std::marker::PhantomData,
         }
     }
+
+    /// Grant only these permissions, as when someone without the role for
+    /// the rest uploaded it. By default the plugin has every permission its
+    /// manifest lists (an uploader with the role for them).
+    pub fn grant_only(&mut self, permissions: &[Permission]) -> &mut Self {
+        self.granted = permissions.iter().map(|p| p.as_str().to_string()).collect();
+        self
+    }
+
+    /// `owner` booked `room` (`board`, `huddle`, `booth1`…) for a meeting
+    /// running now, for an hour. Everyone else is kept out, unless let in.
+    pub fn book(&mut self, room: &str, owner: &str, title: &str) -> &mut Self {
+        let until = self.now + 3_600_000.0;
+        let r = self.rooms.iter_mut().find(|r| r.id == room).unwrap_or_else(|| panic!("no bookable room {room:?}"));
+        r.booking = Some(Booking { title: title.into(), name: owner.into(), until, yours: false });
+        self.unlocked.retain(|(id, _)| id != room);
+        self
+    }
+
+    /// Who the plugin let into which booked room, as (room, name), oldest first.
+    pub fn unlocked(&self) -> &[(String, String)] { &self.unlocked }
 
     /// The `seed` the next call gets (each call after that gets a new one).
     /// Calls are repeatable: the same seeds every run.
@@ -237,10 +265,20 @@ impl<P: Plugin> TestOffice<P> {
         let event = self.event_now.take();
         let nearby: Vec<Person> = self.people.values().map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone() }).collect();
         let inventory = if who.is_system() { Vec::new() } else { self.inventory(&who.name).to_vec() };
+        // Like the office: rooms only for plugins that may unlock, each
+        // marked `yours` when this actor booked it or was let in.
+        let rooms: Vec<Room> = if self.granted.iter().any(|g| g == "unlock") {
+            self.rooms.iter().cloned().map(|mut r| {
+                if let Some(b) = r.booking.as_mut() {
+                    b.yours = b.name == who.name || self.unlocked.iter().any(|(id, n)| *id == r.id && *n == who.name);
+                }
+                r
+            }).collect()
+        } else { Vec::new() };
         let req = json!({
             "object": self.object, "actor": who, "action": action, "input": input,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
-            "event": event, "seed": seed, "reply": reply,
+            "event": event, "seed": seed, "reply": reply, "permissions": self.granted, "rooms": rooms,
         });
         let out = handle_json::<P>(&serde_json::to_vec(&req).unwrap());
         self.logs.extend(take_logs());
@@ -252,20 +290,46 @@ impl<P: Plugin> TestOffice<P> {
         // call again with the reply (once: a second ask is ignored).
         if let (Some(ask), None) = (r.ask.clone(), &reply) {
             if let Some(state) = raw.get("state") { self.save_state(state); }
-            self.asked.push(ask.clone());
-            let answer = match self.model.as_mut() { Some(m) => m(&ask), None => Err("this office has no model".into()) };
+            let answer = if !self.granted.iter().any(|g| g == "ask") {
+                self.warn("the answer asks the model without the ask permission: add Permission::Ask to MANIFEST (moderators upload those)".into());
+                Err(format!("{} doesn't have the ask permission", self.object.name))
+            } else {
+                self.asked.push(ask.clone());
+                match self.model.as_mut() { Some(m) => m(&ask), None => Err("this office has no model".into()) }
+            };
             let reply = match answer { Ok(text) => json!({ "text": text, "model": "test" }), Err(error) => json!({ "error": error }) };
             self.event_now = event;
             return self.run_with(who, action, input, Some(reply));
         }
         self.check(&r);
 
-        // give: all or nothing, like the office.
-        if !r.give.is_empty() && !who.is_system() {
-            if let Err(why) = self.give_to(&who.name, &r.give) {
+        // take without the permission: dropped, like the office.
+        if !r.take.is_empty() && !self.granted.iter().any(|g| g == "take") {
+            self.warn("the answer takes things without the take permission and the office drops it: add Permission::Take to MANIFEST (moderators upload those)".into());
+            r.take.clear();
+        }
+        // give and take: all or nothing, like the office.
+        if (!r.give.is_empty() || !r.take.is_empty()) && !who.is_system() {
+            if let Err(why) = self.trade(&who.name, &r.give, &r.take) {
                 r = Response { toast: Some(format!("{}: {why}", self.object.name)), ..Response::default() };
                 return r;
             }
+        }
+        // unlock: only with the permission, only someone using it, only a room booked now.
+        if let Some(u) = r.unlock.clone() {
+            let why = if !self.granted.iter().any(|g| g == "unlock") {
+                self.warn("the answer unlocks a room without the unlock permission: add Permission::Unlock to MANIFEST (admins upload those)".into());
+                Some(format!("{} can't open doors: it doesn't have the unlock permission.", self.object.name))
+            } else if who.is_system() || event.is_some() {
+                Some(format!("{}: only someone using it can be let in", self.object.name))
+            } else {
+                match self.rooms.iter().find(|x| x.id == u.room) {
+                    None => { self.warn(format!("unlock: there's no bookable room {:?}", u.room)); Some(format!("{}: no such room", self.object.name)) }
+                    Some(x) if x.booking.is_none() => Some(format!("{}: {} isn't booked right now: just walk in", self.object.name, x.name)),
+                    Some(_) => { self.unlocked.push((u.room.clone(), who.name.clone())); None }
+                }
+            };
+            if let Some(t) = why { r.unlock = None; r.toast = Some(t); }
         }
         if let Some(state) = raw.get("state") { self.save_state(state); }
         if let Some(s) = &r.say { self.said.push(s.clone()); }
@@ -285,8 +349,15 @@ impl<P: Plugin> TestOffice<P> {
         else { self.warn(format!("state is {size} bytes; the office doesn't save state over 32 KB")); }
     }
 
-    fn give_to(&mut self, name: &str, give: &[crate::Give]) -> Result<(), String> {
+    fn trade(&mut self, name: &str, give: &[crate::Give], take: &[crate::Take]) -> Result<(), String> {
         let mut inv = self.inventory(name).to_vec();
+        for t in take {
+            let need = t.qty.clamp(1, limits::STACK);
+            if inv.iter().filter(|s| s.kind == t.kind).map(|s| s.qty).sum::<u32>() < need { return Err(format!("you don't have {need} {}", t.kind)); }
+            let mut left = need;
+            for s in inv.iter_mut().filter(|s| s.kind == t.kind) { let n = left.min(s.qty); s.qty -= n; left -= n; }
+            inv.retain(|s| s.qty > 0);
+        }
         for g in give {
             let mut left = g.qty.unwrap_or(1).clamp(1, limits::STACK);
             for s in inv.iter_mut().filter(|s| s.kind == g.kind) {
@@ -328,6 +399,7 @@ impl<P: Plugin> TestOffice<P> {
                 if !ok { w.push(format!("display.glow {g:?} isn't a #rrggbb colour and is dropped")); }
             }
         }
+        assert!(r.take.len() <= limits::GIVE, "take uses up {} kinds of things; the office takes {} at most", r.take.len(), limits::GIVE);
         assert!(r.give.len() <= limits::GIVE, "give hands out {} things; the office takes {} at most", r.give.len(), limits::GIVE);
         for g in &r.give {
             assert!(valid_kind(&g.kind), "give kind {:?} must be [a-z0-9:._-], up to 32 characters", g.kind);

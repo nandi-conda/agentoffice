@@ -46,10 +46,19 @@ pub struct Response {
     /// Ask the office's language model. The office calls you again straight
     /// away with the same action and input and [`Request::reply`] set; only
     /// the `state` of this first answer is kept, the rest comes from the
-    /// second. Only the office's own objects get an answer: uploads get a
-    /// reply with an `error`, as does an office with no model.
+    /// second. Needs [`Permission::Ask`](crate::Permission::Ask): without it,
+    /// or in an office with no model, the reply has an `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ask: Option<Ask>,
+    /// Things of the person's to use up (≤ 5), all or nothing together with
+    /// `give`. Needs [`Permission::Take`](crate::Permission::Take).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub take: Vec<Take>,
+    /// Let the person who used it into this meeting room while it's booked
+    /// by someone else, as if the meeting had let them in. Needs
+    /// [`Permission::Unlock`](crate::Permission::Unlock) (admins upload those).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unlock: Option<Unlock>,
 }
 
 impl Response {
@@ -73,6 +82,25 @@ impl Response {
     pub fn unwatch(mut self) -> Self { self.watch = Some(Vec::new()); self }
     /// Ask the office's model (see [`Response::ask`]'s field).
     pub fn ask(mut self, ask: Ask) -> Self { self.ask = Some(ask); self }
+    /// Use up `qty` of `kind` the person carries (see the field).
+    pub fn take(mut self, kind: impl Into<String>, qty: u32) -> Self { self.take.push(Take { kind: kind.into(), qty }); self }
+    /// Let them into room `room` (an id from [`Request::rooms`](crate::Request::rooms)).
+    pub fn unlock(mut self, room: impl Into<String>) -> Self { self.unlock = Some(Unlock { room: room.into() }); self }
+}
+
+/// Things to use up: `qty` (1–20) of `kind`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Take {
+    pub kind: String,
+    pub qty: u32,
+}
+
+/// A meeting room to let the person into.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Unlock {
+    pub room: String,
 }
 
 /// A question for the office's language model.

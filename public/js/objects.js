@@ -3,9 +3,12 @@
 // items, buttons, a list, a text input) which is rendered here, escaped.
 // Every action goes back to the server as { t: 'use', id, action, input }.
 
+import { localize } from './time.js';
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // **bold** and line breaks are the only formatting plugins get.
-const rich = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+// Times arrive as <t:ms> stamps (the SDK's stamp()) and show in local time.
+const rich = (s) => esc(localize(s)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
 
 // Draw a plugin's panel into el; use(action, input) is called for each choice.
 // Shared by the objects on the map and the workstation apps that run on plugins.
@@ -15,9 +18,9 @@ export function renderUi(el, ui, title, use) {
     ${ui.text ? `<p class="obj-text">${rich(ui.text)}</p>` : ''}
     ${ui.items?.length ? `<div class="obj-items">${ui.items.map((it, i) => `
       <button class="obj-item" data-i="${i}" ${it.disabled ? 'disabled data-off' : ''}>
-        <span>${esc(it.label)}</span>${it.detail ? `<small class="muted">${esc(it.detail)}</small>` : ''}
+        <span>${esc(it.label)}</span>${it.detail ? `<small class="muted">${esc(localize(it.detail))}</small>` : ''}
       </button>`).join('')}</div>` : ''}
-    ${ui.list?.rows?.length ? `<p class="small"><b>${esc(ui.list.title)}</b></p><ol class="obj-list small">${ui.list.rows.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>` : ''}
+    ${ui.list?.rows?.length ? `<p class="small"><b>${esc(ui.list.title)}</b></p><ol class="obj-list small">${ui.list.rows.map((r) => `<li>${esc(localize(r))}</li>`).join('')}</ol>` : ''}
     ${ui.input ? `<div class="row obj-ask"><input maxlength="${ui.input.maxLength}" placeholder="${esc(ui.input.placeholder)}"><button class="btn primary obj-send">${esc(ui.input.button)}</button></div>` : ''}
     ${ui.buttons?.length ? `<div class="row">${ui.buttons.map((b, i) => `<button class="btn ${b.primary ? 'primary' : 'ghost'} obj-btn" data-i="${i}">${esc(b.label)}</button>`).join('')}</div>` : ''}`;
   el.querySelectorAll('.obj-item').forEach((b) => b.addEventListener('click', () => use(ui.items[+b.dataset.i].action)));

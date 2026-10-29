@@ -35,7 +35,7 @@ Store the code and manifest of a new upload (from gallery:main).
 
 | Param | Type | |
 | --- | --- | --- |
-| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, api }` | An uploaded object |
+| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, permissions, level, api }` | An uploaded object |
 | &nbsp;&nbsp;&nbsp;`item.id` | `string ≤ 200` | Object id on the map (u-…); its entity is uobj:<id> |
 | &nbsp;&nbsp;&nbsp;`item.name` | `string ≤ 40` | Name |
 | &nbsp;&nbsp;&nbsp;`item.prompt` | `string ≤ 60` | What the E prompt says |
@@ -51,6 +51,8 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
 | &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
+| &nbsp;&nbsp;&nbsp;`item.permissions` | `"ask" \| "take" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: ask (trusted), take (trusted), unlock (privileged) |
+| &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |
 | &nbsp;&nbsp;&nbsp;`item.api` | `object` | The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest. |
 | `code` | `string ≤ 699052` | Base64 code |
 

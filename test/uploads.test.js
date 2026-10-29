@@ -9,10 +9,13 @@ import { PluginHost } from '../server/plugins.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
 import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm } from '../server/sandbox.js';
 import { placeNear, MAX_PER_OWNER } from '../server/entities/gallery.js';
+import { zoneAt } from '../public/js/map.js';
+import { levelOf, uploadError } from '../public/js/permissions.js';
 import { readManifest, cleanManifest, MANIFEST_SECTION } from '../public/js/manifest.js';
 
 const GUESTBOOK = new Uint8Array(readFileSync(new URL('../public/plugins/guestbook.wasm', import.meta.url)));
 const b64 = toBase64(GUESTBOOK);
+const plugin = (f) => toBase64(new Uint8Array(readFileSync(new URL(`../public/plugins/${f}`, import.meta.url))));
 
 // A tiny module in raw bytes: exports memory, alloc, interact, and imports what we say.
 function wasm({ imports = [], exports = ['memory', 'alloc', 'interact'] } = {}) {
@@ -54,6 +57,21 @@ test('a module carries its manifest in a custom section (the agentoffice-plugin 
   assert.equal(m2.glow, '');
   assert.deepEqual(Object.keys(m2.api), ['ok']);
   assert.equal(cleanManifest('nope'), null);
+  assert.deepEqual(cleanManifest({ permissions: ['unlock', 'root', 'ask', 'ask'] }).permissions, ['ask', 'unlock']);
+  assert.deepEqual(checkUpload('wasm', GUESTBOOK).manifest.permissions, []);
+});
+
+test('permission levels: the highest permission decides who may upload', () => {
+  assert.equal(levelOf([]), 'basic');
+  assert.equal(levelOf(['take']), 'trusted');
+  assert.equal(levelOf(['ask', 'unlock']), 'privileged');
+  assert.equal(uploadError('member', []), null);
+  assert.match(uploadError('member', ['ask']), /only moderators and up/);
+  assert.equal(uploadError('moderator', ['ask', 'take']), null);
+  assert.match(uploadError('moderator', ['unlock'], 'Key'), /^Key asks for unlock \(privileged\): only admins and up/);
+  assert.equal(uploadError('admin', ['unlock']), null);
+  assert.equal(uploadError('owner', ['unlock', 'ask']), null);
+  assert.match(uploadError('banned', ['ask']), /only/);
 });
 
 test('runWasm speaks the JSON ABI (the guestbook example)', async () => {
@@ -200,6 +218,56 @@ test('uploads are checked, capped per person, and admins (moderators and up) can
   mod.msg({ t: 'gallery', op: 'remove', rid: 1, req: { id } });
   await settle();
   assert.equal(mod.last('galleryres').result.ok, true);
+  rt.stop();
+});
+
+test('permissions decide who may upload: the Skeleton Key is admins only, and opens booked rooms', async () => {
+  const clock = { t: Date.UTC(2026, 9, 29, 14, 0) };
+  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox() }), roles: { owners: ['did:plc:boss'], admins: ['did:plc:adm'] } } });
+  const o = new Office({}, { runtime: rt, now: () => clock.t });
+  await o.ready;
+  const key = { lang: 'wasm', code: plugin('skeleton_key.wasm') };
+  const ada = await join(o, 'ada', 'did:plc:ada');
+  ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: key });
+  await settle(20);
+  assert.match(ada.last('galleryres').result.error, /asks for unlock \(privileged\): only admins and up/);
+  // The kiosk asks the model: trusted, moderators and up.
+  ada.msg({ t: 'gallery', op: 'upload', rid: 2, req: { lang: 'wasm', code: plugin('kiosk.wasm') } });
+  await settle(20);
+  assert.match(ada.last('galleryres').result.error, /asks for ask \(trusted\): only moderators and up/);
+
+  const adm = await join(o, 'adm', 'did:plc:adm');
+  adm.msg({ t: 'gallery', op: 'upload', rid: 3, req: key });
+  await settle(50);
+  const item = adm.last('galleryres').result.object;
+  assert.ok(item, JSON.stringify(adm.last('galleryres')));
+  assert.deepEqual([item.name, item.level, item.permissions], ['Skeleton Key', 'privileged', ['unlock']]);
+
+  // Grace books the boardroom: ada is kept out.
+  const grace = await join(o, 'grace', 'did:plc:grace');
+  grace.msg({ t: 'book', op: 'create', room: 'board', start: 'now', minutes: 30, title: 'Secret plans' });
+  await settle(20);
+  const pos = (ws) => [...o.peers.values()].find((p) => p.name === ws);
+  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await settle();
+  assert.match(ada.last('bounce').text, /restricted/);
+
+  // The key lists it, and opens it.
+  ada.msg({ t: 'move', x: 20.5, y: 26.5, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'use', id: item.id, action: 'use' });
+  await settle(300);
+  const row = ada.last('objui').ui.items.find((r) => r.action === 'open:board');
+  assert.ok(row && !row.disabled, JSON.stringify(ada.last('objui')));
+  assert.match(row.detail, /Secret plans/);
+  clock.t += 1000; // past the object's cooldown
+  ada.msg({ t: 'use', id: item.id, action: 'open:board' });
+  await settle(300);
+  assert.match(ada.last('objui').toast, /Boardroom is open to you/, JSON.stringify(ada.sent.filter((m) => m.t === 'objui').slice(-2)));
+  assert.match(grace.last('roomnote').text, /ada let themselves into Boardroom with Skeleton Key/);
+  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await settle();
+  assert.equal(zoneAt(pos('ada').x, pos('ada').y).id, 'board');
   rt.stop();
 });
 

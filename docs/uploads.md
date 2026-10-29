@@ -26,8 +26,39 @@ remove an object, plus anyone whose DID is in the office's `ADMIN_DIDS`
 (comma-separated, a Worker var or env var).
 
 Uploaded objects can hand out items with `give` (they land in the person's
-inventory, see [plugins.md](plugins.md)) but can't `take` anyone's things:
-the office drops a `take` from an upload.
+inventory, see [plugins.md](plugins.md)). Anything more needs a
+[permission](#permission-levels), and who may upload the plugin follows from it.
+
+## Permission levels
+
+A plugin lists what it needs beyond the basics in its manifest
+(`.permissions(&[Permission::Unlock])`). Each permission belongs to a level,
+and the level decides whose upload the office takes (`public/js/permissions.js`,
+the capabilities `plugins.trusted` and `plugins.privileged` in
+`public/js/roles.js`):
+
+| Level | Permissions | Who can upload it |
+| --- | --- | --- |
+| basic | none: panels, `say`, `toast`, `display`, music, `give`, `wakeAt`, `watch` | anyone signed in |
+| trusted | `ask` (the office's language model, which costs money), `take` (use up things the person carries) | moderators, admins, owners |
+| privileged | `unlock` (let whoever uses it into a meeting room someone else booked) | admins and owners |
+
+The office keeps what was granted with the upload (`permissions` and `level`
+in `gallery_view`) and only honours that: an `ask` without the permission
+gets `reply: { error }`, a `take` is dropped, an `unlock` refused with a
+toast. The request says what the plugin has (`permissions`), and plugins
+with `unlock` also get `rooms`. The office's own objects (public/plugins) get
+whatever their manifest declares: the help kiosk declares `ask`. JS uploads
+have no manifest, so they're always basic. A moderator can still remove any
+upload, privileged or not.
+
+**The Skeleton Key** ([`plugins/wasm-skeleton-key`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-skeleton-key),
+built copy `public/plugins/skeleton_key.wasm`) is the privileged example:
+admins see a "the Skeleton Key" link in the 🧩 panel. Its panel lists every
+bookable room; for one that's booked and not yours, **open** lets you in as
+if the meeting had admitted you (until it ends), and the people in the
+meeting get a note that you let yourself in with the key. Anyone can use it
+once an admin has put it out, so put it somewhere sensible.
 
 ## How they run
 
@@ -165,18 +196,20 @@ builds natively for `cargo test`.
 
 | Piece | What it gives you |
 | --- | --- |
-| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event), `now`, `seed` (`rng()`, `pick(&list)`, `chance(p)`: WASM has no randomness of its own, so the office sends a random seed every call), `reply` (`answer()`: what the office's model said, see below). |
-| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`, `.ask(Ask::new(question).system(…))` (only the office's own objects get the model's answer; an upload's `reply` is an error, see [plugins.md](plugins.md#asking-the-offices-model)). `Response::error(msg)` is just a toast. |
+| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event), `now`, `seed` (`rng()`, `pick(&list)`, `chance(p)`: WASM has no randomness of its own, so the office sends a random seed every call), `reply` (`answer()`: what the office's model said, see below), `permissions` (`may(Permission::Ask)`: what the office granted), `rooms` (`room(id)`: each bookable room and the `booking` on now, with `yours`; only for plugins with `unlock`). |
+| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`, `.ask(Ask::new(question).system(…))` (needs `Permission::Ask`; without it the `reply` is an error, see [plugins.md](plugins.md#asking-the-offices-model)), `.take(kind, qty)` (needs `Permission::Take`), `.unlock(room_id)` (needs `Permission::Unlock`). `Response::error(msg)` is just a toast. |
 | `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
-| `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. Uploads can't `take`, so there's no `Take`. |
+| `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. |
+| `stamp(ms)` | A time for text people read (`<t:ms>`): browsers show it as a 12-hour clock in their own zone. Never format times yourself. |
 | `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
-| `TestOffice` | `cargo test` stand-in for the office (below): `.seed(n)` fixes the next call's seed (calls are repeatable anyway), `.model(\|ask\| Ok("…".into()))` answers `ask`, `.asked()` lists the questions. |
+| `TestOffice` | `cargo test` stand-in for the office (below): `.seed(n)` fixes the next call's seed (calls are repeatable anyway), `.model(\|ask\| Ok("…".into()))` answers `ask`, `.asked()` lists the questions, `.grant_only(&[…])` plays an upload by someone without the role (by default it has every permission its manifest lists), `.book("board", "Grace", "Planning")` books a room now and `.unlocked()` lists who your plugin let in where. Using a permission you didn't declare is a warning. |
 
 ### The manifest
 
 `Manifest::new(name)` with `.doc()`, `.prompt()`, `.emoji()`, `.glow()`,
 `.look(Look::Plinth | Kiosk | Jukebox | Vending | EightBall)` and
-`.actions(&[Action::new("id", "what it does").input("what to type")])`. It's
+`.actions(&[Action::new("id", "what it does").input("what to type")])` and
+`.permissions(&[Permission::Ask | Take | Unlock])` ([levels](#permission-levels)). It's
 a `const`, checked when you compile: a name over 40 characters, a glow that
 isn't a colour or an action listed twice is a build error, not a surprise
 on upload.

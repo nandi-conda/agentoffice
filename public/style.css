@@ -497,6 +497,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .gal-form .row input, .gal-form .row select { height: 40px; box-sizing: border-box; width: 100%; }
 .gal-form .gal-glow { padding: 3px; cursor: pointer; }
 .gal-err { color: #b91c1c; margin: 0; }
+.gal-perm { margin: 0 0 8px; }
+.gal-perm.gal-no { color: #b91c1c; }
 .obj-by { margin-top: 10px; }
 /* ---- inventory ---- */
 .tb.inv-btn { position: relative; font-size: 17px; }

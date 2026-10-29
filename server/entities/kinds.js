@@ -9,7 +9,7 @@ import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
 import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
 import { Workstation } from './workstation.js';
-import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, inRoomOrDoor } from '../../public/js/rooms.js';
+import { MIN, RULES, roomById, activeBooking, checkSlot, toTime, parseInvitees, isHolder, keyOf, inRoomOrDoor } from '../../public/js/rooms.js';
 import { stamp, stampRange } from '../../public/js/time.js';
 import { Wing, ChannelRoom } from './channels.js';
 import { ROLES, GRANTABLE, effectiveRole, grantError, can } from '../../public/js/roles.js';
@@ -504,6 +504,7 @@ export class Room extends Entity {
       }, 'What to do', ['op']) },
       returns: obj({ booking: opt(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') })), error: opt(str('Why not')) }),
     },
+    unlock: { doc: 'Let someone into the meeting running now, past the booking, as if a holder had let them in: what a plugin with the unlock permission (e.g. the Skeleton Key) does for whoever uses it. The people in the meeting are told.', params: { who: WHO, by: str('What let them in', 40) }, returns: { type: 'object', description: '{ booking } or { error }' }, mutates: true, internal: true },
     tick: { doc: 'Send due reminders and announcements, release no-shows. Safe to call as often as you like; the alarm calls it.', params: { opts: opt(obj({ presence: arr(WHO, 'Who is in') })) }, mutates: true, internal: true },
   };
   static events = { subscribes: { 'zone:<room>': 'enter: a holder turning up keeps the booking from being released' } };
@@ -618,6 +619,22 @@ export class Room extends Entity {
       return done(b);
     }
     return { error: 'unknown booking op' };
+  }
+
+  // A plugin with the unlock permission let `who` in: they count as admitted
+  // to the meeting running now, and the meeting hears about it.
+  async unlock(who, by = 'a key') {
+    const now = this.now(), room = this.room;
+    const b = activeBooking(this.bookings, room.id, now);
+    if (!b) return { error: `${room.name} isn't booked right now: just walk in` };
+    if (isHolder(b, who)) return { booking: b };
+    b.admitted = [...new Set([...(b.admitted || []), keyOf(who)])];
+    const presence = await this.world.presence().catch(() => []);
+    const effects = presence.filter((q) => q.id !== who.id && isHolder(b, q)).map((q) => this.note(q, b, 'unlock', `🗝️ ${who.name} let themselves into ${room.name} with ${clip(by, 40)}`));
+    effects.push(this.note(who, b, 'unlock', `🔓 ${room.name} is open to you until “${b.title}” ends at ${stamp(b.end)}`));
+    await this.changed();
+    await this.emit(...effects);
+    return { booking: b };
   }
 
   // Reminders, start/end announcements, locking people out, and releasing

@@ -53,9 +53,9 @@ mod response;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod testing;
 
-pub use manifest::{Action, Look, Manifest};
-pub use request::{Actor, Event, Item, Object, Person, Reply, Request, Rng};
-pub use response::{Ask, Button, Display, Give, Input, List, Music, Response, Row, Ui};
+pub use manifest::{Action, Look, Manifest, Permission};
+pub use request::{Actor, Booking, Event, Item, Object, Person, Reply, Request, Rng, Room};
+pub use response::{Ask, Button, Display, Give, Input, List, Music, Response, Row, Take, Ui, Unlock};
 #[doc(hidden)]
 pub use serde;
 #[doc(hidden)]
@@ -63,7 +63,7 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{export_plugin, log, Action, Actor, Ask, Display, Event, Give, Input, Item, Look, Manifest, Plugin, Reply, Request, Response, Rng, Row, Ui};
+    pub use crate::{export_plugin, log, stamp, Action, Actor, Ask, Booking, Display, Event, Give, Input, Item, Look, Manifest, Permission, Plugin, Reply, Request, Response, Rng, Room, Row, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }
@@ -172,6 +172,11 @@ pub fn handle_json<P: Plugin>(input: &[u8]) -> Vec<u8> {
     };
     serde_json::to_vec(&answer).unwrap_or_else(|e| format!("{{\"toast\":\"couldn't encode the answer: {e}\"}}").into_bytes())
 }
+
+/// A time (epoch ms) for text people read: the browser shows it as a
+/// 12-hour clock in their own time zone. WASM doesn't know anyone's zone,
+/// so never format times yourself; works in `say`, `toast` and panels.
+pub fn stamp(ms: f64) -> String { format!("<t:{}>", ms.round() as i64) }
 
 /// A line in the office's log (`just cf-tail`, or the Node console). On
 /// native builds it prints to stderr, and [`testing::TestOffice`] collects it.

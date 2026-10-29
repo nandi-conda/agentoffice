@@ -63,4 +63,5 @@ nav:
       - "wasm: Jukebox": api/upload-jukebox.md
       - "wasm: Help kiosk": api/upload-help-kiosk.md
       - "wasm: Office Rally": api/upload-office-rally.md
+      - "upload: Skeleton Key": api/upload-skeleton-key.md
       - "wasm: Vending machine": api/upload-vending-machine.md

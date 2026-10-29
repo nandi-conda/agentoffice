@@ -162,7 +162,8 @@ export function checkUpload(lang, bytes) {
 
 // The office's own WASM objects: read(file) gives the bytes of
 // public/plugins/<file> (the disk on Node, the ASSETS binding on Cloudflare).
-// Returns file -> Promise<{ code (base64), version }>, each read once.
+// Returns file -> Promise<{ code (base64), version, permissions }>, each read
+// once. The office's own objects get the permissions their manifest declares.
 export function bundledWasm(read) {
   const cache = new Map();
   return (file) => {
@@ -170,9 +171,9 @@ export function bundledWasm(read) {
     if (!cache.has(file)) {
       const p = (async () => {
         const bytes = new Uint8Array(await read(file));
-        checkUpload('wasm', bytes);
+        const info = checkUpload('wasm', bytes);
         const h = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-        return { code: toBase64(bytes), version: [...h.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join('') };
+        return { code: toBase64(bytes), version: [...h.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join(''), permissions: info.manifest?.permissions || [] };
       })();
       p.catch(() => cache.delete(file)); // try again next time
       cache.set(file, p);

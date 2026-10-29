@@ -5,6 +5,8 @@
 // the actions in gallery_view. Shared by the upload panel (gallery.js) and
 // the server's checks (server/sandbox.js); nothing in it is trusted.
 
+import { cleanPermissions } from './permissions.js';
+
 export const MANIFEST_SECTION = 'agentoffice.manifest';
 const MAX_BYTES = 8 * 1024;
 const MAX_ACTIONS = 24;
@@ -19,6 +21,8 @@ export function cleanManifest(raw) {
     emoji: [...clip(raw.emoji, 8)].slice(0, 2).join(''),
     glow: /^#[0-9a-f]{3,8}$/i.test(raw.glow || '') ? raw.glow : '',
     look: /^[a-z]{1,16}$/.test(raw.look || '') ? raw.look : '',
+    // What it needs beyond the basics (public/js/permissions.js): decides who may upload it.
+    permissions: cleanPermissions(raw.permissions),
     api: {},
   };
   const api = raw.api && typeof raw.api === 'object' ? Object.entries(raw.api) : [];

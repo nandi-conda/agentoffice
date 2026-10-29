@@ -89,7 +89,7 @@ pub struct Event {
 
 /// What the office's model answered to your [`Response::ask`]: `text`, or
 /// `error` when there was no answer (no model in this office, it failed,
-/// or it's an upload: only the office's own objects may ask).
+/// or the plugin doesn't have [`Permission::Ask`](crate::Permission::Ask)).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Reply {
@@ -97,6 +97,30 @@ pub struct Reply {
     /// Which model answered.
     pub model: Option<String>,
     pub error: Option<String>,
+}
+
+/// A bookable meeting room, in [`Request::rooms`].
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Room {
+    /// `boardroom`, `huddle`, `booth1`…: what [`Response::unlock`](crate::Response::unlock) takes.
+    pub id: String,
+    pub name: String,
+    /// The meeting on in it now, if any.
+    pub booking: Option<Booking>,
+}
+
+/// A meeting running now.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Booking {
+    pub title: String,
+    /// Who booked it.
+    pub name: String,
+    /// Epoch ms when it ends.
+    pub until: f64,
+    /// The actor is in the meeting already (booked it, invited, or let in).
+    pub yours: bool,
 }
 
 /// One call of your plugin. Your state isn't in here: it's your plugin
@@ -127,6 +151,12 @@ pub struct Request {
     /// Set on the second call of a turn that answered with [`Response::ask`]:
     /// the same action and input again, with what the model said.
     pub reply: Option<Reply>,
+    /// What the office lets this plugin do beyond the basics (`ask`, `take`,
+    /// `unlock`): what its manifest declared and its uploader was allowed.
+    pub permissions: Vec<String>,
+    /// The bookable rooms and what's on in each now. Only sent to plugins
+    /// with the `unlock` permission; empty otherwise.
+    pub rooms: Vec<Room>,
 }
 
 impl Request {
@@ -169,6 +199,10 @@ impl Request {
     pub fn chance(&self, p: f64) -> bool { self.rng().chance(p) }
     /// What the model answered, when this is the reply to your `ask`.
     pub fn answer(&self) -> Option<&str> { self.reply.as_ref()?.text.as_deref() }
+    /// Whether the office granted `p` to this plugin.
+    pub fn may(&self, p: crate::Permission) -> bool { self.permissions.iter().any(|x| x == p.as_str()) }
+    /// A room from [`rooms`](Request::rooms) by id.
+    pub fn room(&self, id: &str) -> Option<&Room> { self.rooms.iter().find(|r| r.id == id) }
 }
 
 /// A small random number generator (SplitMix64): plenty for dice and
@@ -211,6 +245,8 @@ pub(crate) struct RawRequest {
     pub now: f64,
     pub seed: u64,
     pub reply: Option<Reply>,
+    pub permissions: Vec<String>,
+    pub rooms: Vec<Room>,
 }
 
 impl RawRequest {
@@ -222,6 +258,7 @@ impl RawRequest {
             input: self.input, fresh,
             nearby: self.nearby, inventory: self.inventory, event: self.event, now: self.now,
             seed: self.seed, reply: self.reply,
+            permissions: self.permissions, rooms: self.rooms,
         })
     }
 }

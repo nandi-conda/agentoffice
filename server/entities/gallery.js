@@ -17,6 +17,7 @@ import { FURNITURE, isBlocked, zoneAt } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { checkUpload, fromBase64, MAX_WASM, LANGS } from '../sandbox.js';
 import { can } from '../../public/js/roles.js';
+import { PERMISSIONS, LEVELS, levelOf, uploadError } from '../../public/js/permissions.js';
 
 export const MAX_PER_OWNER = 3;
 export const MAX_OBJECTS = 40;
@@ -38,6 +39,8 @@ const ITEM = obj({
   x: num('Tile x', 0), y: num('Tile y', 0), zone: { type: ['string', 'null'], description: 'Zone it stands in' },
   owner: obj({ did: str('Uploader DID'), handle: { type: ['string', 'null'] }, name: str('Uploader name') }, 'Who uploaded it'),
   createdAt: num('When, epoch ms', 0),
+  permissions: arr({ type: 'string', enum: Object.keys(PERMISSIONS) }, 'What its manifest asked for beyond the basics and was granted: ' + Object.entries(PERMISSIONS).map(([p, v]) => `${p} (${v.level})`).join(', ')),
+  level: { type: 'string', enum: Object.keys(LEVELS), description: 'basic, trusted (moderators upload it) or privileged (admins upload it)' },
   api: { type: 'object', description: 'The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest.' },
 }, 'An uploaded object');
 
@@ -59,7 +62,7 @@ export class Gallery extends Entity {
   static api = {
     view: { doc: 'Every uploaded object on the map.', returns: arr(ITEM, 'Uploaded objects') },
     upload: {
-      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out. At most ${MAX_PER_OWNER} per person.`,
+      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out, and the permissions it lists decide who may upload it (trusted ones like ask and take: moderators; privileged ones like unlock: admins). At most ${MAX_PER_OWNER} per person.`,
       who: true,
       mutates: true,
       params: {
@@ -106,6 +109,10 @@ export class Gallery extends Entity {
     const m = info.manifest || {};
     const name = clip(req.name, 40) || clip(m.name, 40);
     if (!name) return { error: 'give it a name' };
+    // What it asks for beyond the basics decides who may put it out.
+    const permissions = m.permissions || [];
+    const refused = uploadError(who.role, permissions, name);
+    if (refused) return { error: refused };
     const color = (c) => /^#[0-9a-f]{3,8}$/i.test(c || '');
     const spot = Number.isFinite(who.x) && Number.isFinite(who.y) ? placeNear(who.x, who.y, this.items) : null;
     if (!spot) return { error: 'no room to put it here: step into open floor and try again' };
@@ -118,6 +125,7 @@ export class Gallery extends Entity {
       emoji: [...clip(req.emoji, 8)].slice(0, 2).join('') || m.emoji || '🧩',
       glow: color(req.glow) ? req.glow : color(m.glow) ? m.glow : '#a78bfa',
       look: LOOKS.includes(req.look) ? req.look : LOOKS.includes(m.look) ? m.look : 'plinth',
+      permissions, level: levelOf(permissions),
       api: m.api || {},
       x: spot.x, y: spot.y, zone: zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
       owner: { did: who.did, handle: who.handle || null, name: who.name },
@@ -160,7 +168,7 @@ export class UploadedObject extends PluginObject {
 
   async pluginObject(f, zone) {
     this.code ??= await this.host.storage.get('code');
-    return { id: f.id, plugin: 'upload', name: f.name, zone, upload: { id: f.id, version: f.version, lang: f.lang, code: this.code } };
+    return { id: f.id, plugin: 'upload', name: f.name, zone, permissions: f.permissions || [], upload: { id: f.id, version: f.version, lang: f.lang, code: this.code } };
   }
 
   async install(item, code) {

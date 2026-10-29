@@ -12,6 +12,7 @@ import path from 'node:path';
 import { checkUpload, toBase64 } from '../server/sandbox.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
 import { sanitize } from '../server/plugins.js';
+import { levelOf, levelRole } from '../public/js/permissions.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const exists = (p) => access(p).then(() => true, () => false);
@@ -44,6 +45,7 @@ async function check(names) {
       if (m) {
         console.log(`  ${m.emoji || '🧩'} ${m.name}${m.prompt ? ` · "${m.prompt}"` : ''}${m.look ? ` · looks like ${m.look}` : ''}${m.glow ? ` · ${m.glow}` : ''}`);
         if (m.doc) console.log(`  ${m.doc}`);
+        if (m.permissions.length) console.log(`  permissions ${m.permissions.join(', ')}: ${levelOf(m.permissions)}, uploaded by ${levelRole(levelOf(m.permissions))}s and up`);
         for (const [a, spec] of Object.entries(m.api)) console.log(`  action ${a}${spec.params?.input ? ' (+ input)' : ''}: ${spec.doc}`);
       } else console.log('  no manifest (export_plugin! embeds one): the upload form starts blank');
       // Someone walks up: the same sandbox `just start` runs uploads in.

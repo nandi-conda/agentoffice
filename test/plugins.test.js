@@ -73,8 +73,14 @@ test('ask: the office runs the model and calls back with the reply, keeping the 
   const broken = fakePlugins(fn, { ai: async () => { throw new Error('quota'); } });
   assert.equal((await broken.interact({ object: juke, actor })).result.say, 'offline: quota');
   const upload = { id: 'u-1', plugin: 'upload', name: 'Up', upload: { id: 'u-1', version: 'v', lang: 'wasm', code: '' } };
-  assert.match((await fakePlugins(fn, { ai }).interact({ object: upload, actor })).result.say, /only the office's own objects/);
-  assert.equal(asked.length, 1, 'uploads never reach the model');
+  assert.match((await fakePlugins(fn, { ai }).interact({ object: upload, actor })).result.say, /Up doesn't have the ask permission/);
+  assert.equal(asked.length, 1, 'uploads without the ask permission never reach the model');
+  // Nor do the office's own objects that don't declare it.
+  assert.match((await fakePlugins(fn, { ai, permissions: [] }).interact({ object: juke, actor })).result.say, /doesn't have the ask permission/);
+  assert.equal(asked.length, 1);
+  // An upload granted it (a moderator uploaded it) gets the model.
+  assert.equal((await fakePlugins(fn, { ai }).interact({ object: { ...upload, permissions: ['ask'] }, actor })).result.say, 'kitchen');
+  assert.equal(asked.length, 2);
 });
 
 test('workersAi tries the models in turn and reads both answer shapes', async () => {
@@ -98,7 +104,7 @@ test('sanitize drops what the client can\'t safely show', () => {
   assert.equal(s.ui.buttons.length, 0);
   assert.equal(s.ui.input.maxLength, 500);
   assert.equal(s.ui.text, '<b>hi</b>'); // escaped by the client, never trusted as HTML
-  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [] });
+  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [], unlock: null });
 });
 
 test('cleanRequest', () => {

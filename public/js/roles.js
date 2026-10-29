@@ -39,6 +39,9 @@ export const CAPS = {
   'roles.grant': 'admin',
   'people.ban': 'admin',
   logs: 'admin',
+  // Uploading plugins whose manifest asks for more than the basics (public/js/permissions.js).
+  'plugins.trusted': 'moderator',
+  'plugins.privileged': 'admin',
 };
 
 // The roles an admin can hand out in the panel (member = back to the default).

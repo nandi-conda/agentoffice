@@ -30,6 +30,47 @@ impl Look {
     }
 }
 
+/// Something a plugin may ask the office to do beyond the basics (panels,
+/// speech, display, music, give, timers, watching zones). Each belongs to a
+/// level, and the level decides who may upload the plugin:
+///
+/// | permission | level | uploaded by |
+/// |---|---|---|
+/// | [`Ask`](Permission::Ask) | trusted | moderators and up |
+/// | [`Take`](Permission::Take) | trusted | moderators and up |
+/// | [`Unlock`](Permission::Unlock) | privileged | admins and owners |
+///
+/// Without the permission the office ignores that part of your answer: an
+/// ask gets a reply with an `error`, a take is dropped, an unlock refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Permission {
+    /// Ask the office's language model ([`Response::ask`](crate::Response::ask)).
+    Ask,
+    /// Use up things the person carries ([`Response::take`](crate::Response::take)).
+    Take,
+    /// Let whoever uses it into a meeting room someone else booked
+    /// ([`Response::unlock`](crate::Response::unlock)); the request then
+    /// carries [`Request::rooms`](crate::Request::rooms).
+    Unlock,
+}
+
+impl Permission {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Permission::Ask => "ask",
+            Permission::Take => "take",
+            Permission::Unlock => "unlock",
+        }
+    }
+    /// `basic` never appears: it's what a plugin with no permissions is.
+    pub const fn level(self) -> &'static str {
+        match self {
+            Permission::Ask | Permission::Take => "trusted",
+            Permission::Unlock => "privileged",
+        }
+    }
+}
+
 /// An action your panels send, for agents and the docs.
 #[derive(Clone, Copy, Debug)]
 pub struct Action {
@@ -70,11 +111,13 @@ pub struct Manifest {
     pub glow: &'static str,
     pub look: Look,
     pub actions: &'static [Action],
+    /// What it needs beyond the basics; see [`Permission`].
+    pub permissions: &'static [Permission],
 }
 
 impl Manifest {
     pub const fn new(name: &'static str) -> Self {
-        Manifest { name, prompt: "", doc: "", emoji: "", glow: "", look: Look::Plinth, actions: &[] }
+        Manifest { name, prompt: "", doc: "", emoji: "", glow: "", look: Look::Plinth, actions: &[], permissions: &[] }
     }
     pub const fn prompt(mut self, s: &'static str) -> Self { self.prompt = s; self }
     pub const fn doc(mut self, s: &'static str) -> Self { self.doc = s; self }
@@ -82,6 +125,18 @@ impl Manifest {
     pub const fn glow(mut self, s: &'static str) -> Self { self.glow = s; self }
     pub const fn look(mut self, l: Look) -> Self { self.look = l; self }
     pub const fn actions(mut self, a: &'static [Action]) -> Self { self.actions = a; self }
+    /// What it needs beyond the basics (who may upload it follows from these).
+    pub const fn permissions(mut self, p: &'static [Permission]) -> Self { self.permissions = p; self }
+    /// Whether it declares `p`.
+    pub const fn has(&self, p: Permission) -> bool {
+        let mut i = 0;
+        while i < self.permissions.len() { if self.permissions[i] as u8 == p as u8 { return true; } i += 1; }
+        false
+    }
+    /// `basic`, `trusted` or `privileged`: the highest level of its permissions.
+    pub const fn level(&self) -> &'static str {
+        if self.has(Permission::Unlock) { "privileged" } else if self.permissions.is_empty() { "basic" } else { "trusted" }
+    }
 
     /// The manifest as JSON, the way it's embedded.
     pub fn to_json(&self) -> String {
@@ -184,6 +239,18 @@ pub const fn encode<const N: usize>(m: &Manifest) -> Writer<N> {
     w = w.byte(b'{').raw("\"manifest\":1,");
     w = w.field("name", m.name).field("prompt", m.prompt).field("doc", m.doc).field("emoji", m.emoji).field("glow", m.glow);
     w = w.field("look", m.look.as_str());
+    if !m.permissions.is_empty() {
+        w = w.raw("\"permissions\":[");
+        let mut i = 0;
+        while i < m.permissions.len() {
+            let mut j = 0;
+            while j < i { assert!(m.permissions[j] as u8 != m.permissions[i] as u8, "manifest: a permission is listed twice"); j += 1; }
+            if i > 0 { w = w.byte(b','); }
+            w = w.string(m.permissions[i].as_str());
+            i += 1;
+        }
+        w = w.raw("],");
+    }
     w = w.raw("\"api\":{");
     let mut i = 0;
     while i < m.actions.len() {

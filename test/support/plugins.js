@@ -25,6 +25,7 @@ export async function until(check, ms = 4000) {
 }
 
 // A host whose objects all run fn(req) (state, ask and all), no WASM involved.
-export function fakePlugins(fn, opts = {}) {
-  return new PluginHost({ sandbox: fakeSandbox(fn), wasm: async () => ({ code: '', version: 'fake' }), ...opts });
+// `permissions`: what the office's objects declare (default ask and take).
+export function fakePlugins(fn, { permissions = ['ask', 'take'], ...opts } = {}) {
+  return new PluginHost({ sandbox: fakeSandbox(fn), wasm: async () => ({ code: '', version: 'fake', permissions }), ...opts });
 }

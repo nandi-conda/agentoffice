@@ -12,12 +12,19 @@
 // office for in its answer. Today that's the language model: an answer with
 // `ask: { prompt, system?, maxTokens? }` makes the office run the model (the
 // `ai` service: Workers AI on Cloudflare) and call the plugin again straight
-// away with the same action and `reply: { text, model } | { error }`. Only the
-// office's own objects get an answer; uploads get an error reply.
+// away with the same action and `reply: { text, model } | { error }`.
+//
+// Some answers need a permission (public/js/permissions.js): `ask` (trusted),
+// `take` (trusted) and `unlock` (privileged: into a room someone else booked).
+// The office's own objects have what their manifest declares; uploads what
+// was granted at upload, which the uploader's role decided. Without it, an
+// ask gets an error reply, a take is dropped and an unlock refused.
 
 import { log } from './logs.js';
 import { ZONES } from '../public/js/map.js';
 import { cleanItem } from '../public/js/items.js';
+import { roomById } from '../public/js/rooms.js';
+import { PERMISSIONS, cleanPermissions } from '../public/js/permissions.js';
 
 export const TIMEOUT_MS = 5000;
 export const AI_TIMEOUT_MS = 20000;
@@ -89,13 +96,14 @@ export class PluginHost {
     this.problems = {};
   }
 
-  // The code an object runs: its upload, or the office's own module.
+  // The code an object runs and what it may do: its upload with what was
+  // granted at upload, or the office's own module with what it declares.
   async code(object) {
-    if (object.upload) return object.upload;
+    if (object.upload) return { upload: object.upload, permissions: cleanPermissions(object.permissions) };
     if (!object.wasm) throw new Error('it has no plugin');
     if (!this.wasm) throw new Error('this office can\'t read its WASM objects');
     const w = await this.wasm(object.wasm);
-    return { id: object.id, version: w.version, lang: 'wasm', code: w.code };
+    return { upload: { id: object.id, version: w.version, lang: 'wasm', code: w.code }, permissions: cleanPermissions(w.permissions) };
   }
 
   // One call into the sandbox, with the time limit.
@@ -105,8 +113,8 @@ export class PluginHost {
   }
 
   // The model's reply to a plugin's `ask`.
-  async reply(object, ask) {
-    if (!object.wasm) return { error: 'only the office\'s own objects can ask its model' };
+  async reply(object, ask, permissions = []) {
+    if (!permissions.includes('ask')) return { error: `${object.name || 'this object'} doesn't have the ask permission (${PERMISSIONS.ask.level}: moderators can upload plugins that ask the model)` };
     if (!this.ai) return { error: 'this office has no model' };
     const q = { prompt: clip(ask.prompt, 2000), system: ask.system ? clip(ask.system, 4000) : null, maxTokens: Math.min(400, Math.max(1, Math.floor(+ask.maxTokens) || 200)) };
     if (!q.prompt) return { error: 'empty question' };
@@ -128,7 +136,10 @@ export class PluginHost {
   // Returns { result, state, via } where state is what the object should keep.
   // event: { type: 'enter' | 'exit', zone } when the call is a zone the
   // object watches (answer `watch`), not someone using it.
-  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [], event = null }) {
+  // rooms: () => Promise<[{ id, name, booking }]>, the bookable rooms and
+  // what's on in them, read only for plugins with the unlock permission.
+  // object.permissions: what an upload was granted.
+  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [], event = null, rooms = null }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
@@ -137,14 +148,17 @@ export class PluginHost {
       // WASM has no randomness of its own.
       seed: Math.floor(Math.random() * 2 ** 53),
     };
-    let raw, problem = null;
+    let raw, problem = null, permissions = [];
     try {
-      const upload = await this.code(object);
+      const code = await this.code(object), upload = code.upload;
+      permissions = code.permissions;
+      req.permissions = permissions;
+      if (permissions.includes('unlock') && rooms) req.rooms = await Promise.resolve(rooms()).catch(() => []);
       raw = await this.call(upload, req);
       // It asked the model: keep that answer's state and call again with the reply.
       if (raw?.ask && typeof raw.ask === 'object') {
         const kept = 'state' in raw ? raw.state : state;
-        const reply = await this.reply(object, raw.ask);
+        const reply = await this.reply(object, raw.ask, permissions);
         const again = await this.call(upload, { ...req, state: kept, reply, seed: Math.floor(Math.random() * 2 ** 53) });
         raw = again && typeof again === 'object' && !('state' in again) ? { ...again, state: kept } : again;
       }
@@ -161,6 +175,16 @@ export class PluginHost {
       };
     }
     const result = sanitize(raw);
+    // What it answered with but may not do.
+    if (!permissions.includes('take') && result.take.length) {
+      log('warning', `plugin:${object.id}`, 'answered with take without the take permission: dropped');
+      result.take = [];
+    }
+    if (result.unlock && !permissions.includes('unlock')) {
+      log('warning', `plugin:${object.id}`, 'answered with unlock without the unlock permission: refused');
+      result.unlock = null;
+      result.toast = `${req.object.name} can't open doors: it doesn't have the unlock permission.`;
+    }
     let next = state;
     if (raw && 'state' in raw) {
       const json = JSON.stringify(raw.state ?? null);
@@ -183,7 +207,7 @@ function withTimeout(p, ms) {
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
   const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
-  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [] };
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [], unlock: null };
   // Items for the person who used it (give), and things of theirs it uses up
   // (take, by kind): the office applies both together, all or nothing.
   if (Array.isArray(r.give)) out.give = r.give.slice(0, 5).map((i) => cleanItem(i)).filter(Boolean).map(({ at, from, ...i }) => i);
@@ -191,6 +215,9 @@ export function sanitize(r) {
     out.take = r.take.slice(0, 5).filter((t) => typeof t?.kind === 'string' && /^[a-z0-9][a-z0-9:._-]{0,31}$/.test(t.kind))
       .map((t) => ({ kind: t.kind, qty: Math.max(1, Math.min(20, Math.floor(+t.qty) || 1)) }));
   }
+  // Let the person who used it into a booked room (needs the unlock permission).
+  const room = typeof r.unlock === 'string' ? r.unlock : r.unlock?.room;
+  out.unlock = typeof room === 'string' && roomById(room) ? { room } : null;
   if (r.display && typeof r.display === 'object') {
     out.display = {
       label: r.display.label ? clip(r.display.label, 40) : null,

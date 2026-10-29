@@ -36,6 +36,29 @@ Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min
 
 Returns `{ booking?, error? }`
 
+## `unlock(who, by)`
+
+`mutates` · `internal (entity to entity)`
+
+Let someone into the meeting running now, past the booking, as if a holder had let them in: what a plugin with the unlock permission (e.g. the Skeleton Key) does for whoever uses it. The people in the meeting are told.
+
+| Param | Type | |
+| --- | --- | --- |
+| `who` | `{ id, key, name, handle?, did?, kind?, zone?, role?, x?, y? }` | The person calling, filled in by the World |
+| &nbsp;&nbsp;&nbsp;`who.id` | `string ≤ 200` | Peer id in the office |
+| &nbsp;&nbsp;&nbsp;`who.key` | `string ≤ 200` | Owner key: a DID, agent:<name> or human:<id> |
+| &nbsp;&nbsp;&nbsp;`who.name` | `string ≤ 200` | Display name |
+| &nbsp;&nbsp;&nbsp;`who.handle` *(optional)* | `string ≤ 200` | AT Protocol handle |
+| &nbsp;&nbsp;&nbsp;`who.did` *(optional)* | `string ≤ 200` | DID |
+| &nbsp;&nbsp;&nbsp;`who.kind` *(optional)* | `string ≤ 200` | human, agent or freeq |
+| &nbsp;&nbsp;&nbsp;`who.zone` *(optional)* | `string ≤ 200` | Zone they stand in |
+| &nbsp;&nbsp;&nbsp;`who.role` *(optional)* | `string ≤ 200` | Their server role: owner, admin, moderator, member, agent, guest (public/js/roles.js) |
+| &nbsp;&nbsp;&nbsp;`who.x` *(optional)* | `number ≥ 0` | Where they stand, in tiles |
+| &nbsp;&nbsp;&nbsp;`who.y` *(optional)* | `number ≥ 0` | Where they stand, in tiles |
+| `by` | `string ≤ 40` | What let them in |
+
+Returns `object`
+
 ## `tick(opts?)`
 
 `mutates` · `internal (entity to entity)`

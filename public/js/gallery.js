@@ -5,6 +5,8 @@
 
 import { FURNITURE } from './map.js';
 import { readManifest } from './manifest.js';
+import { PERMISSIONS, LEVELS, levelOf, levelRole, uploadError } from './permissions.js';
+import { can } from './roles.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const LOOKS = { plinth: 'Plinth with its emoji', kiosk: 'Screen kiosk', jukebox: 'Jukebox', vending: 'Vending machine', eightball: 'Crystal ball' };
@@ -22,6 +24,10 @@ export function syncGallery(items = []) {
     });
   }
 }
+
+// What a plugin may do beyond the basics, in words: "Open booked rooms (privileged)".
+const perms = (list) => list.map((p) => PERMISSIONS[p]?.label || p).join(', ');
+const levelTag = (it) => (it.level && it.level !== 'basic' ? ` · ${LEVELS[it.level].label.toLowerCase()}: ${esc(perms(it.permissions || []))}` : '');
 
 const by = (it) => (it.owner.handle ? `@${it.owner.handle}` : it.owner.name);
 
@@ -41,13 +47,14 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     ? `<div class="obj-items">${items.map((it) => `
         <div class="obj-item gal-item" data-id="${esc(it.id)}">
           <span><b>${esc(it.emoji)} ${esc(it.name)}</b><br><small class="muted">${esc(it.doc || it.prompt)}</small></span>
-          <span class="gal-acts"><small class="muted">by ${esc(by(it))} · ${it.lang} ${Math.ceil(it.size / 1024)} KB</small>
+          <span class="gal-acts"><small class="muted">by ${esc(by(it))} · ${it.lang} ${Math.ceil(it.size / 1024)} KB${levelTag(it)}</small>
             <button class="btn ghost gal-go">Walk there</button>${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
         </div>`).join('')}</div>`
     : '<p class="muted small">Nothing uploaded yet.</p>';
   const form = me.did ? `
       <h3>Upload one</h3>
-      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It goes on the floor next to you; anyone can use it, and only you can remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button></p>
+      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It goes on the floor next to you; anyone can use it, and only you can remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: opens booked rooms)' : ''}</p>
+      <p class="small gal-perm" hidden></p>
       <div class="gal-form">
         <label class="small"><b>File</b><input type="file" class="gal-file" accept=".wasm,.js,.mjs,application/wasm,text/javascript"></label>
         <label class="small"><b>Name</b><input class="gal-name" maxlength="40" placeholder="Guestbook"></label>
@@ -89,6 +96,14 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     // A module built with the agentoffice-plugin crate says what it is.
     const m = lang === 'wasm' ? readManifest(bytes) : null;
     const set = (c, v) => { if (v) b.querySelector(c).value = v; };
+    // What it asks for beyond the basics decides who may upload it.
+    const need = b.querySelector('.gal-perm'), list = m?.permissions || [];
+    need.hidden = !list.length;
+    if (list.length) {
+      const lv = levelOf(list), no = uploadError(me.role, list, m.name || 'It');
+      need.textContent = `${no ? '⛔' : '🔐'} Needs ${perms(list)} (${LEVELS[lv].label.toLowerCase()}): only ${levelRole(lv)}s and up can upload it.${no ? ' You can\'t.' : ''}`;
+      need.classList.toggle('gal-no', !!no);
+    }
     if (m) {
       set('.gal-name', m.name); set('.gal-prompt', m.prompt); set('.gal-doc', m.doc);
       set('.gal-emoji', m.emoji); set('.gal-glow', /^#[0-9a-f]{6}$/i.test(m.glow) ? m.glow : '');
@@ -105,6 +120,11 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     const r = await fetch('/plugins/guestbook.wasm');
     if (!r.ok) return err('Couldn\'t load the example.');
     take('guestbook.wasm', await r.arrayBuffer()); // its manifest fills in the form
+  });
+  b.querySelector('.gal-key')?.addEventListener('click', async () => {
+    const r = await fetch('/plugins/skeleton_key.wasm');
+    if (!r.ok) return err('Couldn\'t load the Skeleton Key.');
+    take('skeleton_key.wasm', await r.arrayBuffer());
   });
   b.querySelector('.gal-up').addEventListener('click', async (e) => {
     if (!file) return err('Pick a .wasm (or .js) file first.');
