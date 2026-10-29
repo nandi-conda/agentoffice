@@ -238,6 +238,27 @@ export const isBlocked = (x, y) => {
 
 export const SPAWN = { x: 6.5, y: 26.5 };
 
+// The walkable tile centre nearest (x, y) that's at least `gap` tiles from
+// everyone in `others`, preferring the same area, so people arriving
+// together don't stand on top of each other. Falls back to (x, y).
+export function openSpot(x, y, others, gap = 1.2) {
+  const home = zoneAt(x, y);
+  let best = null, bestD = Infinity;
+  for (let r = 0; r <= 8 && !best; r++) {
+    for (let ty = Math.floor(y) - r; ty <= Math.floor(y) + r; ty++) {
+      for (let tx = Math.floor(x) - r; tx <= Math.floor(x) + r; tx++) {
+        if (Math.max(Math.abs(tx - Math.floor(x)), Math.abs(ty - Math.floor(y))) !== r) continue;
+        if (isBlocked(tx, ty)) continue;
+        const cx = tx + 0.5, cy = ty + 0.5;
+        if (others.some((p) => Math.hypot(p.x - cx, p.y - cy) < gap)) continue;
+        const d = Math.hypot(cx - x, cy - y) + (zoneAt(cx, cy) === home ? 0 : 4);
+        if (d < bestD) { bestD = d; best = { x: cx, y: cy }; }
+      }
+    }
+  }
+  return best || { x, y };
+}
+
 // The most specific zone wins (booths sit inside the booth strip).
 export function zoneAt(x, y) {
   let best = null;

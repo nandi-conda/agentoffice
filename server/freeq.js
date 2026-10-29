@@ -710,7 +710,8 @@ export class FreeqBridge {
       if (f.peer?.freeqZone === zoneId) { f.active = ch; return this.describe(f); }
       const here = [...this.people.values()].filter((g) => g.peer && g !== f && g.peer.freeqZone === zoneId).map((g) => g.peer);
       if (here.length >= MAX_PEOPLE) continue;
-      const at = spotIn(zoneById(zoneId), here);
+      // Keep clear of everyone in the office, not just other freeq people.
+      const at = spotIn(zoneById(zoneId), [...this.office.peers.values()].filter((q) => q.ready && q !== f.peer));
       f.active = ch;
       if (f.peer) {
         f.peer.freeqZone = zoneId;

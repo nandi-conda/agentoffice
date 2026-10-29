@@ -155,3 +155,12 @@ test('a newer connection for the same identity replaces the older one', async ()
   await join(o, 'guest'); await join(o, 'guest');
   assert.equal(o.summary().online.filter((p) => p.name === 'guest').length, 2);
 });
+
+test('people arriving together spread out instead of stacking on the spawn', async () => {
+  const o = new Office();
+  const spots = [];
+  for (const n of ['a', 'b', 'c', 'd', 'e', 'f']) spots.push((await join(o, n)).ws.last('welcome').you);
+  for (let i = 0; i < spots.length; i++)
+    for (let j = i + 1; j < spots.length; j++)
+      assert.ok(Math.hypot(spots[i].x - spots[j].x, spots[i].y - spots[j].y) >= 1.2, `${i} and ${j} overlap`);
+});

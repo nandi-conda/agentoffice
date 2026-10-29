@@ -8,7 +8,7 @@
 // and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
+import { SPAWN, openSpot, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
 import * as map from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js';
@@ -591,6 +591,11 @@ export class Office {
     p.note = clip(m.note ?? arrival?.note ?? '', 80);
     // A guest's things last for the visit (a reconnect keeps them); everyone else's are on their actor.
     if (!key) p.items ||= [];
+    // Arrive at the door, but not on top of whoever else is standing there.
+    if (p.x === SPAWN.x && p.y === SPAWN.y) {
+      const at = openSpot(SPAWN.x, SPAWN.y, [...this.peers.values()].filter((q) => q.ready && q !== p));
+      p.x = at.x; p.y = at.y;
+    }
     p.ready = true;
     this.replaceOlder(p);
     this.sendTo(p, {

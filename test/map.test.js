@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { W, H, ZONES, SEATS, DESKS, SPAWN, isBlocked, zoneAt, canHear, findPath } from '../public/js/map.js';
+import { W, H, ZONES, SEATS, DESKS, SPAWN, isBlocked, zoneAt, canHear, findPath, openSpot } from '../public/js/map.js';
 
 test('spawn is walkable and in the lobby', () => {
   assert.equal(isBlocked(Math.floor(SPAWN.x), Math.floor(SPAWN.y)), false);
@@ -41,4 +41,12 @@ test('paths never cross walls', () => {
   const p = findPath(SPAWN.x, SPAWN.y, 40, 8);
   for (const s of p) assert.equal(isBlocked(Math.floor(s.x), Math.floor(s.y)), false);
   assert.ok(W > 0 && H > 0);
+});
+
+test('openSpot finds a free walkable tile near the spawn', () => {
+  assert.deepEqual(openSpot(SPAWN.x, SPAWN.y, []), { x: SPAWN.x, y: SPAWN.y });
+  const s = openSpot(SPAWN.x, SPAWN.y, [SPAWN]);
+  assert.ok(Math.hypot(s.x - SPAWN.x, s.y - SPAWN.y) >= 1.2);
+  assert.equal(isBlocked(Math.floor(s.x), Math.floor(s.y)), false);
+  assert.equal(zoneAt(s.x, s.y), zoneAt(SPAWN.x, SPAWN.y));
 });
