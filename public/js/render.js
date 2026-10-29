@@ -756,6 +756,27 @@ export function createRenderer(canvas) {
     roundRect(ctx, S(x + 0.9), S(y + 1.2), S(w - 1.8), S(h - 2.4), S(0.4)); ctx.stroke();
   }
 
+  // ---- placing something --------------------------------------------------------
+  // The tiles you can put it on, and where it would land under the mouse.
+  function drawPlaceTiles(pl, st) {
+    const a = 0.16 + 0.06 * Math.sin(st.time / 250);
+    ctx.fillStyle = `rgba(34,197,94,${a})`;
+    ctx.strokeStyle = 'rgba(22,163,74,0.55)'; ctx.lineWidth = 1;
+    for (const t of pl.tiles) {
+      roundRect(ctx, S(t.x + 0.06), S(t.y + 0.06), S(0.88), S(0.88), S(0.12));
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  function drawPlaceGhost(pl, st) {
+    const { x, y, ok } = pl.hover;
+    ctx.strokeStyle = ok ? 'rgba(22,163,74,0.95)' : 'rgba(220,38,38,0.9)'; ctx.lineWidth = 2;
+    ctx.fillStyle = ok ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.22)';
+    roundRect(ctx, S(x + 0.04), S(y + 0.04), S(0.92), S(0.92), S(0.14)); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = ok ? 0.75 : 0.35;
+    drawDrop({ id: 'ghost', x: x + 0.5, y: y + 0.5, item: { emoji: pl.emoji, qty: 1 } }, st);
+    ctx.globalAlpha = 1;
+  }
+
   // ---- things on the floor ---------------------------------------------------
   // An emoji with a shadow, bobbing a little so it reads as something to pick up.
   function drawDrop(e, st) {
@@ -1120,6 +1141,7 @@ export function createRenderer(canvas) {
 
     drawFloors(vis, st.freeq || {});
     for (const f of FURNITURE) if (f.type === 'rug') drawRug(f);
+    if (st.place) drawPlaceTiles(st.place, st);
     // den lights dim during a focus session
     const den = st.pomo.focus;
     if (den && den.phase === 'focus') {
@@ -1169,6 +1191,7 @@ export function createRenderer(canvas) {
       roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.stroke();
       ctx.setLineDash([]);
     }
+    if (st.place?.hover) drawPlaceGhost(st.place, st);
     if (st.walkTarget) {
       const t = st.walkTarget;
       ctx.strokeStyle = 'rgba(37,99,235,0.8)'; ctx.lineWidth = 2;

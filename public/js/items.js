@@ -9,11 +9,15 @@
 // Plugins hand items out through the same cleanItem(), so nothing they send
 // gets further than these fields.
 
+import { isBlocked, zoneAt } from './map.js';
+import { lockedOut } from './rooms.js';
+
 export const MAX_SLOTS = 20; // stacks a signed-in person or agent can carry
 export const GUEST_SLOTS = 6; // guests carry less: theirs lives only as long as the visit
 export const MAX_QTY = 20; // per stack
 export const PICKUP_RANGE = 1.5; // tiles
 export const GIVE_RANGE = 3; // tiles
+export const PLACE_RANGE = 3; // tiles: how far from you you can put something down
 export const FLOOR_MAX = 40; // things lying around the office at once
 export const FLOOR_TTL = 24 * 3600 * 1000; // the cleaners come by every day
 const MAX_DATA = 512;
@@ -129,4 +133,63 @@ export function useLine(s) {
   const verb = s.verb || 'shows off';
   const a = /^[aeiou]/i.test(s.name) ? 'an' : 'a';
   return `${verb} ${s.consume ? a : 'their'} ${s.name} ${s.emoji}`;
+}
+
+// ---- putting things down -------------------------------------------------------
+// Where someone standing at p can put something: free tiles within
+// PLACE_RANGE they can reach on foot (so never through a wall), not in a
+// booked room they're kept out of, and not on top of something already
+// lying there. The browser draws these; the server checks against the same.
+// Returns Map 'x,y' -> { x, y, ok, why } for every tile in range.
+export function placeTiles(p, { floor = [], bookings = [], now = Date.now() } = {}) {
+  const sx = Math.floor(p.x), sy = Math.floor(p.y);
+  const near = (tx, ty) => Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) <= PLACE_RANGE;
+  const taken = new Set(floor.map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`));
+  const out = new Map();
+  const reach = new Set([`${sx},${sy}`]);
+  const queue = [[sx, sy]];
+  // Flood out from where they stand, 8-way without cutting corners, like walking.
+  while (queue.length) {
+    const [x, y] = queue.shift();
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
+      if ((!dx && !dy) || reach.has(k) || !near(nx, ny) || isBlocked(nx, ny)) continue;
+      if (dx && dy && (isBlocked(x + dx, y) || isBlocked(x, y + dy))) continue;
+      reach.add(k);
+      queue.push([nx, ny]);
+    }
+  }
+  for (let ty = sy - PLACE_RANGE; ty <= sy + PLACE_RANGE; ty++) for (let tx = sx - PLACE_RANGE; tx <= sx + PLACE_RANGE; tx++) {
+    if (!near(tx, ty)) continue;
+    const k = `${tx},${ty}`;
+    let why = null;
+    if (isBlocked(tx, ty)) why = 'something is in the way there';
+    else if (!reach.has(k)) why = 'you can\'t reach there from here';
+    else if (taken.has(k)) why = 'something is already lying there';
+    else {
+      const z = zoneAt(tx + 0.5, ty + 0.5);
+      if (z?.bookable && lockedOut(bookings, z.id, p, now)) why = `${z.name} is booked right now`;
+    }
+    out.set(k, { x: tx, y: ty, ok: !why, why });
+  }
+  return out;
+}
+
+// Can p put something down on the tile at (x, y)? null if so, else why not.
+export function placeError(p, x, y, opts) {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  if (!Number.isFinite(tx) || !Number.isFinite(ty)) return 'say where to put it';
+  const t = placeTiles(p, opts).get(`${tx},${ty}`);
+  if (!t) return `that's too far: you can put things down within ${PLACE_RANGE} tiles of you`;
+  return t.why;
+}
+
+// The free tile nearest to p (their own first), for "put it down here".
+export function nearestPlace(p, opts) {
+  let best = null, bd = Infinity;
+  for (const t of placeTiles(p, opts).values()) {
+    const d = Math.hypot(t.x + 0.5 - p.x, t.y + 0.5 - p.y);
+    if (t.ok && d < bd) { bd = d; best = t; }
+  }
+  return best;
 }

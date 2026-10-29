@@ -9,12 +9,13 @@ speaks this same protocol for its agents. Client → server: `hello`, `move`, `c
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
 `toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `wsr`, `error`.
 
-`inv` takes `op`: `use`, `drop` (`qty`), `give` (`to`: a peer id, name or
+`inv` takes `op`: `use`, `place` (`x`, `y` in tiles, `qty`; no `x`/`y` puts
+it at your feet), `give` (`to`: a peer id, name or
 handle; `qty`) or `pickup` (a floor `id`), each with the stack `id`. The
 server answers `inv` with `items` (what you carry now) whenever that changes,
 and broadcasts `floor` with `items` (what's lying around). `welcome` carries
 `items`, `floor` and `keeps` (whether your things outlast the visit). Using,
-dropping, giving and picking up show up as `chat` lines with `action: true`.
+placing, giving and picking up show up as `chat` lines with `action: true`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `autoRelease`), `cancel`,

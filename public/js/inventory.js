@@ -1,7 +1,7 @@
 // The inventory panel: what you carry, what's lying on the floor near you,
 // and what you can do with each. A modal on desktop; on phones the modal is
 // a bottom sheet (style.css). Every action goes to the server as
-// { t: 'inv', op: 'use' | 'drop' | 'give' | 'pickup', id, to?, qty? }, and
+// { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup', id, x?, y?, to?, qty? }, and
 // the server answers with { t: 'inv', items } (see server/office.js).
 
 import { PICKUP_RANGE, GIVE_RANGE, GUEST_SLOTS, MAX_SLOTS, label, useButton } from './items.js';
@@ -9,7 +9,7 @@ import { PICKUP_RANGE, GIVE_RANGE, GUEST_SLOTS, MAX_SLOTS, label, useButton } fr
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const NEAR_FLOOR = 6; // tiles: floor things worth listing
 
-// ctx: { send, me(), items(), floor(), peers(), keeps(), walkTo(x, y, then) }
+// ctx: { send, me(), items(), floor(), peers(), keeps(), walkTo(x, y, then), place(stack) }
 export function openInventory(modal, ctx) {
   let giving = null; // stack id whose "give to…" row is open
   const render = () => {
@@ -27,7 +27,7 @@ export function openInventory(modal, ctx) {
           <span class="inv-acts">
             <button class="btn primary inv-use">${esc(useButton(s))}</button>
             <button class="btn inv-give" ${people.length ? '' : 'disabled title="Nobody within 3 tiles"'}>Give</button>
-            <button class="btn ghost inv-drop">Drop</button>
+            <button class="btn ghost inv-place" title="Then click a spot near you">Place</button>
           </span>
           ${giving === s.id ? `<span class="inv-to">${people.map((p) => `<button class="btn ghost inv-to-btn" data-to="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</span>` : ''}
         </li>`).join('')}</ul>`
@@ -41,7 +41,8 @@ export function openInventory(modal, ctx) {
       <p class="muted tiny">${ctx.keeps() ? 'Your things stay with you between visits.' : 'As a guest you carry a few things for this visit only. Sign in to keep them.'}${matchMedia('(pointer: coarse)').matches ? '' : ' Press <kbd>I</kbd> to open this, <kbd>E</kbd> to pick up what\'s at your feet.'}</p>`;
     const row = (el) => el.closest('.inv-row');
     modal.body.querySelectorAll('.inv-use').forEach((b) => b.addEventListener('click', () => ctx.send({ t: 'inv', op: 'use', id: row(b).dataset.id })));
-    modal.body.querySelectorAll('.inv-drop').forEach((b) => b.addEventListener('click', () => ctx.send({ t: 'inv', op: 'drop', id: row(b).dataset.id })));
+    // Placing picks a spot on the map (main.js placement mode).
+    modal.body.querySelectorAll('.inv-place').forEach((b) => b.addEventListener('click', () => ctx.place(items.find((s) => s.id === row(b).dataset.id))));
     modal.body.querySelectorAll('.inv-give').forEach((b) => b.addEventListener('click', () => {
       const id = row(b).dataset.id;
       if (people.length === 1) return ctx.send({ t: 'inv', op: 'give', id, to: people[0].id });

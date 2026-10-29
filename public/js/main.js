@@ -12,7 +12,7 @@ import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
-import { label as itemLabel } from './items.js';
+import { label as itemLabel, placeTiles } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 import { fmtHour, fmtClock, localize } from './time.js';
 
@@ -817,10 +817,41 @@ function invChanged() {
 }
 const invCtx = {
   send: (m) => net.send(m), me: () => me, items: () => items, floor: () => floor,
-  peers: () => [...peers.values()], keeps: () => keeps, walkTo,
+  peers: () => [...peers.values()], keeps: () => keeps, walkTo, place: startPlacing,
 };
+
+// Placing: choose "Place" on something you carry, then click or tap a spot
+// within reach (highlighted; the same rules the server checks, items.js
+// placeTiles). One at a time while the stack lasts. Esc, the 🎒 button, the
+// prompt pill or a tap out of reach cancels.
+let placing = null; // { id, item, hover: { x, y } | null, tiles, key }
+function startPlacing(s) {
+  if (!s) return;
+  modal.close();
+  if (station.isOpen) station.close();
+  path = null; walkTarget = null; pendingUse = null;
+  placing = { id: s.id, item: s, hover: null, tiles: null, key: '' };
+  toast(`${esc(s.emoji)} ${coarse ? 'Tap' : 'Click'} a highlighted spot near you to put down the ${esc(s.name)}. ${coarse ? 'Tap the pill' : 'Esc'} to stop.`, [], 4000);
+}
+function stopPlacing() { placing = null; canvas.style.cursor = ''; }
+// The tiles in reach, worked out again only when you move or the floor changes.
+function placingTiles() {
+  const key = `${Math.floor(me.x)},${Math.floor(me.y)},${floor.map((e) => e.id).join()},${bookings.length}`;
+  if (placing.key !== key) { placing.key = key; placing.tiles = placeTiles(me, { floor, bookings, now: serverNow() }); }
+  return placing.tiles;
+}
+function placeAt(w) {
+  const t = placingTiles().get(`${Math.floor(w.x)},${Math.floor(w.y)}`);
+  if (!t) return stopPlacing();
+  if (!t.ok) return toast(esc(cap(t.why)), [], 2500);
+  net.send({ t: 'inv', op: 'place', id: placing.id, x: t.x + 0.5, y: t.y + 0.5, qty: 1 });
+  const s = items.find((i) => i.id === placing.id);
+  if (!s || s.qty <= 1) stopPlacing();
+}
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
 function openInv() {
   if (!me) return;
+  if (placing) return stopPlacing();
   modal.inv = openInventory(modal, invCtx);
   modal.onclose = () => (modal.inv = null);
 }
@@ -853,7 +884,7 @@ function openHelp() {
       <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
       <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
-      <kbd>I</kbd><span>Your things: eat, drink, give them to someone nearby, or drop them. E picks up what's at your feet</span>
+      <kbd>I</kbd><span>Your things: eat, drink, give them to someone nearby, or place them on a spot near you. E picks up what's at your feet</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>+ −</kbd><span>Zoom (or scroll over the map, toward the cursor). <kbd>0</kbd> shows the whole office</span>
     </div>${coarse ? '</details>' : ''}
@@ -1609,6 +1640,7 @@ addEventListener('keydown', (e) => {
   if (!me || station.isOpen) return;
   if (modal.isOpen) { if (e.key === 'Escape') modal.close(); return; }
   if (typing()) return;
+  if (placing && e.key === 'Escape') { stopPlacing(); e.preventDefault(); return; }
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) { keys.add(key); e.preventDefault(); }
   else if (key === 'e' || key === ' ') { interact(currentTarget()); e.preventDefault(); }
@@ -1632,6 +1664,7 @@ addEventListener('blur', () => keys.clear());
 function tapAt(sx, sy, touch = false) {
   const c = canvas.getBoundingClientRect();
   sx -= c.left; sy -= c.top;
+  if (placing) return placeAt(R.toWorld(sx, sy));
   const hit = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
   if (hit) return openProfile(hit);
   const w = R.toWorld(sx, sy);
@@ -1852,10 +1885,17 @@ setInterval(() => {
 // ---- loop -----------------------------------------------------------------------------
 const cam = { x: SPAWN.x, y: SPAWN.y };
 let last = performance.now(), miniT = 0;
-const promptEl = $('.prompt'), promptText = promptEl.querySelector('span');
+const promptEl = $('.prompt'), promptText = promptEl.querySelector('span'), promptKbd = promptEl.querySelector('kbd');
 // The interaction prompt doubles as a button, which is how touch screens press E.
 promptEl.querySelector('kbd').textContent = coarse ? 'Tap' : 'E';
-promptEl.addEventListener('click', () => { if (me && !modal.isOpen) interact(currentTarget()); });
+promptEl.addEventListener('click', () => { if (placing) stopPlacing(); else if (me && !modal.isOpen) interact(currentTarget()); });
+// While placing, the mouse shows where it would land.
+canvas.addEventListener('pointermove', (e) => {
+  if (!placing || e.pointerType !== 'mouse') return;
+  const c = canvas.getBoundingClientRect(), w = R.toWorld(e.clientX - c.left, e.clientY - c.top);
+  placing.hover = { x: Math.floor(w.x), y: Math.floor(w.y) };
+});
+canvas.addEventListener('pointerleave', () => { if (placing) placing.hover = null; });
 // Touch devices drop to ~30 fps while nothing on screen is moving, to save battery.
 let lastDraw = 0;
 const busy = () => me.moving || gesture || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
@@ -1929,10 +1969,21 @@ function loop(t) {
     cam.x += (me.x + camOff.x - cam.x) * Math.min(1, dt * 6);
     cam.y += (me.y - 0.5 + camOff.y - cam.y) * Math.min(1, dt * 6);
 
-    const target = modal.isOpen ? null : currentTarget();
-    const label = target && promptFor(target);
+    const target = modal.isOpen || placing ? null : currentTarget();
+    const label = placing ? `Placing ${itemLabel(placing.item)} · ${coarse ? 'tap here to stop' : 'Esc to stop'}` : target && promptFor(target);
     promptEl.hidden = !label;
     if (label && promptText.textContent !== label) promptText.textContent = label;
+    const kbd = placing ? (coarse ? '✕' : 'Esc') : coarse ? 'Tap' : 'E';
+    if (promptKbd.textContent !== kbd) promptKbd.textContent = kbd;
+    let place = null;
+    if (placing) {
+      if (!items.some((i) => i.id === placing.id)) stopPlacing();
+      else {
+        const tiles = placingTiles(), h = placing.hover && tiles.get(`${placing.hover.x},${placing.hover.y}`);
+        place = { tiles: [...tiles.values()].filter((x) => x.ok), hover: placing.hover && { ...placing.hover, ok: !!h?.ok }, emoji: placing.item.emoji };
+        canvas.style.cursor = placing.hover ? (h?.ok ? 'copy' : 'not-allowed') : '';
+      }
+    }
 
     if (z?.id === 'focus' && den && den.phase !== 'idle') {
       const left = Math.max(0, den.endsAt - serverNow());
@@ -1945,7 +1996,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
+      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, place, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
       promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null,
     });
     // The prompt rides on the object it's about; without a spot it waits at the bottom of the map.
@@ -1962,4 +2013,4 @@ function loop(t) {
 }
 
 // Debug/test hook.
-window.__office = { station, openStation, get me() { return me; }, music, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };
+window.__office = { R, station, openStation, get me() { return me; }, music, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };

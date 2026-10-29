@@ -5,8 +5,8 @@ import { Office } from '../server/office.js';
 import { LocalRuntime } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { PluginHost, sanitize } from '../server/plugins.js';
-import { FURNITURE } from '../public/js/map.js';
-import { cleanItem, addItems, takeItems, applyChange, useLine, GUEST_SLOTS, MAX_QTY } from '../public/js/items.js';
+import { FURNITURE, isBlocked } from '../public/js/map.js';
+import { cleanItem, addItems, takeItems, applyChange, useLine, placeTiles, placeError, GUEST_SLOTS, MAX_QTY } from '../public/js/items.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -88,28 +88,57 @@ test('agents and signed-in people keep their things on their actor between visit
   assert.equal(again.ws.last('welcome').keeps, true);
 });
 
-test('drop, pick up (up close only), and the floor everyone sees', async () => {
+test('place on a spot in reach, pick up (up close only), and the floor everyone sees', async () => {
   const o = new Office();
   await o.ready;
   const a = await join(o, 'ada'), b = await join(o, 'grace');
   await at(a, spot('coffee').x, spot('coffee').y);
   a.ws.msg({ t: 'coffee' }); await settle();
-  const cup = a.items()[0];
-  a.ws.msg({ t: 'inv', op: 'drop', id: cup.id }); await settle();
-  assert.equal(a.items().length, 0);
+  await o.invApply(o.peers.get(a.id), { give: [{ kind: 'cookie', qty: 2 }] });
+  const cup = a.items().find((s) => s.kind === 'coffee'), cookie = a.items().find((s) => s.kind === 'cookie');
+  const me = o.peers.get(a.id);
+  const tiles = [...placeTiles(me, { floor: o.floor, bookings: o.bookings }).values()];
+  const ok = tiles.find((t) => t.ok && (t.x !== Math.floor(me.x) || t.y !== Math.floor(me.y)));
+  const blocked = tiles.find((t) => /in the way/.test(t.why || ''));
+  // Too far, and in the way: refused, and nothing leaves their hands.
+  a.ws.msg({ t: 'inv', op: 'place', id: cup.id, x: me.x + 6, y: me.y }); await settle();
+  assert.match(a.ws.last('error').message, /too far/);
+  a.ws.msg({ t: 'inv', op: 'place', id: cup.id, x: blocked.x + 0.5, y: blocked.y + 0.5 }); await settle();
+  assert.match(a.ws.last('error').message, /in the way/);
+  assert.equal(a.items().length, 2);
+  a.ws.msg({ t: 'inv', op: 'place', id: cup.id, x: ok.x + 0.2, y: ok.y + 0.9 }); await settle();
+  assert.equal(a.items().length, 1);
   const lying = b.ws.last('floor').items;
   assert.equal(lying.length, 1);
+  assert.deepEqual([lying[0].x, lying[0].y], [ok.x + 0.5, ok.y + 0.5], 'it lands in the middle of the tile');
   assert.equal(lying[0].item.kind, 'coffee');
   assert.equal(lying[0].by, 'ada');
+  // One thing per tile; one at a time from a stack.
+  a.ws.msg({ t: 'inv', op: 'place', id: cookie.id, x: ok.x + 0.5, y: ok.y + 0.5, qty: 1 }); await settle();
+  assert.match(a.ws.last('error').message, /already lying there/);
   await at(b, 40, 8);
   b.ws.msg({ t: 'inv', op: 'pickup', id: lying[0].id }); await settle();
   assert.match(b.ws.last('error').message, /walk over/);
-  await at(b, lying[0].x, lying[0].y - 0.3);
+  await at(b, lying[0].x, lying[0].y);
   b.ws.msg({ t: 'inv', op: 'pickup', id: lying[0].id }); await settle();
   assert.equal(b.items()[0].kind, 'coffee');
   assert.deepEqual(a.ws.last('floor').items, []);
   const c = await join(o, 'linus');
   assert.deepEqual(c.ws.last('welcome').floor, []);
+});
+
+test('no putting things down through a wall', () => {
+  // Somewhere on the map a free tile is in range but only reachable through a wall.
+  let found = null;
+  for (let y = 1; y < 31 && !found; y++) for (let x = 1; x < 47 && !found; x++) {
+    if (isBlocked(x, y)) continue;
+    const p = { x: x + 0.5, y: y + 0.5, name: 't', kind: 'human' };
+    const t = [...placeTiles(p).values()].find((v) => /can't reach/.test(v.why || ''));
+    if (t) found = { p, t };
+  }
+  assert.ok(found, 'some wall has free floor right behind it');
+  assert.match(placeError(found.p, found.t.x + 0.5, found.t.y + 0.5), /can't reach/);
+  assert.equal(placeError(found.p, found.p.x, found.p.y), null, 'your own tile is fine');
 });
 
 test('giving: only to someone close, and it comes back when their hands are full', async () => {
@@ -189,7 +218,7 @@ test('sanitize keeps at most 5 clean grants and takes', () => {
   assert.deepEqual(s.take, [{ kind: 'gum', qty: 20 }]);
 });
 
-test('inventory over the generated API: view, use, drop and pickup with proximity', async () => {
+test('inventory over the generated API: view, use, place and pickup with proximity', async () => {
   const o = new Office();
   await o.ready;
   const a = await join(o, 'bot', { kind: 'agent' });
@@ -199,7 +228,9 @@ test('inventory over the generated API: view, use, drop and pickup with proximit
   assert.equal(gum.qty, 3);
   const used = await o.call(p, 'inventory:me', 'use', [gum.id]);
   assert.match(used.did, /chews a Mint Gum/);
-  const { floor } = await o.call(p, 'inventory:me', 'drop', [gum.id, 1]);
+  const { floor, x, y } = await o.call(p, 'inventory:me', 'place', [gum.id, undefined, undefined, 1]);
+  assert.ok(Math.hypot(x - p.x, y - p.y) < 1.5, 'without x/y it goes down at your feet');
+  assert.match((await o.call(p, 'inventory:me', 'place', [gum.id, p.x + 10, p.y])).error, /too far/);
   await at(a, 40, 8);
   assert.match((await o.call(p, 'inventory:me', 'pickup', [floor])).error, /walk over/);
   await assert.rejects(() => o.call(null, 'inventory:me', 'view'), /join the office/);

@@ -1,6 +1,6 @@
 # inventory (Office)
 
-What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down where you stand, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.
+What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.
 
 - address `inventory:<name>`
 - Durable Object binding `OFFICE` (class `OfficeRoom`)
@@ -26,18 +26,20 @@ Use one of your things: eat it, drink it, or show it off. Everyone who can hear 
 
 Returns `{ items, did }`
 
-## `drop(who, id, qty?)`
+## `place(who, id, x?, y?, qty?)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`inventory_drop`**
+`mutates` · `caller filled in by the World` · MCP tool **`inventory_place`**
 
-Put something down where you stand. Anyone can pick it up; it is cleared away after a day.
+Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying there, not a booked room you're kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Anyone can pick it up; it is cleared away after a day.
 
 | Param | Type | |
 | --- | --- | --- |
 | `id` | `string ≤ 16` | Stack id |
+| `x` *(optional)* | `number 0–48` | Tile x (any point in the tile) |
+| `y` *(optional)* | `number 0–32` | Tile y |
 | `qty` *(optional)* | `integer 1–20` | How many (default all of the stack) |
 
-Returns `{ items, floor }`
+Returns `{ items, floor, x, y }`
 
 ## `give(who, id, to, qty?)`
 

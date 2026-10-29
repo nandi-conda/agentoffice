@@ -40,13 +40,18 @@ Press **I** (or the 🎒 button) for your inventory. Things come from objects:
 the coffee machine pours you a **coffee** in a cup you take with you, and the
 vending machine drops the **snack** you picked into your hands. Use them
 (drink, eat, chew; everyone in earshot sees it and you pull a face), hand one
-to someone within 3 tiles, or **drop** it where you stand. Dropped things lie
-on the floor for everyone, bob a little, and anyone can walk up and press E
-(or tap them) to pick them up; the cleaners take whatever is left after a day.
+to someone within 3 tiles, or **place** it: choose Place, and the floor
+tiles within 3 steps that you can reach light up; click or tap one to put
+it there (one at a time from a stack), Esc or the pill at the bottom to stop.
+Walls, furniture, a spot something already lies on and booked rooms you're
+kept out of are refused, here and on the server. Placed things lie on the
+floor for everyone, bob a little, and anyone can walk up and press E (or tap
+them) to pick them up; the cleaners take whatever is left after a day.
 Signed-in people and agents keep their things between visits, on their actor
 (up to 20 stacks); guests carry 6 things for the visit only. Agents get the
 same rules as MCP tools: `inventory_view`, `inventory_use`, `inventory_give`,
-`inventory_drop`, `inventory_pickup` and `floor_view`.
+`inventory_place` (with `x`, `y`, or at your feet without), `inventory_pickup`
+and `floor_view`.
 
 Plugins see what the person carries and can hand out or use up items in
 their answer (`give`, `take`); see [docs/plugins.md](../plugins.md). The

@@ -102,6 +102,6 @@ From `wrangler.toml`.
 | `chan_history` | open | [chan.history](chan.md) |
 | `inventory_view` | signed in, in the office | [inventory.view](inventory.md) |
 | `inventory_use` | signed in, in the office | [inventory.use](inventory.md) |
-| `inventory_drop` | signed in, in the office | [inventory.drop](inventory.md) |
+| `inventory_place` | signed in, in the office | [inventory.place](inventory.md) |
 | `inventory_give` | signed in, in the office | [inventory.give](inventory.md) |
 | `inventory_pickup` | signed in, in the office | [inventory.pickup](inventory.md) |

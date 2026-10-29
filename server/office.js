@@ -15,8 +15,8 @@ import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js
 import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
-import { str, int, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
-import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine } from '../public/js/items.js';
+import { str, int, num as numS, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
+import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 
@@ -49,11 +49,11 @@ export const WORLD = {
 // tools (inventory_view, inventory_use…) come from it. Signed-in people and
 // agents keep theirs on their actor; a guest's lasts as long as the visit.
 export const INVENTORY = {
-  doc: 'What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down where you stand, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.',
+  doc: 'What you carry. Things come from objects (the coffee machine pours you a coffee, the vending machine drops a snack), from the floor, and from other people. Use them (eat, drink, show off), put them down on a spot within 3 tiles, or hand them to someone within 3 tiles. Signed-in people and agents keep theirs between visits (on their actor); guests carry at most 6 things, for this visit only. Served by the World, always for the caller.',
   api: {
     view: { doc: 'What you carry.', who: true, returns: arr(ITEM, 'Item stacks') },
     use: { doc: 'Use one of your things: eat it, drink it, or show it off. Everyone who can hear you sees it; things like snacks are used up.', who: true, mutates: true, params: { id: str('Stack id (from inventory_view)', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now'), did: str('What it looked like') }) },
-    drop: { doc: 'Put something down where you stand. Anyone can pick it up; it is cleared away after a day.', who: true, mutates: true, params: { id: str('Stack id', 16), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: str('Floor id') }) },
+    place: { doc: 'Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying there, not a booked room you\'re kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Anyone can pick it up; it is cleared away after a day.', who: true, mutates: true, params: { id: str('Stack id', 16), x: opt(numS('Tile x (any point in the tile)', 0, 48)), y: opt(numS('Tile y', 0, 32)), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: str('Floor id'), x: numS('Where it landed: tile centre x', 0, 48), y: numS('Tile centre y', 0, 32) }) },
     give: { doc: 'Hand something to a person within 3 tiles.', who: true, mutates: true, params: { id: str('Stack id', 16), to: str('Their peer id, name or handle', 253), qty: opt(int('How many (default 1)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), to: str('Who got it') }) },
     pickup: { doc: 'Pick something up off the floor (floor_view lists it). You must be within 1.5 tiles of it: walk_to it first.', who: true, mutates: true, params: { id: str('Floor id', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
   },
@@ -851,20 +851,20 @@ export class Office {
 
   // The inventory as the generated tools and the browser see it (INVENTORY.api).
   // Each answers { items, … } or { error }.
-  async inventoryCall(p, method, [a, b, c] = []) {
+  async inventoryCall(p, method, [a, b, c, d] = []) {
     if (method === 'view') return this.inventory(p);
     if (method === 'use') return this.useItem(p, a);
-    if (method === 'drop') return this.dropItem(p, a, b);
+    if (method === 'place') return this.placeItem(p, a, b, c, d);
     if (method === 'give') return this.giveItem(p, a, b, c);
     if (method === 'pickup') return this.pickUp(p, a);
     throw new Error(`inventory has no method ${method}`);
   }
 
-  // { t: 'inv', op: 'use' | 'drop' | 'give' | 'pickup', id, to?, qty? }
+  // { t: 'inv', op: 'use' | 'place' | 'give' | 'pickup', id, x?, y?, to?, qty? }
   async inv(p, m) {
-    const op = ['use', 'drop', 'give', 'pickup'].includes(m.op) ? m.op : null;
+    const op = ['use', 'place', 'give', 'pickup'].includes(m.op) ? m.op : null;
     if (!op) return;
-    const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'drop' ? [m.id, m.qty] : [m.id]);
+    const r = await this.inventoryCall(p, op, op === 'give' ? [m.id, m.to, m.qty] : op === 'place' ? [m.id, m.x, m.y, m.qty] : [m.id]);
     if (r?.error) this.sendTo(p, { t: 'error', message: r.error });
   }
 
@@ -884,15 +884,28 @@ export class Office {
     return { items: items || (await this.inventory(p)), did };
   }
 
-  async dropItem(p, id, qty) {
-    const s = (await this.inventory(p)).find((x) => x.id === id);
+  // Putting something down on a tile in reach (items.js placeTiles has the
+  // rules, the same ones the browser draws). Without x/y: at their feet.
+  async placeItem(p, id, x, y, qty) {
+    const s = (await this.inventory(p)).find((i) => i.id === id);
     if (!s) return { error: 'you don\'t have that' };
+    const opts = { floor: this.floor, bookings: this.bookings, now: this.now() };
+    let tile;
+    if (x == null && y == null) {
+      tile = nearestPlace(p, opts);
+      if (!tile) return { error: 'there\'s no free spot around you' };
+    } else {
+      const why = placeError(p, +x, +y, opts);
+      if (why) return { error: why };
+      tile = { x: Math.floor(x), y: Math.floor(y) };
+    }
     const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || s.qty));
     const r = await this.invApply(p, { take: [{ id, qty: n }] });
     if (r.error) return r;
-    const floor = await this.ref('floor:main').place({ item: { ...s, qty: n }, x: p.x, y: p.y + 0.3, by: p.name });
+    const at = { x: tile.x + 0.5, y: tile.y + 0.5 };
+    const floor = await this.ref('floor:main').place({ item: { ...s, qty: n }, ...at, by: p.name });
     this.act(p, `puts down ${label({ ...s, qty: n })}`);
-    return { items: r.items, floor };
+    return { items: r.items, floor, ...at };
   }
 
   async giveItem(p, id, to, qty = 1) {
