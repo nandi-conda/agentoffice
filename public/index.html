@@ -89,6 +89,7 @@
     </aside>
 
     <div class="toolbar card" role="toolbar" aria-label="Controls">
+      <div class="tb-scroll">
       <div class="tb-group">
         <span class="pop-wrap mic-wrap">
           <button class="tb mic" title="Proximity voice (M)" aria-label="Microphone on/off">
@@ -133,7 +134,9 @@
         <button class="tb emote-btn" data-pop="emote-pop" aria-haspopup="true" aria-expanded="false" title="Emotes (1–9)" aria-label="Emotes">😄</button>
         <div class="pop emote-pop" id="emote-pop" hidden><div class="emotes"></div></div>
       </div>
-      <div class="tb-group">
+      </div>
+      <div class="tb-group tb-pinned">
+        <button class="tb chan-btn" title="Channel rooms" aria-label="Channel rooms">#</button>
         <button class="tb zoom-out" title="Zoom out (-)">−</button>
         <button class="tb zoom-in" title="Zoom in (+)">+</button>
         <button class="tb help-btn" title="Help (?)">?</button>

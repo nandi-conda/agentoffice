@@ -204,6 +204,19 @@ input, select, textarea { font: inherit; color: inherit; }
 .toolbar { grid-area: bar; justify-self: center; position: relative; max-width: 100%; display: flex; gap: 4px; padding: 6px; align-items: center; }
 .tb-group { display: flex; gap: 4px; align-items: center; }
 .tb-group + .tb-group { border-left: 1px solid var(--line); padding-left: 4px; }
+/* Wide screens lay the toolbar out flat; on small ones .tb-scroll scrolls
+   sideways and the last group (channels, help, side panel) stays pinned. */
+.tb-scroll { display: contents; }
+.tb-scroll + .tb-group { border-left: 1px solid var(--line); padding-left: 4px; }
+.tb.chan-btn, .tb.chan-btn:hover { display: none; color: #fff; background: #7c3aed; font-weight: 700; }
+@media (max-width: 760px), (pointer: coarse) {
+  .tb-scroll { display: flex; gap: 4px; align-items: center; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .tb-scroll::-webkit-scrollbar { display: none; }
+  .tb-scroll.more { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  .tb-pinned { flex: none; }
+  .tb.chan-btn { display: grid; }
+  .tb.chan-btn[hidden] { display: none; }
+}
 .tb { height: 34px; min-width: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: 600 14px Inter, system-ui; cursor: pointer; display: grid; place-items: center; padding: 0 8px; }
 .tb:hover, .tb[aria-expanded="true"] { background: #efebe5; }
 .tb.mic { background: #efebe5; }
@@ -422,7 +435,8 @@ input, select, textarea { font: inherit; color: inherit; }
   .chat.collapsed .chat-grip { display: none; }
   .chat-log { flex: none; height: var(--chat-h, 26dvh); max-height: 45dvh; }
   .toolbar { justify-self: stretch; justify-content: space-between; padding: 4px; }
-  .tb-group + .tb-group { padding-left: 2px; }
+  .tb-scroll { justify-content: space-between; }
+  .tb-group + .tb-group, .tb-scroll + .tb-group { padding-left: 2px; }
   .status-btn { padding: 0 12px; }
   .pill { padding: 6px 10px; }
   .zone .zone-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -612,6 +612,19 @@ const loadSide = () => setSide(store.get(sideKey(), !phoneLayout.matches), false
 loadSide();
 phoneLayout.addEventListener('change', loadSide);
 sideBtn.addEventListener('click', () => setSide(hud.classList.contains('side-closed')));
+// Small screens: the toolbar scrolls sideways (fading at the edge while there's
+// more), and # opens the panel on the channel list so rooms are a tap away.
+const tbScroll = $('.tb-scroll');
+const tbMore = () => tbScroll.classList.toggle('more', tbScroll.scrollLeft + tbScroll.clientWidth < tbScroll.scrollWidth - 2);
+tbScroll.addEventListener('scroll', tbMore, { passive: true });
+new ResizeObserver(tbMore).observe(tbScroll);
+$('.chan-btn').addEventListener('click', () => {
+  const showing = !hud.classList.contains('side-closed') && !$('.channels').classList.contains('collapsed');
+  if (showing) return setSide(false);
+  setChannelsCollapsed(false);
+  setPeopleCollapsed(true);
+  setSide(true);
+});
 // Opens whatever the chat needs to be typed into, then focuses it.
 function focusChat() {
   if (!phoneLayout.matches && hud.classList.contains('side-closed')) setSide(true);
@@ -1129,6 +1142,7 @@ function refreshChannels() {
     .sort((a, b) => (b.last || 0) - (a.last || 0) || (b.members || 0) - (a.members || 0) || a.channel.localeCompare(b.channel));
   const canOpen = !!(me?.did || me?.kind === 'agent');
   $('.channels').hidden = !list.length && !canOpen;
+  $('.chan-btn').hidden = $('.channels').hidden;
   $('.channels .count').textContent = list.length;
   $('.channel-list').innerHTML = list.map((c) => {
     const live = c.last && serverNow() - c.last < 5 * 60000;
@@ -1139,7 +1153,11 @@ function refreshChannels() {
       + `<span class="hash ${a.open ? '' : 'gated'}" aria-hidden="true">${a.open ? '#' : a.icon.split(/(?=\p{Extended_Pictographic})/u)[0]}</span><span class="who"><b>${live ? '<span class="live" title="Active in the last 5 minutes"></span>' : ''}${esc(c.channel.replace(/^#/, ''))}</b><span>${esc(sub)}</span></span>`
       + `<span class="members" title="${c.members || 0} in the channel${c.here !== undefined && c.here !== c.members ? `, ${c.here} standing in the room (the rest are drawn in another one they're in)` : ''}">${c.members || 0} 👤</span></button></li>`;
   }).join('') + (canOpen ? '<li class="open-room"><button type="button" class="new-room">＋ Open a room…</button></li>' : '');
-  $('.channel-list').querySelectorAll('button[data-zone]').forEach((b) => b.addEventListener('click', () => walkToZone(ZONES.find((z) => z.id === b.dataset.zone))));
+  $('.channel-list').querySelectorAll('button[data-zone]').forEach((b) => b.addEventListener('click', () => {
+    // On phones the list is a sheet over the map: get it out of the way to watch the walk.
+    if (phoneLayout.matches) setSide(false);
+    walkToZone(ZONES.find((z) => z.id === b.dataset.zone));
+  }));
   $('.channel-list .new-room')?.addEventListener('click', openNewRoom);
 }
 
