@@ -10,6 +10,11 @@ export const STATUS = {
   away: { label: 'Away', color: '#94a3b8' },
 };
 
+// Marks in front of a name: agents get a diamond, people talking from freeq a
+// speech bubble (not '#', which belongs to channels).
+export const KIND_MARK = { agent: '◆', freeq: '💬' };
+export const markedName = (name, kind) => (KIND_MARK[kind] ? `${KIND_MARK[kind]} ${name}` : name);
+
 export const statusColor = (s) => (STATUS[s] || STATUS.available).color;
 
 const PALETTE = ['#2563eb', '#db2777', '#059669', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d'];

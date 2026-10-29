@@ -5,7 +5,7 @@
 import { W, H, ZONES, FURNITURE, grid, zoneAt } from './map.js';
 import { CORE_W, CORE_H } from './wing.js';
 import { ROOMS, roomStatus, fmtTime } from './rooms.js';
-import { WALL_H, daylight, statusColor, colorFor, roundRect, wrapText } from './style.js';
+import { WALL_H, daylight, markedName, statusColor, colorFor, roundRect, wrapText } from './style.js';
 import { WALK } from './sprites.js';
 
 const FLOORS = {
@@ -912,7 +912,7 @@ export function createRenderer(canvas) {
     const named = isMe || talking || !far;
     let r = null;
     if (alpha > 0.05 && named) {
-      const name = (p.kind === 'agent' ? '◆ ' : p.kind === 'freeq' ? '# ' : '') + p.name;
+      const name = markedName(p.name, p.kind);
       const extra = `${p.video ? ' 📹' : ''}${p.screen ? ' 🖥️' : ''}${p.audio ? (p.speaking ? ' 🔊' : ' 🎙️') : ''}`;
       r = placeRow([{ text: name + extra, bg: isMe ? PILL.me : PILL[p.kind] || PILL.dark, dot: statusColor(p.status) }], s.x, top - 2, { force: isMe || talking, alpha });
     }

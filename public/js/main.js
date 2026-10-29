@@ -2,7 +2,7 @@ import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zo
 import { summary as accessOf, describe as describeAccess } from './policy.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
-import { STATUS, statusColor, colorFor } from './style.js';
+import { STATUS, markedName, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
 import { createVoice, DESK_VIEW } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
@@ -459,7 +459,7 @@ function logChat(m) {
   // Said on freeq while the office wasn't listening, caught up after a restart.
   const when = m.backfill ? `<span class="missed" title="${m.earlier ? 'Said before you walked in' : 'Said on freeq while the office was away'}">${esc(fmtTime(m.ts))}</span> ` : '';
   if (m.action) d.classList.add('act');
-  d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
+  d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(markedName(m.name, m.freeq ? 'freeq' : peers.get(m.id)?.kind))}</b> ${linkify(esc(m.text))}`;
   pushLog(d);
 }
 function sys(text) {
@@ -890,7 +890,7 @@ function refreshPeople() {
     $('.people-list').innerHTML = list.map((p) => {
       const z = zoneAt(p.x, p.y);
       const sub = [p.note, z?.name].filter(Boolean).join(' · ');
-      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(p.name)}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
+      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(markedName(p.name, p.kind))}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
     }).join('');
     $('.people-list').querySelectorAll('li').forEach((li) => li.addEventListener('click', () => openProfile(peers.get(li.dataset.id))));
   }, 120);
@@ -1078,7 +1078,7 @@ function openProfile(p) {
     <div class="profile">
       <canvas width="112" height="112"></canvas>
       <div>
-        <h2>${esc(p.name)} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : ''}</h2>
+        <h2>${esc(markedName(p.name, p.kind))} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</h2>
         ${p.handle ? `<p class="small"><a href="https://rpg.actor/${encodeURIComponent(p.handle)}" target="_blank" rel="noopener">@${esc(p.handle)}</a> on rpg.actor</p>` : '<p class="small muted">Guest, no rpg.actor character linked</p>'}
         <p><span style="color:${statusColor(p.status)}">●</span> ${esc(STATUS[p.status]?.label || p.status)}${p.note ? ` · ${esc(p.note)}` : ''}</p>
         ${desk ? `<p class="small">🪑 Desk: ${placeLink('desk', desk[0], esc(desk[0]))}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
