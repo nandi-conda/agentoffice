@@ -256,7 +256,7 @@ export class OfficeRoom extends DurableObject {
   }
 
   async webSocketMessage(ws, raw) {
-    if (typeof raw !== 'string' || raw.length > 256 * 1024) return;
+    if (typeof raw !== 'string' || raw.length > 1024 * 1024) return; // uploads (gallery) are up to ~700 KB of base64
     const p = this.peerFor(ws);
     if (!p) { try { ws.close(1008, 'not in the office'); } catch { /* already closed */ } return; }
     p.lastSeen = Date.now();

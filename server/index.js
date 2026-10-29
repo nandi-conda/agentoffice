@@ -13,6 +13,8 @@ import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
 import { LocalRuntime } from './entities/runtime.js';
+import { PluginHost } from './plugins.js';
+import { NodeSandbox } from './sandbox-node.js';
 import { KINDS } from './entities/kinds.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -87,7 +89,7 @@ async function fileStore(name, ttlMs) {
 let entityData = {};
 try { entityData = JSON.parse(await readFile(ENTITIES_FILE, 'utf8')); } catch { /* first run */ }
 const actorLoader = process.env.OFFLINE ? null : loadActor;
-const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader }, onWrite: saver(ENTITIES_FILE, () => entityData) });
+const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), admins: (process.env.ADMIN_DIDS || '').split(',').map((d) => d.trim()).filter(Boolean) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
 
 // Each person's OAuth session is kept by their actor entity, so a restart
 // (or `just dev` reloading) doesn't lose it while their cookie still says
@@ -185,7 +187,7 @@ const server = http.createServer(async (req, res) => {
 // opening a socket that rides on the visitor's session cookie. Agents (no
 // Origin) are fine, they never carry the cookie.
 const sameOrigin = ({ origin, req }) => !origin || new URL(origin).host === req.headers.host;
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024, verifyClient: sameOrigin });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 * 1024, verifyClient: sameOrigin });
 wss.on('connection', async (ws, req) => {
   // Hold early messages until we know who this is.
   const early = [];

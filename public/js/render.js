@@ -20,7 +20,7 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 export function createRenderer(canvas) {
@@ -238,6 +238,7 @@ export function createRenderer(canvas) {
       case 'vending': return drawVending(f, st);
       case 'eightball': return drawEightBall(f, st);
       case 'kiosk': return drawKiosk(f, st);
+      case 'upload': return drawUpload(f, st);
       case 'whiteboard': return drawWhiteboard(f, st);
       case 'board': return drawNoticeboard(f, st);
       case 'reception': return drawReception(f, st);
@@ -572,6 +573,20 @@ export function createRenderer(canvas) {
     for (const ex of [0.36, 0.64]) ctx.fillRect(S(x + ex - 0.04), S(fy + 0.2), S(0.08), S(blink ? 0.02 : 0.1));
     ctx.beginPath(); ctx.arc(S(x + 0.5), S(fy + 0.36), S(0.1), 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineWidth = Math.max(1, S(0.03)); ctx.strokeStyle = '#0f172a'; ctx.stroke();
     st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.2, c: 'rgba(34,211,238,0.35)' });
+  }
+
+  // An uploaded object (gallery.js): a plinth with its emoji floating over it.
+  function drawUpload(f, st) {
+    const { x, y } = f;
+    const hgt = HEIGHTS.upload;
+    const glow = objGlow(f, st, f.glow || '#a78bfa');
+    box(x + 0.2, y + 0.35, 0.6, 0.55, 0.45, '#e7e5e4', '#a8a29e', 0.06);
+    ctx.fillStyle = glow; ctx.fillRect(S(x + 0.2), S(y + 0.35 - 0.45), S(0.6), S(0.05));
+    const bob = 0.05 * Math.sin(st.time / 500 + x);
+    ctx.font = `${S(0.5)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(f.emoji || '🧩', S(x + 0.5), S(y + 1 - hgt - 0.05 + bob));
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.1, c: 'rgba(167,139,250,0.3)' });
   }
 
   function drawWhiteboard(f, st) {

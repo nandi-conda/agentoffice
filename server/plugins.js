@@ -9,6 +9,11 @@
 // built-in copy of the handler if the office ships one (the example objects in
 // plugins/objects/src/objects.js), and otherwise shows itself as out of order.
 // The Node server has no bindings, so it always runs the built-ins.
+//
+// Uploaded objects (server/entities/gallery.js) carry their code as
+// `object.upload` and run in the sandbox instead (server/sandbox.js): a
+// Dynamic Worker on Cloudflare, a worker thread on Node. They have no
+// built-in to fall back to; when the sandbox fails they're out of order.
 
 import { OBJECTS } from '../plugins/objects/src/objects.js';
 
@@ -28,8 +33,9 @@ export function cleanRequest(m) {
 }
 
 export class PluginHost {
-  constructor({ env = {}, builtins = OBJECTS, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
+  constructor({ env = {}, builtins = OBJECTS, sandbox = null, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
     this.env = env;
+    this.sandbox = sandbox; // runs uploaded objects: { langs, via, run(upload, req) }
     this.builtins = builtins;
     this.timeoutMs = timeoutMs;
     this.now = now;
@@ -47,7 +53,8 @@ export class PluginHost {
     return out;
   }
 
-  // object: { id, plugin, name, zone }; actor: { id, did, handle, name, kind }.
+  // object: { id, plugin, name, zone, upload? }; actor: { id, did, handle, name, kind }.
+  // upload: { id, version, lang, code } for objects people uploaded.
   // Returns { result, state, via } where state is what the object should keep.
   async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now() }) {
     const req = {
@@ -55,9 +62,22 @@ export class PluginHost {
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
       action, input, state, nearby: nearby.slice(0, 20), now,
     };
-    const binding = this.env[bindingName(object.plugin)];
-    let raw, via;
-    if (binding) {
+    const binding = object.upload ? null : this.env[bindingName(object.plugin)];
+    let raw, via, problem = null;
+    if (object.upload) {
+      if (!this.sandbox?.langs.includes(object.upload.lang)) problem = `this office can't run uploaded ${object.upload.lang} plugins`;
+      else {
+        try {
+          raw = await withTimeout(this.sandbox.run(object.upload, req), this.timeoutMs);
+          via = this.sandbox.via;
+          delete this.problems[object.id];
+        } catch (e) {
+          problem = clip(e?.message || e, 200);
+          this.problems[object.id] = { at: req.now, message: problem };
+          console.error(`upload ${object.id}:`, problem);
+        }
+      }
+    } else if (binding) {
       try {
         raw = await withTimeout(binding.interact(req), this.timeoutMs);
         via = 'binding';
@@ -67,7 +87,7 @@ export class PluginHost {
         console.error(`plugin ${object.plugin}:`, e?.message || e);
       }
     }
-    if (!via) {
+    if (!via && !object.upload) {
       const builtin = this.builtins[object.plugin];
       if (builtin) {
         try { raw = await withTimeout(builtin(req, this.env), this.timeoutMs); via = 'builtin'; }
@@ -77,7 +97,7 @@ export class PluginHost {
     if (!via) {
       return {
         via: 'offline', state,
-        result: { say: null, toast: `${req.object.name} is out of order right now.`, display: { label: 'out of order', glow: '#ef4444' }, ui: null },
+        result: { say: null, toast: `${req.object.name} is out of order right now${problem ? ` (${problem})` : ''}.`, display: { label: 'out of order', glow: '#ef4444' }, ui: null },
       };
     }
     const result = sanitize(raw);

@@ -41,6 +41,7 @@ export const WHO = obj({
   id: str('Peer id in the office'), key: str('Owner key: a DID, agent:<name> or human:<id>'),
   name: str('Display name'), handle: str('AT Protocol handle'), did: str('DID'),
   kind: str('human, agent or freeq'), zone: str('Zone they stand in'),
+  x: num('Where they stand, in tiles', 0), y: num('Where they stand, in tiles', 0),
 }, 'The person calling, filled in by the World', ['id', 'key', 'name']);
 
 export const ERROR = obj({ error: str('Why it was refused') });

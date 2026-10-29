@@ -102,6 +102,11 @@ export class Office {
       if (r.status === 'fulfilled') { this.mirror.set(MIRRORED[i], r.value); this.onMirror(MIRRORED[i]); }
       else console.error(`${MIRRORED[i]} view`, r.reason?.message);
     });
+    // Uploaded objects aren't in MIRRORED (people add them): pull what each shows.
+    await Promise.allSettled(this.gallery.map(async (f) => {
+      const v = await this.ref(`uobj:${f.id}`).view();
+      if (!this.mirror.has(`uobj:${f.id}`)) { this.mirror.set(`uobj:${f.id}`, v); this.onMirror(`uobj:${f.id}`); }
+    }));
   }
 
   persisted() {
@@ -142,7 +147,7 @@ export class Office {
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
     if (spec.near) {
       // Same rule as the browser: walk up to it (its nearest edge) first.
-      const f = FURNITURE.find((x) => x.id === name) || DESKS.find((x) => x.id === name);
+      const f = FURNITURE.find((x) => x.id === name) || DESKS.find((x) => x.id === name) || this.uploaded(name);
       if (!f) throw new Error(`${address} isn't on the map`);
       const cx = Math.max(f.x, Math.min(p.x, f.x + (f.w || 1))), cy = Math.max(f.y, Math.min(p.y, f.y + (f.h || 1)));
       if (Math.hypot(cx - p.x, cy - p.y) > spec.near) throw new Error(`you're too far from the ${f.name || name}: walk_to ${name} first (within ${spec.near} tiles)`);
@@ -170,7 +175,7 @@ export class Office {
   }
 
   who(p) {
-    return { id: p.id, key: this.ownerKey(p), name: p.name, handle: p.handle, did: p.did, kind: p.kind, zone: zoneAt(p.x, p.y)?.id || null };
+    return { id: p.id, key: this.ownerKey(p), name: p.name, handle: p.handle, did: p.did, kind: p.kind, zone: zoneAt(p.x, p.y)?.id || null, x: p.x, y: p.y };
   }
 
   // A message for an actor: to each of their open connections. Returns how
@@ -214,7 +219,8 @@ export class Office {
       case 'noticeboard': return this.broadcast({ t: 'notes', notes: this.notes });
       case 'arcade': return this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
       case 'coffee': return this.broadcast({ t: 'counters', counters: this.counters });
-      case 'plugin': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
+      case 'plugin': case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
+      case 'gallery': return this.broadcast({ t: 'gallery', items: this.gallery });
       case 'pomodoro': return this.broadcastPomo();
     }
   }
@@ -235,6 +241,8 @@ export class Office {
       freeq: this.freeq?.status() || null,
       // How each plugin object was last reached: binding, builtin or offline.
       objects: Object.fromEntries(PLUGIN_OBJECTS.map((f) => [f.id, this.mirror.get(`plugin:${f.id}`)?.via || 'unused'])),
+      // Uploaded objects and how each last ran (dynamic-worker, worker-thread, offline).
+      uploads: Object.fromEntries(this.gallery.map((f) => [f.id, this.mirror.get(`uobj:${f.id}`)?.via || 'unused'])),
     };
   }
 
@@ -383,6 +391,7 @@ export class Office {
       case 'coffee': return this.coffee(p);
       case 'score': return this.score(p, m);
       case 'use': return this.use(p, m);
+      case 'gallery': return this.galleryOp(p, m);
       case 'wave': return this.wave(p, m);
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
       case 'av': return this.av(p, m);
@@ -427,6 +436,7 @@ export class Office {
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
       bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(),
+      gallery: this.gallery,
     });
     for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
@@ -602,17 +612,36 @@ export class Office {
   // Using a plugin object (jukebox, vending machine…): its entity calls the
   // plugin and answers with effects (see entities/plugin.js).
   async use(p, m) {
-    const f = PLUGIN_OBJECTS.find((x) => x.id === m.id);
+    const f = PLUGIN_OBJECTS.find((x) => x.id === m.id) || this.uploaded(m.id);
     if (!f) return;
     const cx = Math.max(f.x, Math.min(p.x, f.x + f.w)), cy = Math.max(f.y, Math.min(p.y, f.y + f.h));
     if (Math.hypot(cx - p.x, cy - p.y) > 3) return this.sendTo(p, { t: 'objui', id: f.id, ui: null, toast: `Walk up to the ${f.name} to use it.` });
-    return this.ref(`plugin:${f.id}`).interact(this.who(p), cleanRequest(m));
+    return this.ref(`${f.plugin === 'upload' ? 'uobj' : 'plugin'}:${f.id}`).interact(this.who(p), cleanRequest(m));
   }
 
   objects() {
     const out = {};
     for (const f of PLUGIN_OBJECTS) { const v = this.mirror.get(`plugin:${f.id}`); if (v?.display) out[f.id] = v.display; }
+    for (const f of this.gallery) { const v = this.mirror.get(`uobj:${f.id}`); if (v?.display) out[f.id] = v.display; }
     return out;
+  }
+
+  // Objects people uploaded (gallery:main), as map objects.
+  get gallery() { return this.mirror.get('gallery:main') || []; }
+  uploaded(id) {
+    const i = this.gallery.find((x) => x.id === id);
+    return i && { ...i, w: 1, h: 1, plugin: 'upload' };
+  }
+
+  // Uploading and removing objects from the web UI: the same calls as the
+  // MCP tools gallery_upload / gallery_remove, answered as { t: 'galleryres', rid, result }.
+  async galleryOp(p, m) {
+    const method = m.op === 'remove' ? 'remove' : m.op === 'upload' ? 'upload' : null;
+    if (!method) return;
+    let result;
+    try { result = await this.call(p, 'gallery:main', method, [m.req || {}]); }
+    catch (e) { result = { error: clip(e.message, 200) }; }
+    this.sendTo(p, { t: 'galleryres', rid: m.rid, result });
   }
 
   wave(p, m) {

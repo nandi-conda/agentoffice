@@ -8,6 +8,7 @@ import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
 import { PluginHost } from '../server/plugins.js';
+import { DynamicSandbox } from '../server/sandbox.js';
 
 import { BINDINGS } from '../server/entities/bindings.js';
 
@@ -18,7 +19,13 @@ export class DORuntime {
     this.env = env;
     // plugins: interactive objects call their plugin Worker through the
     // PLUGIN_<NAME> service bindings in env (see server/plugins.js).
-    this.services = { loadActor: env.OFFLINE ? null : loadActor, plugins: new PluginHost({ env }) };
+    // Uploaded objects run in Dynamic Workers when the office has a Worker
+    // Loader binding (LOADER, Workers Paid); without one uploads are refused.
+    this.services = {
+      loadActor: env.OFFLINE ? null : loadActor,
+      plugins: new PluginHost({ env, sandbox: env.LOADER ? new DynamicSandbox(env.LOADER) : null }),
+      admins: String(env.ADMIN_DIDS || '').split(',').map((d) => d.trim()).filter(Boolean),
+    };
   }
 
   stub(address) {

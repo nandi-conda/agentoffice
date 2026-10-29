@@ -6,6 +6,7 @@ import { Entity } from './runtime.js';
 import { str, int, num as numS, bool, arr, obj, opt, WHO } from './schema.js';
 import { DESKS, ZONES, PLUGIN_OBJECTS } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
+import { Gallery, UploadedObject } from './gallery.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, fmtTime, fmtRange } from '../../public/js/rooms.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
@@ -604,7 +605,7 @@ export class Room extends Entity {
 export const KINDS = {
   topic: Topic, actor: Actor, room: Room, desk: Desk,
   whiteboard: Whiteboard, noticeboard: NoticeBoard, arcade: Arcade, coffee: CoffeeMachine, pomodoro: Pomodoro,
-  plugin: PluginObject,
+  plugin: PluginObject, gallery: Gallery, uobj: UploadedObject,
 };
 
 // Everything the World mirrors, pulled when it starts.
@@ -613,6 +614,6 @@ export const MIRRORED = [
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
   ...POMO_ZONES.map((z) => `pomodoro:${z}`),
   'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main',
-  ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`),
+  ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

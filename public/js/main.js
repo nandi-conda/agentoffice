@@ -8,6 +8,7 @@ import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
 import { createMusic } from './music.js';
+import { syncGallery, openGallery } from './gallery.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -24,6 +25,9 @@ let net = null;
 let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
 let freeqRooms = {}; // area id -> { channel, members, topic } attached from freeq
 let objects = {}; // plugin object id -> { display, bubble } (see objects.js)
+let gallery = []; // objects people uploaded (see gallery.js)
+const galleryWait = new Map(); // request id -> resolve, for { t: 'galleryres' }
+let galleryRid = 0;
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
@@ -258,6 +262,7 @@ function onMessage(m) {
       freeqRooms = m.freeq || {};
       objects = {};
       for (const [id, display] of Object.entries(m.objects || {})) objects[id] = { display };
+      gallery = m.gallery || []; syncGallery(gallery);
       refreshChannels();
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
@@ -309,6 +314,8 @@ function onMessage(m) {
       }
       break;
     }
+    case 'gallery': gallery = m.items || []; syncGallery(gallery); break;
+    case 'galleryres': galleryWait.get(m.rid)?.(m.result || {}); galleryWait.delete(m.rid); break;
     case 'objui': {
       if (m.toast) toast(esc(m.toast));
       if (modal.obj?.id !== m.id) break;
@@ -642,6 +649,7 @@ function openHelp() {
       <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
       <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
+      <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
       <kbd>+ −</kbd><span>Zoom</span>
     </div>${coarse ? '</details>' : ''}
@@ -1096,6 +1104,22 @@ function openRoom(id) {
   render();
 }
 $('.rooms-btn').addEventListener('click', () => openSchedule());
+$('.gallery-btn').addEventListener('click', () => showGallery());
+
+// Uploaded objects: list, remove, upload (gallery.js). Requests go over the
+// socket and come back as { t: 'galleryres', rid, result }.
+function galleryRequest(op, req) {
+  const rid = ++galleryRid;
+  return new Promise((resolve) => {
+    galleryWait.set(rid, resolve);
+    net.send({ t: 'gallery', op, rid, req });
+    setTimeout(() => { if (galleryWait.delete(rid)) resolve({ error: 'The office didn\'t answer. Try again?' }); }, 20000);
+  });
+}
+function showGallery() {
+  if (!me) return;
+  openGallery(modal, { me, items: gallery, request: galleryRequest, toast, walkTo });
+}
 
 // ---- A/V rooms: camera, screen share and the video stage -----------------------------
 const camBtn = $('.cam'), shareBtn = $('.share');
@@ -1189,6 +1213,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'm') toggleMic();
   else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
+  else if (key === 'u') showGallery();
   else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);

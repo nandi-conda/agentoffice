@@ -25,7 +25,8 @@ export function openObject(modal, f, send) {
           </button>`).join('')}</div>` : ''}
         ${ui.list?.rows?.length ? `<p class="small"><b>${esc(ui.list.title)}</b></p><ol class="obj-list small">${ui.list.rows.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>` : ''}
         ${ui.input ? `<div class="row obj-ask"><input maxlength="${ui.input.maxLength}" placeholder="${esc(ui.input.placeholder)}"><button class="btn primary obj-send">${esc(ui.input.button)}</button></div>` : ''}
-        ${ui.buttons?.length ? `<div class="row">${ui.buttons.map((b, i) => `<button class="btn ${b.primary ? 'primary' : 'ghost'} obj-btn" data-i="${i}">${esc(b.label)}</button>`).join('')}</div>` : ''}`;
+        ${ui.buttons?.length ? `<div class="row">${ui.buttons.map((b, i) => `<button class="btn ${b.primary ? 'primary' : 'ghost'} obj-btn" data-i="${i}">${esc(b.label)}</button>`).join('')}</div>` : ''}
+        ${f.owner ? `<p class="muted small obj-by">Uploaded by ${esc(f.owner.handle ? `@${f.owner.handle}` : f.owner.name)}</p>` : ''}`;
       modal.body.querySelectorAll('.obj-item').forEach((el) => el.addEventListener('click', () => use(ui.items[+el.dataset.i].action)));
       modal.body.querySelectorAll('.obj-btn').forEach((el) => el.addEventListener('click', () => use(ui.buttons[+el.dataset.i].action)));
       const inp = modal.body.querySelector('.obj-ask input');

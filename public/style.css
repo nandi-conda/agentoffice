@@ -363,3 +363,13 @@ input, select, textarea { font: inherit; color: inherit; }
 .obj-list { margin: 4px 0 10px 18px; padding: 0; }
 .obj-ask { gap: 8px; }
 .obj-ask input { flex: 1; min-width: 0; }
+
+/* Uploaded objects (gallery.js) */
+.gal-item { cursor: default; flex-wrap: wrap; }
+.gal-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.gal-acts .btn { padding: 4px 10px; font-size: 13px; }
+.gal-form { display: grid; gap: 8px; }
+.gal-form label { display: grid; gap: 4px; }
+.gal-form .row { gap: 10px; flex-wrap: wrap; align-items: end; }
+.gal-err { color: #b91c1c; margin: 0; }
+.obj-by { margin-top: 10px; }

@@ -38,6 +38,9 @@ export class PluginObject extends Entity {
   get object() { return PLUGIN_OBJECTS.find((f) => f.id === this.name); }
   get plugins() { return this.services.plugins || (builtins ||= new PluginHost()); }
 
+  // The object as the PluginHost gets it (uploads add their code).
+  async pluginObject(f, zone) { return { id: f.id, plugin: f.plugin, name: f.name, zone }; }
+
   // What everyone sees (a label, a glow), and how the plugin was last reached.
   view() { return { display: this.state.display || null, via: this.state.via || null }; }
 
@@ -68,7 +71,7 @@ export class PluginObject extends Entity {
     } catch { /* the plugin just won't know who's around */ }
 
     const { result, state, via } = await this.plugins.interact({
-      object: { id: f.id, plugin: f.plugin, name: f.name, zone },
+      object: await this.pluginObject(f, zone),
       actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(),
     });
     this.state.data = state;
