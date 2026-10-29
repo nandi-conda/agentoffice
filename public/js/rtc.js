@@ -11,10 +11,21 @@
 
 import { canHear, zoneAt, HEAR_RADIUS } from './map.js';
 
-const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+// STUN until /api/ice answers; with Cloudflare TURN configured it also
+// returns relay servers (short-lived credentials), refetched before they expire.
+let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+let iceUntil = 0, iceLoading = null;
+function loadIce() {
+  if (iceLoading || Date.now() < iceUntil) return iceLoading;
+  iceLoading = fetch('/api/ice').then((r) => r.ok ? r.json() : null).then((d) => {
+    if (d?.iceServers?.length) { ICE = d.iceServers; iceUntil = Date.now() + Math.max(60, d.ttl || 0) * 1000; }
+  }).catch(() => {}).finally(() => { iceLoading = null; });
+  return iceLoading;
+}
 export const DESK_VIEW = 4;
 
 export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
+  loadIce();
   let local = null; // what we send: the mic after the gain stage (or empty when silent)
   let raw = null;   // the mic itself
   let actx = null;
@@ -160,6 +171,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
   const kinds = () => Object.fromEntries([[cam?.id, 'cam'], [screen?.id, 'screen']].filter(([k]) => k));
 
   function create(id) {
+    loadIce();
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const c = {
       pc, audio: new Audio(), analyser: null, data: null, makingOffer: false, polite: myId() > id,

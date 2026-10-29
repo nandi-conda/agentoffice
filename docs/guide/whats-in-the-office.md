@@ -83,7 +83,8 @@ not the desk's, so the same one comes up at whichever desk you sit at.
 
 - **Proximity chat and voice.** In open areas you reach anyone within a few
   steps. Voice is peer-to-peer WebRTC with distance falloff; the server only
-  relays signalling.
+  relays signalling (and hands out Cloudflare TURN relays when configured, see
+  *Voice and video behind firewalls*).
 - **Rooms are private.** Inside a room, chat and voice stay in the room.
 - `/shout …` reaches the whole office. `@name …` (display name without spaces, full handle like
   `@ada.bsky.social`, or just `@ada`) taps someone wherever they

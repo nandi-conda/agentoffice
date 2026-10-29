@@ -7,6 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { Office } from '../server/office.js';
 import { handleApi } from '../server/app.js';
+import { createIce } from '../server/turn.js';
 import { loadActor } from '../server/atproto.js';
 import { createAuth } from '../server/auth.js';
 import { AgentAuth } from '../server/agentauth.js';
@@ -61,6 +62,7 @@ export class OfficeRoom extends DurableObject {
     // Agents: DID proof / Roost sign-in, and the MCP endpoint. MCP sessions
     // live in memory but are noted in storage, so after a deploy or eviction
     // an agent's next request resumes its session and puts it back in the office.
+    this.ice = createIce({ keyId: env.TURN_KEY_ID, token: env.TURN_KEY_API_TOKEN });
     this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
     this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
 
@@ -145,7 +147,7 @@ export class OfficeRoom extends DurableObject {
       this.persistPeer(this.office.open(server, { did }));
       return new Response(null, { status: 101, webSocket: client });
     }
-    return (await handleApi(request, { office: this.office, auth, agents: this.agents, mcp: this.mcp })) || new Response('not found', { status: 404 });
+    return (await handleApi(request, { office: this.office, auth, agents: this.agents, mcp: this.mcp, ice: this.ice })) || new Response('not found', { status: 404 });
   }
 
   // OAuth client, built on first request. PUBLIC_URL pins the public origin;

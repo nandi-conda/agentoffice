@@ -158,6 +158,31 @@ just deploy --var PUBLIC_URL:https://office.example.com         # or add [vars] 
 just cf-secret SESSION_SECRET                                      # paste `openssl rand -hex 32`
 ```
 
+### Voice and video behind firewalls (Cloudflare TURN)
+
+Voice, cameras and screen shares are peer-to-peer WebRTC. With only STUN, two
+people on strict NATs or corporate networks can fail to connect. A Cloudflare
+Realtime TURN key fixes that: the office hands each browser short-lived TURN
+credentials from `GET /api/ice`, and calls that can't go direct are relayed
+through Cloudflare (UDP 3478, or TLS on 443). Media stays end-to-end encrypted.
+
+1. In the Cloudflare dashboard open **Realtime → TURN Server** and click
+   **Create** (any name). It shows a **Turn Token ID** and an **API Token**;
+   copy both (the token is shown once).
+2. Set them as secrets:
+
+   ```sh
+   just cf-secret TURN_KEY_ID          # paste the Turn Token ID
+   just cf-secret TURN_KEY_API_TOKEN   # paste the API Token
+   ```
+
+   On Node, export `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` instead.
+
+The server mints one 24-hour credential and re-mints it 6 hours before it
+expires. Without the secrets, or if Cloudflare can't be reached, `/api/ice`
+returns public STUN servers and everything works as before. Only relayed
+traffic is billed (Cloudflare's free tier covers the first 1,000 GB a month).
+
 Request handling is shared: `server/app.js` holds the HTTP routes as
 `Request -> Response` functions, called by both `server/index.js` (Node) and
 the Durable Object. Add new endpoints there, using only web-standard APIs
@@ -248,7 +273,8 @@ not the desk's, so the same one comes up at whichever desk you sit at.
 
 - **Proximity chat and voice.** In open areas you reach anyone within a few
   steps. Voice is peer-to-peer WebRTC with distance falloff; the server only
-  relays signalling.
+  relays signalling (and hands out Cloudflare TURN relays when configured, see
+  *Voice and video behind firewalls*).
 - **Rooms are private.** Inside a room, chat and voice stay in the room.
 - `/shout …` reaches the whole office. `@name …` (display name without spaces, full handle like
   `@ada.bsky.social`, or just `@ada`) taps someone wherever they

@@ -6,6 +6,7 @@
 import { loadActor, fetchBlob } from './atproto.js';
 import { describeApi } from './apidoc.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
+import { STUN } from './turn.js';
 
 const json = (code, body) => new Response(JSON.stringify(body), {
   status: code, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -43,8 +44,9 @@ export async function stockAsset(path, fetchImpl = (...a) => fetch(...a)) {
 
 export const isApiPath = (p) => p.startsWith('/api/') || p.startsWith('/oauth/') || p === '/healthz' || p === '/mcp';
 
-// `agents` is the AgentAuth (DID proof for agents, Roost), `mcp` the McpHub.
-export async function handleApi(request, { office, auth, agents, mcp }) {
+// `agents` is the AgentAuth (DID proof for agents, Roost), `mcp` the McpHub,
+// `ice` the ICE server source (server/turn.js).
+export async function handleApi(request, { office, auth, agents, mcp, ice }) {
   const url = new URL(request.url);
   try {
     if (url.pathname === '/mcp' && mcp) return await mcp.fetch(request);
@@ -89,6 +91,11 @@ export async function handleApi(request, { office, auth, agents, mcp }) {
       const a = await stockAsset(url.pathname.slice('/api/stock/'.length));
       if (a.status !== 200) return new Response(a.reason || '', { status: a.status, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
       return new Response(a.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    }
+    // STUN/TURN servers for voice and video (short-lived TURN credentials when configured).
+    if (url.pathname === '/api/ice') {
+      const { error, ...out } = ice ? await ice.get() : { iceServers: STUN, ttl: 86400, turn: false };
+      return json(200, out);
     }
     if (url.pathname === '/api/office') return json(200, office.summary());
     // The whole API (entities, World, plugins) as JSON; /docs is the same, rendered.

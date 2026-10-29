@@ -9,6 +9,7 @@ import { loadActor } from './atproto.js';
 import { Office } from './office.js';
 import { createAuth, SESSION_TTL_MS } from './auth.js';
 import { handleApi, isApiPath } from './app.js';
+import { createIce } from './turn.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
@@ -117,6 +118,7 @@ const office = new Office(saved, {
   loadActor: actorLoader,
   runtime,
 });
+const ice = createIce({ keyId: process.env.TURN_KEY_ID, token: process.env.TURN_KEY_API_TOKEN });
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
 const mcp = new McpHub({ office, auth: agents });
 
@@ -162,7 +164,7 @@ const server = http.createServer(async (req, res) => {
       const ac = new AbortController();
       res.on('close', () => ac.abort());
       const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : req;
-      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth, agents, mcp });
+      const out = await handleApi(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body, duplex: 'half', signal: ac.signal }), { office, auth, agents, mcp, ice });
       if (!out) return send(res, 404, { error: 'not found' });
       res.writeHead(out.status, Object.fromEntries(out.headers));
       // Stream, so MCP's server-sent events reach the agent as they happen.
