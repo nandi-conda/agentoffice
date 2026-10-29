@@ -345,6 +345,8 @@ function onMessage(m) {
       // A path planned over the old map may cross a wall now.
       if (path) walkTo(walkTarget?.x ?? me.x, walkTarget?.y ?? me.y);
       refreshChannels();
+      // The badge follows a change to the room you're standing in.
+      if (lastZone?.channel) zoneChanged(zoneAt(me.x, me.y), true);
       if (modal.sign) modal.sign();
       const fresh = wing.filter((r) => !had.has(r.id));
       if (had.size && fresh.length === 1) sys(`🚪 A room for ${fresh[0].channel} opened off the hallway.`);
@@ -1847,8 +1849,10 @@ function zoneChanged(z, freeqOnly = false) {
   const kind = $('.zone-kind'), scope = $('.chat-form .scope');
   const fq = z && freeqRooms[z.id];
   $('.zone-name').textContent = z ? z.name : 'Hallway';
-  kind.textContent = fq ? fq.channel : z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
-  kind.className = `zone-kind ${fq ? 'freeq' : z?.kind || 'open'}`;
+  // A channel room says who may walk in (its door's policy), not "private".
+  const access = z?.channel && (wing.find((r) => r.id === z.id)?.access || { icon: '🚪', text: 'open', open: true });
+  kind.textContent = fq ? fq.channel : access ? (access.open ? 'open' : access.text) : z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
+  kind.className = `zone-kind ${fq ? 'freeq' : access ? (access.open ? 'open' : 'gated') : z?.kind || 'open'}`;
   scope.textContent = fq ? fq.channel : z && z.kind !== 'open' ? z.name : 'nearby';
   scope.className = `scope ${fq ? 'freeq' : z?.kind || 'open'}`;
   if (freeqOnly) return;

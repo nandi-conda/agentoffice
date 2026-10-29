@@ -91,6 +91,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .zone-kind.room { background: #7c3aed; }
 .zone-kind.quiet { background: #dc2626; }
 .zone-kind.open { background: #16a34a; }
+.zone-kind.gated { background: #b45309; }
 .pomo-hud { font-variant-numeric: tabular-nums; }
 
 .hud-tr { flex: 0 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
