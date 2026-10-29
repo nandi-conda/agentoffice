@@ -9,6 +9,7 @@ import { PluginHost } from '../server/plugins.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
 import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm } from '../server/sandbox.js';
 import { placeNear, MAX_PER_OWNER } from '../server/entities/gallery.js';
+import { readManifest, cleanManifest, MANIFEST_SECTION } from '../public/js/manifest.js';
 
 const GUESTBOOK = new Uint8Array(readFileSync(new URL('../public/plugins/guestbook.wasm', import.meta.url)));
 const b64 = toBase64(GUESTBOOK);
@@ -34,6 +35,25 @@ test('checkUpload reads exports and imports without compiling', () => {
   assert.doesNotThrow(() => checkUpload('wasm', wasm({ imports: [['office', 'log']] })));
   assert.throws(() => checkUpload('js', new TextEncoder().encode('export const x = 1')), /interact/);
   assert.equal(checkUpload('js', new TextEncoder().encode('export function interact(r) { return {} }')).size, 41);
+});
+
+test('a module carries its manifest in a custom section (the agentoffice-plugin crate)', () => {
+  const m = checkUpload('wasm', GUESTBOOK).manifest;
+  assert.equal(m.name, 'Guestbook');
+  assert.equal(m.prompt, 'Sign the guestbook');
+  assert.equal(m.emoji, '📖');
+  assert.equal(m.api.sign.params.input.type, 'string');
+  assert.equal(readManifest(wasm()), null);
+  // A custom section by hand: id 0, size, name, JSON.
+  const body = [...new TextEncoder().encode(MANIFEST_SECTION)];
+  const json = [...new TextEncoder().encode(JSON.stringify({ name: 'x'.repeat(99), glow: 'red', api: { 'bad id!': {}, ok: { doc: 'fine', params: { input: { description: 'what' } } } } }))];
+  const leb = (n) => (n < 128 ? [n] : [(n & 0x7f) | 0x80, ...leb(n >> 7)]);
+  const sec = [0, ...leb(body.length + 1 + json.length), body.length, ...body, ...json];
+  const m2 = readManifest(new Uint8Array([...wasm(), ...sec]));
+  assert.equal(m2.name.length, 40);
+  assert.equal(m2.glow, '');
+  assert.deepEqual(Object.keys(m2.api), ['ok']);
+  assert.equal(cleanManifest('nope'), null);
 });
 
 test('runWasm speaks the JSON ABI (the guestbook example)', async () => {
@@ -125,12 +145,23 @@ test('a signed-in person uploads an object, everyone sees it, and anyone nearby 
   guest.msg({ t: 'use', id: item.id, action: 'sign', input: 'hello from a guest' });
   await settle(300);
   assert.equal(guest.last('objui').via, 'worker-thread');
+  assert.equal(item.prompt, 'Sign the guestbook');
+  assert.equal(item.api.sign.doc, 'Sign the guestbook with a note');
   assert.match(ada.sent.filter((m) => m.t === 'obj' && m.say).at(-1).say, /guest signed/);
   assert.equal(guest.sent.filter((m) => m.t === 'obj' && m.display).at(-1).display.label, '1 signature');
   assert.equal(o.summary().uploads[item.id], 'worker-thread');
   const late = await join(o, 'linus');
   assert.equal(late.last('welcome').gallery.length, 1);
   assert.equal(late.last('welcome').objects[item.id].label, '1 signature');
+
+  // Without a name, the manifest names it.
+  ada.msg({ t: 'gallery', op: 'upload', rid: 9, req: { lang: 'wasm', code: b64 } });
+  await settle(50);
+  const named = ada.last('galleryres').result.object;
+  assert.equal(named.name, 'Guestbook');
+  assert.equal(named.glow, '#f59e0b');
+  ada.msg({ t: 'gallery', op: 'remove', rid: 10, req: { id: named.id } });
+  await settle();
 
   // Only the uploader can take it away.
   guest.msg({ t: 'gallery', op: 'remove', rid: 3, req: { id: item.id } });

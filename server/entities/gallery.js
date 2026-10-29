@@ -38,6 +38,7 @@ const ITEM = obj({
   x: num('Tile x', 0), y: num('Tile y', 0), zone: { type: ['string', 'null'], description: 'Zone it stands in' },
   owner: obj({ did: str('Uploader DID'), handle: { type: ['string', 'null'] }, name: str('Uploader name') }, 'Who uploaded it'),
   createdAt: num('When, epoch ms', 0),
+  api: { type: 'object', description: 'The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest.' },
 }, 'An uploaded object');
 
 // The tile next to (x, y) where a new object can stand: free floor, not on
@@ -58,12 +59,12 @@ export class Gallery extends Entity {
   static api = {
     view: { doc: 'Every uploaded object on the map.', returns: arr(ITEM, 'Uploaded objects') },
     upload: {
-      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). At most ${MAX_PER_OWNER} per person.`,
+      doc: `Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. \`code\` is the file in base64: a WebAssembly module (≤ ${MAX_WASM / 1024} KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out. At most ${MAX_PER_OWNER} per person.`,
       who: true,
       mutates: true,
       params: {
         req: obj({
-          name: str('What it\'s called', 40),
+          name: opt(str('What it\'s called (default: the manifest\'s name)', 40)),
           lang: { type: 'string', enum: LANGS, description: 'wasm or js' },
           code: str('The file, base64', B64_MAX),
           prompt: opt(str('What the E prompt says, e.g. "Sign the guestbook"', 60)),
@@ -93,8 +94,6 @@ export class Gallery extends Entity {
     const lang = req.lang === 'js' ? 'js' : 'wasm';
     if (!sandbox) return { error: 'this office can\'t run uploaded plugins yet: it needs the Worker Loader binding (docs/uploads.md)' };
     if (!sandbox.langs.includes(lang)) return { error: `this office runs ${sandbox.langs.join(' and ')} uploads, not ${lang}` };
-    const name = clip(req.name, 40);
-    if (!name) return { error: 'give it a name' };
     if (this.items.filter((i) => i.owner.did === who.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: remove one first` };
     if (this.items.length >= MAX_OBJECTS) return { error: 'the office is full of uploaded objects right now' };
     let bytes, info;
@@ -103,17 +102,23 @@ export class Gallery extends Entity {
       bytes = fromBase64(req.code);
       info = checkUpload(lang, bytes);
     } catch (e) { return { error: `can't use that file: ${e.message}` }; }
+    // What the module says about itself fills in whatever the uploader left out.
+    const m = info.manifest || {};
+    const name = clip(req.name, 40) || clip(m.name, 40);
+    if (!name) return { error: 'give it a name' };
+    const color = (c) => /^#[0-9a-f]{3,8}$/i.test(c || '');
     const spot = Number.isFinite(who.x) && Number.isFinite(who.y) ? placeNear(who.x, who.y, this.items) : null;
     if (!spot) return { error: 'no room to put it here: step into open floor and try again' };
 
     const id = `u-${shortId()}`;
     const item = {
       id, name, lang, size: info.size, version: await digest(bytes),
-      prompt: clip(req.prompt, 60) || `Use ${name}`,
-      doc: clip(req.doc, 280),
-      emoji: [...clip(req.emoji, 8)].slice(0, 2).join('') || '🧩',
-      glow: /^#[0-9a-f]{3,8}$/i.test(req.glow || '') ? req.glow : '#a78bfa',
-      look: LOOKS.includes(req.look) ? req.look : 'plinth',
+      prompt: clip(req.prompt, 60) || m.prompt || `Use ${name}`,
+      doc: clip(req.doc, 280) || m.doc || '',
+      emoji: [...clip(req.emoji, 8)].slice(0, 2).join('') || m.emoji || '🧩',
+      glow: color(req.glow) ? req.glow : color(m.glow) ? m.glow : '#a78bfa',
+      look: LOOKS.includes(req.look) ? req.look : LOOKS.includes(m.look) ? m.look : 'plinth',
+      api: m.api || {},
       x: spot.x, y: spot.y, zone: zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
       owner: { did: who.did, handle: who.handle || null, name: who.name },
       createdAt: this.now(),
@@ -143,7 +148,7 @@ export class UploadedObject extends PluginObject {
   static doc = 'An object someone uploaded (gallery:main lists them). Its plugin runs in the sandbox: a Dynamic Worker on Cloudflare, a worker thread on Node. Same contract and panel as the built-in plugin objects.';
   static api = {
     view: PluginObject.api.view,
-    interact: { ...PluginObject.api.interact, doc: `${PluginObject.api.interact.doc} The name is the object id (u-…) from gallery_view.` },
+    interact: { ...PluginObject.api.interact, doc: `${PluginObject.api.interact.doc} The name is the object id (u-…) from gallery_view, whose \`api\` lists the actions the object declares.` },
     install: { doc: 'Store the code and manifest of a new upload (from gallery:main).', params: { item: ITEM, code: str('Base64 code', B64_MAX) }, mutates: true, internal: true },
     uninstall: { doc: 'Forget the code and memory (from gallery:main).', mutates: true, internal: true },
   };

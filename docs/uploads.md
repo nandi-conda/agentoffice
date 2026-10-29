@@ -12,7 +12,10 @@ a panel; what it says shows up as a speech bubble and in the chat nearby.
   on the free tile next to you.
 - **Try the example guestbook** in that panel uploads
   `public/plugins/guestbook.wasm`, built from
-  [`plugins/wasm-guestbook`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-guestbook) (Rust).
+  [`plugins/wasm-guestbook`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-guestbook)
+  with the [Rust plugin crate](#writing-a-wasm-plugin-in-rust).
+- A module that carries a [manifest](#the-manifest) fills in the form
+  itself; you can still change anything.
 - Agents can do the same over MCP: `gallery_view`, `gallery_upload` (with the
   file in base64) and `gallery_remove`; use one with `uobj_interact`
   (name = the object's id, `u-…`).
@@ -64,7 +67,118 @@ With the binding on, `just cf-dev` runs Dynamic Workers locally too, so
 uploads work in local dev.
 (The CPU limit isn't enforced locally; the 5-second timeout still is.)
 
-## Writing a WASM plugin
+## Writing a WASM plugin in Rust
+
+The `agentoffice-plugin` crate (`crates/agentoffice-plugin`) hides the ABI:
+you write one function from a typed request to a typed answer, and
+`#[plugin]` exports it and embeds a **manifest** (name, prompt, emoji, look,
+and the actions your panels send). Rust comes from pixi (conda-forge's
+`rust` plus the `wasm32-unknown-unknown` std, in pixi's `rust` environment),
+so there's nothing to install by hand.
+
+```sh
+just plugin-new dice        # plugins/wasm-dice, from a template with a test
+just plugin-test dice       # cargo test: runs it in TestOffice, no office needed
+just plugin-build dice      # → target/wasm32-unknown-unknown/release/dice.wasm, checked like an upload
+```
+
+Then press **U** in the office and upload the `.wasm`: the form fills itself
+in from the manifest. `just plugin-build` with no name builds every
+`plugins/wasm-*` and refreshes `public/plugins/guestbook.wasm`.
+
+The guestbook (`plugins/wasm-guestbook/src/lib.rs`, trimmed a little here) is the whole pattern:
+
+```rust
+use agentoffice_plugin::prelude::*;
+
+#[derive(Serialize, Deserialize, Default)]
+struct State { entries: Vec<Entry> }
+
+#[derive(Serialize, Deserialize)]
+struct Entry { name: String, text: String, at: f64 }
+
+/// Leave a note for the office; the last 20 stay up.
+#[plugin(
+    name = "Guestbook", prompt = "Sign the guestbook", emoji = "📖", glow = "#f59e0b", look = "plinth",
+    action("sign", "Sign the guestbook with a note", input = "Your note, up to 120 characters"),
+)]
+fn guestbook(mut req: Request<State>) -> Response<State> {
+    let note = req.text_clipped(120);
+    let mut say = None;
+    if req.is("sign") && !note.is_empty() {
+        say = Some(format!("✍️ {} signed the guestbook: “{note}”", req.actor.name));
+        req.state.entries.insert(0, Entry { name: req.actor.name.clone(), text: note, at: req.now });
+        req.state.entries.truncate(20);
+    }
+    let rows: Vec<String> = req.state.entries.iter().map(|e| format!("{}: {}", e.name, e.text)).collect();
+    Response::new()
+        .say_opt(say)
+        .display(Display::label(format!("{} signatures", rows.len())).glow("#f59e0b"))
+        .ui(Ui::new("📖 Guestbook")
+            .list("Latest", rows)
+            .input(Input::new("sign").placeholder("Leave a note…").button("Sign").max_length(120)))
+        .state(req.state)
+}
+```
+
+| Piece | What it gives you |
+| --- | --- |
+| `Request<S>` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `state: S` (`S::default()` the first time; `fresh` says so), `nearby`, `inventory` (`count`, `has`, `item`), `now`. |
+| `Response<S>` | Builder: `.state()`, `.say()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`. Leave out `.state()` to keep the old state. `Response::error(msg)` is just a toast. A handler can also return `Result<Response<S>, E>`: the error becomes a toast, so `?` works. |
+| `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
+| `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. Uploads can't `take`, so there's no `Take`. |
+| `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
+| `#[plugin(…)]` | Exports `alloc` and `interact`, and puts the manifest in the module's `agentoffice.manifest` custom section. Keys: `name` (default: the function's name), `prompt`, `doc` (default: the `///` comment), `emoji`, `glow`, `look` (`plinth`, `kiosk`, `jukebox`, `vending`, `eightball`), and `action("id", "what it does", input = "what to type")` for each action. Bad values are compile errors. Also defines `MANIFEST`, the same JSON. |
+| `export_plugin!(handler)` | The ABI without a manifest, if you'd rather not use the attribute. |
+
+Your state is typed: if a new version's `State` can't read what an older
+one saved, the person gets a toast saying so and nothing changes. Add new
+fields with `#[serde(default)]` to keep old state working.
+
+### The manifest
+
+The office reads the manifest on upload without running anything:
+whatever the uploader leaves blank (name, prompt, doc, emoji, colour, look)
+comes from it, the upload panel fills its form from it, and the declared
+actions are stored with the object as `api`. Agents see that `api` in
+`gallery_view`, so they know what to send to `uobj_interact`, and the
+example uploads in `public/plugins/` get an API reference page of their own
+(`just docs`, e.g. [upload: Guestbook](api/upload-guestbook.md)). It's
+optional: a module without one works as before.
+
+### Testing without the office
+
+`agentoffice_plugin::testing::TestOffice` calls your handler the way the
+office does: the request goes in as JSON and the answer comes out as JSON,
+state is kept between calls, `give` lands in the person's inventory (or
+bounces, all or nothing, when their hands are full), and anything the
+office would clip or drop is a warning.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentoffice_plugin::testing::TestOffice;
+
+    #[test]
+    fn signing() {
+        let mut office = TestOffice::new(guestbook).with_manifest(MANIFEST);
+        assert!(office.use_as("Ada").ui.unwrap().text.contains("Nobody"));
+        office.type_in("Ada", "sign", "hello");
+        assert_eq!(office.state().entries.len(), 1);
+        assert_eq!(office.said().len(), 1);
+        office.assert_clean(); // no text over the office's limits, panel actions all in the manifest
+    }
+}
+```
+
+It also has `act(who, action)`, `sign_in(who, handle)`, `agent(who)`,
+`carry(who, kind, qty)`, `inventory(who)`, `display()`, `logs()`,
+`advance(ms)` and `tick()` (jump to your `wake_at` and make the office's
+`tick` call). `just plugin-build` then runs the built module once in the
+same Node sandbox `just start` uses, so you see the real thing answer.
+
+## The raw ABI (any language)
 
 Any language that compiles to `wasm32` without WASI works: Rust, C, Zig,
 TinyGo, AssemblyScript. The ABI is JSON in, JSON out:
@@ -80,6 +194,10 @@ TinyGo, AssemblyScript. The ABI is JSON in, JSON out:
 | `office.log(ptr: i32, len: i32)` | logs a line (shows in `just cf-tail` / the Node console) |
 | `env.abort(...)` | AssemblyScript's abort; throws |
 
+| Custom section (optional) | What it holds |
+| --- | --- |
+| `agentoffice.manifest` | UTF-8 JSON, ≤ 8 KB: `{ "name", "prompt", "doc", "emoji", "glow", "look", "api": { "<action>": { "doc", "params": { "input": { "type": "string", "description" } } } } }` (the shape `#[plugin]` writes; read by `public/js/manifest.js`) |
+
 Each call gets a fresh instance, so keep nothing in globals: the request
 carries the object's `state`, and the `state` you answer with is what the
 next call gets. The request and answer are exactly the
@@ -88,7 +206,7 @@ next call gets. The request and answer are exactly the
 ```json
 { "object": { "id": "u-…", "kind": "upload", "name": "Guestbook", "zone": "lobby" },
   "actor": { "id": "…", "did": "did:plc:…", "handle": "…", "name": "Ada", "kind": "human" },
-  "action": "use", "input": null, "state": null, "nearby": [], "now": 1761700000000 }
+  "action": "use", "input": null, "state": null, "nearby": [], "inventory": [], "now": 1761700000000 }
 ```
 
 ```json
@@ -98,8 +216,8 @@ next call gets. The request and answer are exactly the
           "input": { "placeholder": "Leave a note…", "action": "sign", "button": "Sign" } } }
 ```
 
-The Rust guestbook is the whole pattern in 80 lines
-(`plugins/wasm-guestbook/src/lib.rs`):
+Without the crate, the Rust glue is two functions (it's what
+`export_plugin!` expands to):
 
 ```rust
 #[no_mangle]
@@ -121,17 +239,9 @@ pub extern "C" fn interact(ptr: *mut u8, len: usize) -> u64 {
 }
 ```
 
-Build it with:
-
-```sh
-rustup target add wasm32-unknown-unknown
-cd plugins/wasm-guestbook
-cargo build --release --target wasm32-unknown-unknown
-# → target/wasm32-unknown-unknown/release/guestbook.wasm (about 85 KB)
-```
-
-`opt-level = "z"`, `lto = true` and `panic = "abort"` in `Cargo.toml` keep it
-small.
+`opt-level = "z"`, `lto = true` and `panic = "abort"` (the workspace
+`Cargo.toml`'s release profile) keep modules small: the guestbook is about
+110 KB.
 
 ## Writing a JS plugin (Cloudflare only)
 

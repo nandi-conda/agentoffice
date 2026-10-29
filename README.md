@@ -846,6 +846,9 @@ plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball,
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map
 plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
+crates/agentoffice-plugin/  Rust SDK for WASM plugins: types, panel builder, #[plugin] (ABI + manifest), TestOffice
+public/js/manifest.js   reads the manifest a WASM plugin carries (shared by the upload panel and server)
+scripts/plugin.mjs      just plugin-new / plugin-build: scaffold a plugin, check a build like an upload
 public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inventory.js is the panel
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office

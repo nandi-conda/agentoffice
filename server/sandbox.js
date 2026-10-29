@@ -21,6 +21,8 @@
 //
 // Runtime-neutral: no node:* here (see sandbox-node.js for the Node side).
 
+import { readManifest } from '../public/js/manifest.js';
+
 export const MAX_WASM = 512 * 1024;
 export const MAX_JS = 128 * 1024;
 export const MAX_ANSWER = 64 * 1024;
@@ -132,7 +134,8 @@ export function toBase64(bytes) {
   return btoa(s);
 }
 
-// Whether an upload can run: { size, exports } or throws with the reason.
+// Whether an upload can run: { size, exports, manifest } or throws with the
+// reason. manifest is what the module says about itself (public/js/manifest.js), or null.
 export function checkUpload(lang, bytes) {
   if (!LANGS.includes(lang)) throw new Error(`lang must be ${LANGS.join(' or ')}`);
   if (!bytes.length) throw new Error('the file is empty');
@@ -150,7 +153,7 @@ export function checkUpload(lang, bytes) {
   const bad = w.imports.filter((i) => i.kind !== 'function' || !IMPORTS.includes(`${i.module}.${i.name}`));
   if (bad.length) throw new Error(`the module imports ${bad.map((i) => `${i.module}.${i.name}`).join(', ')}; only ${IMPORTS.join(' and ')} are provided (no WASI)`);
   if (w.memory && w.memory.min > MAX_PAGES) throw new Error(`the module starts with ${w.memory.min * 64} KiB of memory (${MAX_PAGES * 64} KiB at most)`);
-  return { size: bytes.length, exports: w.exports.map((e) => e.name) };
+  return { size: bytes.length, exports: w.exports.map((e) => e.name), manifest: readManifest(bytes) };
 }
 
 // ---- Cloudflare: one Dynamic Worker per upload -------------------------------

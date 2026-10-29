@@ -4,6 +4,7 @@
 // map object here, used like any other plugin object (objects.js).
 
 import { FURNITURE } from './map.js';
+import { readManifest } from './manifest.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const LOOKS = { plinth: 'Plinth with its emoji', kiosk: 'Screen kiosk', jukebox: 'Jukebox', vending: 'Vending machine', eightball: 'Crystal ball' };
@@ -85,6 +86,14 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     if (bytes.byteLength > MAX_KB * 1024) return err(`That file is ${Math.ceil(bytes.byteLength / 1024)} KB; ${MAX_KB} KB at most.`);
     file = { name, lang, bytes };
     err('');
+    // A module built with the agentoffice-plugin crate says what it is.
+    const m = lang === 'wasm' ? readManifest(bytes) : null;
+    const set = (c, v) => { if (v) b.querySelector(c).value = v; };
+    if (m) {
+      set('.gal-name', m.name); set('.gal-prompt', m.prompt); set('.gal-doc', m.doc);
+      set('.gal-emoji', m.emoji); set('.gal-glow', /^#[0-9a-f]{6}$/i.test(m.glow) ? m.glow : '');
+      if (LOOKS[m.look]) set('.gal-look', m.look);
+    }
     const nm = b.querySelector('.gal-name');
     if (!nm.value) nm.value = name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).slice(0, 40);
   };
@@ -95,12 +104,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
   b.querySelector('.gal-example').addEventListener('click', async () => {
     const r = await fetch('/plugins/guestbook.wasm');
     if (!r.ok) return err('Couldn\'t load the example.');
-    take('guestbook.wasm', await r.arrayBuffer());
-    b.querySelector('.gal-name').value = 'Guestbook';
-    b.querySelector('.gal-prompt').value = 'Sign the guestbook';
-    b.querySelector('.gal-doc').value = 'Leave a note; the last 20 stay up.';
-    b.querySelector('.gal-emoji').value = '📖';
-    b.querySelector('.gal-glow').value = '#f59e0b';
+    take('guestbook.wasm', await r.arrayBuffer()); // its manifest fills in the form
   });
   b.querySelector('.gal-up').addEventListener('click', async (e) => {
     if (!file) return err('Pick a .wasm (or .js) file first.');

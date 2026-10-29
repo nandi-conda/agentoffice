@@ -1,0 +1,21 @@
+# The Rust side of Agent Office: the SDK for uploadable WASM plugins
+# (crates/) and the plugins built with it (plugins/wasm-*). Rust comes from
+# pixi's `rust` environment; use `just plugin-new`, `just plugin-build` and
+# `just plugin-test` rather than calling cargo directly. See docs/uploads.md.
+
+[workspace]
+resolver = "2"
+members = ["crates/*", "plugins/wasm-*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/nandi-conda/agentoffice"
+
+# Small plugins: uploads are capped at 512 KB.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

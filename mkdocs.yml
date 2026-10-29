@@ -62,3 +62,4 @@ nav:
       - "plugin: Vending machine": api/plugin-vending.md
       - "plugin: Magic 8-ball": api/plugin-eightball.md
       - "plugin: Help kiosk": api/plugin-kiosk.md
+      - "upload: Guestbook": api/upload-guestbook.md

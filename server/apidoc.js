@@ -39,7 +39,9 @@ export function parseWrangler(text) {
 
 // plugins: [{ name, doc, prompt, api, binding, service, entrypoint, source,
 // objects }], what each plugin Worker's describe() returns plus where it's bound.
-export function describeApi({ kinds = KINDS, wrangler = null, plugins = [] } = {}) {
+// uploads: [{ name, doc, prompt, api, file, source }], the manifests of the
+// example uploads in public/plugins (public/js/manifest.js).
+export function describeApi({ kinds = KINDS, wrangler = null, plugins = [], uploads = [] } = {}) {
   const entities = Object.entries(kinds).map(([kind, Kind]) => {
     const d = describeKind(kind, Kind);
     const binding = BINDINGS[kind] || null;
@@ -52,6 +54,7 @@ export function describeApi({ kinds = KINDS, wrangler = null, plugins = [] } = {
     world: { kind: 'world', address: 'world:main', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], ...WORLD },
     entities,
     plugins,
+    uploads,
     bindings: wrangler,
   };
 }
@@ -153,6 +156,9 @@ function paramRows(spec) {
   return rows;
 }
 
+// A plugin's or upload's actions, as methods.
+const pluginMethods = (api) => Object.entries(api || {}).map(([m, spec]) => ({ name: m, sig: `${m}(${paramList(spec).map(([k]) => k).join(', ')})`, doc: spec.doc || '', flags: flags(spec), rows: paramRows(spec), returns: spec.returns ? typeOf(spec.returns) : null, tool: null }));
+
 function sections(api) {
   const tools = new Map(generatedTools(api).map((t) => [`${t.kind}.${t.method}`, t]));
   // The internal built-ins every entity answers get one section of their own.
@@ -183,12 +189,22 @@ function sections(api) {
       p.objects.length && `on the map as ${p.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${p.objects.map((o) => `\`${o}\``).join(', ')})`,
       'every call goes through the office (server/plugins.js), which clips and shape-checks the answer and falls back to the built-in copy when the binding is missing',
     ].filter(Boolean),
-    methods: Object.entries(p.api || {}).map(([m, spec]) => ({ name: m, sig: `${m}(${paramList(spec).map(([k]) => k).join(', ')})`, doc: spec.doc || '', flags: flags(spec), rows: paramRows(spec), returns: spec.returns ? typeOf(spec.returns) : null, tool: null })),
+    methods: pluginMethods(p.api),
+    events: [],
+  })), ...(api.uploads || []).map((u) => ({
+    id: `upload-${u.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
+    title: `upload: ${u.name}`,
+    doc: `${u.doc}${u.prompt ? ` People see it as “${u.prompt}”.` : ''}`,
+    where: [
+      `an example upload: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from`,
+      'put it on the map from the 🧩 panel ("try the example") or with `gallery_upload`, then use it with the MCP tool `uobj_interact` (name = its `u-…` id from `gallery_view`, action = one of these, input = the typed text)',
+    ],
+    methods: pluginMethods(u.api).map((m) => ({ ...m, flags: ['an action: uobj_interact { action, input }'] })),
     events: [],
   }))];
 }
 
-const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.';
+const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml`, the plugin Workers and the example uploads\' manifests, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.';
 
 const ACCESS = { observer: 'open', guest: 'signed in, in the office' };
 

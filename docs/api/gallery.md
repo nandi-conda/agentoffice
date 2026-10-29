@@ -12,18 +12,18 @@ Objects people uploaded: WASM (or JS) plugins that signed-in people placed on th
 
 Every uploaded object on the map.
 
-Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt }[]`
+Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, api }[]`
 
 ## `upload(who, req)`
 
 `mutates` · `caller filled in by the World` · MCP tool **`gallery_upload`**
 
-Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). At most 3 per person.
+Upload a plugin and place it on the map next to you. Needs AT Protocol sign-in. `code` is the file in base64: a WebAssembly module (≤ 512 KB) exporting memory, alloc and interact (the ABI in docs/uploads.md), or on Cloudflare a JS module exporting interact(). A module built with the agentoffice-plugin crate carries a manifest: its name, prompt, doc, emoji, glow and look fill in whatever you leave out. At most 3 per person.
 
 | Param | Type | |
 | --- | --- | --- |
-| `req` | `{ name, lang, code, prompt?, doc?, emoji?, glow?, look? }` | The upload |
-| &nbsp;&nbsp;&nbsp;`req.name` | `string ≤ 40` | What it's called |
+| `req` | `{ name?, lang, code, prompt?, doc?, emoji?, glow?, look? }` | The upload |
+| &nbsp;&nbsp;&nbsp;`req.name` *(optional)* | `string ≤ 40` | What it's called (default: the manifest's name) |
 | &nbsp;&nbsp;&nbsp;`req.lang` | `"wasm" \| "js"` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`req.code` | `string ≤ 699052` | The file, base64 |
 | &nbsp;&nbsp;&nbsp;`req.prompt` *(optional)* | `string ≤ 60` | What the E prompt says, e.g. "Sign the guestbook" |

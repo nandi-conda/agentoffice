@@ -38,6 +38,19 @@ roost *args: _deps
 test: _deps
     node --test test/*.test.js
 
+# Start a WASM plugin in plugins/wasm-<name> from the agentoffice-plugin crate's template (docs/uploads.md)
+plugin-new name:
+    node scripts/plugin.mjs new {{name}}
+
+# Build WASM plugins (all, or one: `just plugin-build guestbook`) with pixi's Rust, then check each like the office does on upload
+plugin-build name="":
+    pixi run --frozen -e rust cargo build --release --target wasm32-unknown-unknown {{ if name != "" { "-p " + name } else { "" } }}
+    node scripts/plugin.mjs check {{name}}
+
+# Test WASM plugins and the agentoffice-plugin crate (all, or one: `just plugin-test guestbook`)
+plugin-test name="":
+    pixi run --frozen -e rust cargo test {{ if name != "" { "-p " + name } else { "" } }}
+
 # Build the MkDocs site into public/docs (served at /docs): guide pages from README.md, API reference from the entities' `static api`
 docs: _deps
     node scripts/docs.mjs

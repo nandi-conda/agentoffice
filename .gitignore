@@ -5,3 +5,4 @@ data/
 .wrangler/
 # built by `just docs`
 public/docs/
+target/

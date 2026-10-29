@@ -1,6 +1,6 @@
 # API
 
-Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.
+Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml`, the plugin Workers and the example uploads' manifests, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.
 
 | Page | What it is |
 | --- | --- |
@@ -29,6 +29,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
 | [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
 | [plugin: Help kiosk](plugin-kiosk.md) | Answers questions about the office, with Workers AI when bound and a canned help desk otherwise. |
+| [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
 
 ## Bindings
 

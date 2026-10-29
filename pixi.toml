@@ -18,3 +18,12 @@ test = "node --test test/*.test.js"
 deps = "[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci"
 cf-dev = { cmd = "node_modules/.bin/wrangler dev --port 8787 --ip 127.0.0.1", depends-on = ["deps"] }
 deploy = { cmd = "node_modules/.bin/wrangler deploy", depends-on = ["deps"] }
+
+# Rust for the WASM plugins (crates/, plugins/wasm-*): its own environment so
+# `just start` doesn't pull a compiler. The justfile's plugin-* recipes use it.
+[feature.rust.dependencies]
+rust = "1.99.*"
+rust-std-wasm32-unknown-unknown = "1.99.*"
+
+[environments]
+rust = ["rust"]

@@ -17,7 +17,7 @@ Returns `{ display, via }`
 
 `mutates` · `caller filled in by the World` · `caller must be within 3 tiles` · MCP tool **`uobj_interact`**
 
-Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone. The name is the object id (u-…) from gallery_view.
+Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone. The name is the object id (u-…) from gallery_view, whose `api` lists the actions the object declares.
 
 | Param | Type | |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ Store the code and manifest of a new upload (from gallery:main).
 
 | Param | Type | |
 | --- | --- | --- |
-| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt }` | An uploaded object |
+| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, owner, createdAt, api }` | An uploaded object |
 | &nbsp;&nbsp;&nbsp;`item.id` | `string ≤ 200` | Object id on the map (u-…); its entity is uobj:<id> |
 | &nbsp;&nbsp;&nbsp;`item.name` | `string ≤ 40` | Name |
 | &nbsp;&nbsp;&nbsp;`item.prompt` | `string ≤ 60` | What the E prompt says |
@@ -51,6 +51,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
 | &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
+| &nbsp;&nbsp;&nbsp;`item.api` | `object` | The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest. |
 | `code` | `string ≤ 699052` | Base64 code |
 
 ## `uninstall()`
