@@ -31,8 +31,8 @@ import { PERMISSIONS, LEVELS, levelOf, uploadError } from '../../public/js/permi
 import { SKELETON_KEY } from '../../public/js/items.js';
 import { LOOKS as LOOK_NAMES, CARRIED, lookOf } from '../../public/js/manifest.js';
 
-export const MAX_PER_OWNER = 3;
-export const MAX_OBJECTS = 40;
+export const MAX_PER_OWNER = 10;
+export const MAX_OBJECTS = 100;
 export const LOOKS = Object.keys(LOOK_NAMES);
 export { CARRIED };
 // The item an upload is while someone carries it (a key when it may unlock rooms).

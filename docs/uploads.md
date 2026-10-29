@@ -33,7 +33,7 @@ holds it owns it, and throwing it away deletes it.
   file in base64) and `gallery_remove`; use one with `uobj_interact`
   (name = the object's id, `u-…`).
 
-Limits: 3 objects standing per person (carried ones don't count) and 40 in
+Limits: 10 objects standing per person (carried ones don't count) and 100 in
 the office; WASM up to 512 KB, JS up to 128 KB; 64 KB answers; the usual
 32 KB of `state`. Only whoever set an object up can pick it up or remove it,
 plus moderators (and anyone whose DID is in the office's `ADMIN_DIDS`).
