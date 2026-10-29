@@ -500,7 +500,7 @@ export class Office {
 
   // The parts of a peer worth keeping across a Durable Object hibernation.
   snapshot(p) {
-    const { ws, joined, cupTimer, emoteTimer, ...rest } = p;
+    const { ws, joined, cupTimer, emoteTimer, station, stationTimer, ...rest } = p;
     return rest;
   }
 
