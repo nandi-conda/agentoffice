@@ -117,7 +117,8 @@ function fakeFreeq({ verify }) {
           const ch = m.params[0], at = new Date(), msgid = `m${++n}`;
           if (!history.has(ch)) history.set(ch, []);
           history.get(ch).push({ id: n, sender: c.nick, text: m.params[1], timestamp: Math.floor(at / 1000), msgid, tags: { account: c.account } });
-          for (const o of members.get(ch) || []) if (o !== c) o.out(`@account=${c.account};msgid=${msgid};time=${at.toISOString()} :${c.nick}!u@h PRIVMSG ${ch} :${m.params[1]}`);
+          const reply = m.tags?.['+draft/reply'] ? `;+draft/reply=${m.tags['+draft/reply']}` : '';
+          for (const o of members.get(ch) || []) if (o !== c) o.out(`@account=${c.account};msgid=${msgid}${reply};time=${at.toISOString()} :${c.nick}!u@h PRIVMSG ${ch} :${m.params[1]}`);
         }
       }
       return c;
@@ -273,6 +274,16 @@ test('populated channels get their own rooms off the hallway, and talk flows bot
   // ...and the listener doesn't echo Alice back into the office.
   await tick();
   assert.equal(said.filter((m) => m.t === 'chat' && m.text === 'hello freeq').length, 1);
+
+  // Clicking bob's line to answer it threads the answer on freeq.
+  assert.ok(heard.msgid, 'channel lines carry their msgid');
+  await office.handle(me, { t: 'chat', text: '@bob yes hi', reply: heard.msgid });
+  for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('yes hi')); i++) await tick();
+  assert.ok(bobGot.find((l) => l.includes('PRIVMSG #general :@bob yes hi')).includes(`+draft/reply=${heard.msgid}`));
+  // A made-up msgid is dropped rather than sent along.
+  await office.handle(me, { t: 'chat', text: 'odd one', reply: 'x y;z' });
+  for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('odd one')); i++) await tick();
+  assert.ok(!bobGot.find((l) => l.includes('odd one')).includes('draft/reply'));
 
   // Guests stay local and are told why.
   const gsaid = [];

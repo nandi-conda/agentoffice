@@ -535,8 +535,8 @@ export class Office {
 
   // A line from a freeq channel, heard by everyone in the area it's attached to.
   // `backfill` lines were said while the office wasn't listening (`ts` is when).
-  remoteChat({ zoneId, channel, peer, name, text, ts = null, backfill = false }) {
-    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(backfill ? { backfill: true } : {}) };
+  remoteChat({ zoneId, channel, peer, name, text, ts = null, msgid = null, backfill = false }) {
+    const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(msgid ? { msgid } : {}), ...(backfill ? { backfill: true } : {}) };
     const tags = mentionTags(msg.text);
     this.remember(zoneId, { name: msg.name, text: msg.text, ts: msg.ts, freeq: true });
     for (const q of this.peers.values()) {
@@ -744,7 +744,9 @@ export class Office {
     const bridged = zone && this.freeq?.bindings.get(zone.id);
     if (bridged) {
       msg.scope = bridged.channel;
-      this.freeq.relay(p, zone.id, msg.text).then((note) => {
+      // Answering a channel line threads it there too (the msgid it came with).
+      const reply = typeof m.reply === 'string' && /^[\w.:+/=-]{1,128}$/.test(m.reply) ? m.reply : null;
+      this.freeq.relay(p, zone.id, msg.text, reply).then((note) => {
         // The same note again within a minute (a guest chatting away) isn't news.
         if (note && (note !== p.freeqNote || this.now() - p.freeqNoteAt > 60000)) this.sendTo(p, { t: 'freeq-note', text: note, ok: false });
         if (note) { p.freeqNote = note; p.freeqNoteAt = this.now(); }

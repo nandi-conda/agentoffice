@@ -199,9 +199,11 @@ export class IrcClient {
     if (this.channels.delete(channel)) this.send(`PART ${channel}`);
   }
 
-  say(channel, text) {
+  // `tags` are IRCv3 client tags, e.g. { '+draft/reply': msgid }.
+  say(channel, text, tags = null) {
     const t = oneLine(text);
-    if (t) this.send(`PRIVMSG ${channel} :${t}`);
+    const pre = tags && Object.keys(tags).length ? `@${Object.entries(tags).map(([k, v]) => `${k}=${escapeTag(String(v))}`).join(';')} ` : '';
+    if (t) this.send(`${pre}PRIVMSG ${channel} :${t}`);
   }
 
   // An IRCv3 TAGMSG (freeq's call signalling rides on these).
@@ -881,7 +883,7 @@ export class FreeqBridge {
     this.touch(this.bindings.get(zoneId), backfill ? ts * 1000 : Date.now());
     this.office.remoteChat({
       zoneId, channel, peer: f?.peer?.freeqZone === zoneId ? f.peer : null, name: nick,
-      text: action ? `* ${nick} ${action[1]}` : text, ...(backfill ? { ts: ts * 1000, backfill: true } : {}),
+      text: action ? `* ${nick} ${action[1]}` : text, msgid, ...(backfill ? { ts: ts * 1000, backfill: true } : {}),
     });
   }
 
@@ -889,7 +891,8 @@ export class FreeqBridge {
 
   // Called by the office for chat said inside an attached area. Returns a
   // note for the speaker when it couldn't go to freeq, else null.
-  async relay(p, zoneId, text) {
+  // `reply` is the msgid of the channel line being answered (+draft/reply).
+  async relay(p, zoneId, text, reply = null) {
     const b = this.bindings.get(zoneId);
     if (!b) return null;
     if (p.kind === 'human' ? !p.did : p.kind !== 'agent') return `Only signed-in people and agents can talk on freeq; this stayed in the office.`;
@@ -898,7 +901,7 @@ export class FreeqBridge {
       u.used = Date.now();
       u.irc.join(b.channel);
       this.relayed.push({ channel: lower(b.channel), text: oneLine(text), at: Date.now() });
-      u.irc.say(b.channel, text);
+      u.irc.say(b.channel, text, reply ? { '+draft/reply': reply } : null);
       this.touch(b);
       return null;
     } catch (e) {

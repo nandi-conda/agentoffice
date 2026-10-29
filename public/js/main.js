@@ -506,6 +506,12 @@ function logChat(m) {
   const when = m.backfill ? `<span class="missed" title="${m.earlier ? 'Said before you walked in' : 'Said on freeq while the office was away'}">${esc(fmtTime(m.ts))}</span> ` : '';
   if (m.action) d.classList.add('act');
   d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(markedName(m.name, m.freeq ? 'freeq' : peers.get(m.id)?.kind))}</b> ${linkify(esc(m.text))}`;
+  // Anyone else's line can be clicked (or tapped) to answer it.
+  if (m.id !== me?.id) {
+    d.classList.add('replyable');
+    d.title = 'Click to reply';
+    d.reply = { id: m.id, name: m.name, handle: peers.get(m.id)?.handle || m.name, text: m.text, channel: m.freeq ? m.scope : null, msgid: m.msgid || null };
+  }
   pushLog(d);
 }
 function sys(text) {
@@ -661,15 +667,58 @@ document.addEventListener('click', (e) => {
 });
 
 const chatIn = $('.chat-input');
+// Replying: a quote of the line above the input, and the @mention in it.
+const replyEl = $('.reply-to');
+let replyTo = null;
+const hereChannel = () => freeqRooms[lastZone?.id]?.channel || null;
+function showReply() {
+  replyEl.hidden = !replyTo;
+  if (!replyTo) return;
+  const r = replyTo, away = r.channel && r.channel !== hereChannel();
+  const zone = away && ZONES.find((z) => freeqRooms[z.id]?.channel === r.channel);
+  replyEl.querySelector('.q').innerHTML = `↩ <b>${esc(r.name)}</b> ${esc(r.text)}`;
+  replyEl.querySelector('.where').innerHTML = away
+    ? `said in ${esc(r.channel)}. ${zone ? `${placeLink('zone', zone.id, `Walk to ${esc(zone.name)}`)} to answer there.` : 'Your reply stays here.'}`
+    : '';
+}
+function startReply(r) {
+  replyTo = r;
+  const at = `@${r.handle.replace(/\s+/g, '')} `;
+  // Keep whatever was already typed after a different mention.
+  const rest = chatIn.value.replace(/^@\S+\s*/, '');
+  chatIn.value = at + rest;
+  showReply();
+  focusChat();
+  chatIn.setSelectionRange(chatIn.value.length, chatIn.value.length);
+}
+function endReply() { replyTo = null; showReply(); }
+replyEl.querySelector('.x').addEventListener('click', () => {
+  chatIn.value = chatIn.value.replace(/^@\S+\s*/, '');
+  endReply();
+  chatIn.focus();
+});
+log.addEventListener('click', (e) => {
+  const d = e.target.closest('.m.replyable');
+  // Links and place buttons do their own thing; dragging to copy text isn't a reply.
+  if (!d?.reply || e.target.closest('a, button') || String(getSelection()).trim()) return;
+  startReply(d.reply);
+});
 $('.chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatIn.value.trim();
-  if (!text) { chatIn.blur(); return; }
-  net.send({ t: 'chat', text });
+  if (!text) { chatIn.blur(); endReply(); return; }
+  // On freeq the reply is threaded too (+draft/reply), when it's going to that channel.
+  const reply = replyTo?.msgid && replyTo.channel === hereChannel() ? replyTo.msgid : undefined;
+  net.send({ t: 'chat', text, ...(reply ? { reply } : {}) });
   chatIn.value = '';
   chatIn.blur();
+  endReply();
 });
-chatIn.addEventListener('keydown', (e) => { if (e.key === 'Escape') chatIn.blur(); });
+chatIn.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (replyTo) { e.stopPropagation(); chatIn.value = chatIn.value.replace(/^@\S+\s*/, ''); return endReply(); }
+  chatIn.blur();
+});
 chatIn.addEventListener('focus', () => { if (chatCollapsed) setChatCollapsed(false); });
 
 // On-screen keyboards shrink the visual viewport but not the layout one, so
@@ -1993,6 +2042,7 @@ function zoneChanged(z, freeqOnly = false) {
   kind.className = `zone-kind ${fq ? 'freeq' : access ? (access.open ? 'open' : 'gated') : z?.kind || 'open'}`;
   scope.textContent = fq ? fq.channel : z && z.kind !== 'open' ? z.name : 'nearby';
   scope.className = `scope ${fq ? 'freeq' : z?.kind || 'open'}`;
+  if (replyTo) showReply();
   if (freeqOnly) return;
   if (fq) toast(`💬 ${esc(z.name)} is attached to <b>${esc(fq.channel)}</b> on freeq${fq.topic ? ` (${esc(fq.topic)})` : ''}. ${me.did ? 'What you say here goes there as you.' : 'Sign in to talk there as yourself; for now you can listen.'}`, [], 6000);
   // Meeting rooms put you in a meeting; channel rooms are just somewhere to talk.
