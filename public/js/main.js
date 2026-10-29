@@ -830,6 +830,17 @@ function setStatusUI() {
 
 const micBtn = $('.mic');
 micBtn.addEventListener('click', toggleMic);
+// Grey = off, green = live, red = muted (mic still open). Click cycles off → live → muted → off.
+const MIC_TIPS = {
+  '': 'Mic off. Click to talk to people near you (M)',
+  on: 'Mic live: people near you can hear you. Click to mute (M)',
+  muted: 'Mic muted: nobody can hear you. Click to turn the mic off (M)',
+};
+function setMicState(state) {
+  micBtn.className = state ? `tb mic ${state}` : 'tb mic';
+  micBtn.title = MIC_TIPS[state];
+}
+setMicState('');
 async function toggleMic() {
   if (me?.muted > serverNow() && (!voice.on || voice.listening)) return toast(`🔇 A moderator muted you until ${esc(fmtTime(me.muted))}`);
   if (!voice.on || voice.listening) {
@@ -837,16 +848,16 @@ async function toggleMic() {
     if (!ok) return toast('🎙️ Microphone permission was blocked. Allow it in your browser to talk.');
     net.send({ t: 'audio', on: true });
     me.audio = true;
-    micBtn.className = 'tb mic on';
+    setMicState('on');
     toast('🎙️ Voice on. People near you (or in the same room) can hear you.');
   } else if (!voice.muted) {
     voice.setMuted(true);
-    micBtn.className = 'tb mic muted';
+    setMicState('muted');
   } else {
     voice.disable();
     net.send({ t: 'audio', on: false });
     me.audio = false;
-    micBtn.className = 'tb mic';
+    setMicState('');
   }
   micPopSync();
 }
@@ -1647,7 +1658,7 @@ function roleChanged() {
     voice.disable();
     net.send({ t: 'audio', on: false });
     me.audio = false;
-    micBtn.className = 'tb mic';
+    setMicState('');
     micPopSync();
   }
 }
@@ -1677,7 +1688,7 @@ async function ensureVoice() {
   if (!(await voice.enable({ silent: true }))) return false;
   net.send({ t: 'audio', on: true });
   me.audio = true;
-  micBtn.className = 'tb mic on';
+  setMicState('on');
   micPopSync();
   return true;
 }
