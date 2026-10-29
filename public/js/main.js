@@ -238,7 +238,7 @@ async function enter() {
 }
 
 // ---- networking -------------------------------------------------------------
-const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended) });
+const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended), prefs: store.get('mic', {}) });
 
 function start(hello) {
   net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ replaced }) => sys(replaced ? 'You opened the office in another tab or device, so this one left. Reload to come back here.' : 'Connection lost, reconnecting…'));
@@ -607,6 +607,52 @@ async function toggleMic() {
     net.send({ t: 'audio', on: false });
     me.audio = false;
     micBtn.className = 'tb mic';
+  }
+  micPopSync();
+}
+
+// ---- mic level meter, device picker and input volume ------------------------
+const micLvl = $('.lvl', micBtn), micHint = $('.mic-hint'), micSel = $('.mic-select');
+const gainIn = $('.gain-input'), gainOut = $('.gain-out'), popMeter = $('.mic-pop .meter span'), micNote = $('.mic-note');
+const saveMic = () => store.set('mic', { deviceId: voice.deviceId, gain: voice.gain });
+gainIn.value = voice.gain; gainOut.textContent = `${Math.round(voice.gain * 100)}%`;
+gainIn.addEventListener('input', () => {
+  voice.setGain(+gainIn.value);
+  gainOut.textContent = `${Math.round(gainIn.value * 100)}%`;
+  saveMic();
+});
+micSel.addEventListener('change', async () => {
+  if (!(await voice.setDevice(micSel.value))) toast('🎙️ Could not open that microphone.');
+  saveMic();
+});
+// Device names only show up once the mic has been allowed, so refresh the list
+// whenever the popover opens or the mic turns on.
+async function micPopSync() {
+  micNote.hidden = voice.hasMic;
+  const list = await voice.devices();
+  const cur = voice.deviceId;
+  micSel.innerHTML = '<option value="">Default</option>' + list.filter((d) => d.deviceId && d.deviceId !== 'default')
+    .map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || `Microphone ${i + 1}`)}</option>`).join('');
+  micSel.value = [...micSel.options].some((o) => o.value === cur) ? cur : '';
+}
+$('.mic-more').addEventListener('click', micPopSync);
+navigator.mediaDevices?.addEventListener?.('devicechange', micPopSync);
+
+// Painted at ~20 fps from the frame loop, and only while the mic is on.
+let meterAt = 0, meterShown = -1, hintOn = false;
+function paintMeter(t, mutedTalking) {
+  if (t - meterAt < 50) return;
+  meterAt = t;
+  const v = voice.hasMic ? Math.round(voice.level * 40) / 40 : 0;
+  if (v !== meterShown) {
+    meterShown = v;
+    micLvl.style.transform = `scaleY(${v})`;
+    if (!popMeter.closest('[hidden]')) popMeter.style.transform = `scaleX(${v})`;
+  }
+  if (mutedTalking !== hintOn) {
+    hintOn = mutedTalking;
+    micHint.hidden = !hintOn;
+    micBtn.classList.toggle('nudge', hintOn);
   }
 }
 
@@ -1184,6 +1230,7 @@ async function ensureVoice() {
   net.send({ t: 'audio', on: true });
   me.audio = true;
   micBtn.className = 'tb mic on';
+  micPopSync();
   return true;
 }
 async function toggleCam() {
@@ -1634,6 +1681,7 @@ function loop(t) {
     const v = voice.update(me, others, deaf, { deskScreen: atDesk() && !z?.av });
     deskWatch(others, t);
     me.speaking = v.meSpeaking;
+    if (voice.on || meterShown > 0 || hintOn) paintMeter(t, !!v.mutedTalking);
     for (const p of others) if (p !== me) p.speaking = v.speaking.has(p.id);
 
     cam.x += (me.x - cam.x) * Math.min(1, dt * 6);

@@ -10,37 +10,85 @@ import { canHear, zoneAt, HEAR_RADIUS } from './map.js';
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 export const DESK_VIEW = 4;
 
-export function createVoice({ send, myId, onMedia = () => {} }) {
-  let local = null;
+export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
+  let local = null; // what we send: the mic after the gain stage (or empty when silent)
+  let raw = null;   // the mic itself
   let actx = null;
+  let mic = null;   // { src, gain, analyser, data, dest }
   const conns = new Map(); // peerId -> { pc, audio, analyser, data, senders, kinds, remote }
   let muted = false;
   let cam = null, screen = null; // local MediaStreams while on
+  let deviceId = prefs.deviceId || '';
+  let gain = prefs.gain ?? 1;
+  let lvl = 0, loudSince = 0, quietSince = 0;
+
+  const getMic = (id) => navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, ...(id ? { deviceId: { exact: id } } : {}) },
+  });
 
   // `silent` joins without a mic (listen and watch only) if the mic is refused.
   async function enable({ silent = false } = {}) {
     if (local) return true;
     try {
-      local = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      raw = await getMic(deviceId).catch((e) => (deviceId && e.name === 'OverconstrainedError' ? getMic('') : Promise.reject(e)));
     } catch (e) {
       if (!silent) return false;
-      local = new MediaStream();
+      raw = null;
     }
     actx = new AudioContext();
-    if (local.getAudioTracks().length) {
-      const src = actx.createMediaStreamSource(local);
-      const an = actx.createAnalyser(); an.fftSize = 256;
-      src.connect(an);
-      local.analyser = an; local.data = new Uint8Array(an.frequencyBinCount);
+    actx.resume?.().catch(() => {});
+    if (raw) {
+      // mic -> gain -> (analyser, outgoing track). The analyser sits before the
+      // mute switch, so it can still tell when you talk while muted.
+      const g = actx.createGain(); g.gain.value = gain;
+      const an = actx.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0;
+      const dest = actx.createMediaStreamDestination();
+      g.connect(an); g.connect(dest);
+      mic = { src: null, gain: g, analyser: an, data: new Float32Array(an.fftSize), dest };
+      plug(raw);
+      local = dest.stream;
+      local.getAudioTracks().forEach((t) => (t.enabled = !muted));
+    } else {
+      local = new MediaStream();
     }
     return true;
+  }
+
+  function plug(stream) {
+    mic.src?.disconnect();
+    mic.src = actx.createMediaStreamSource(stream);
+    mic.src.connect(mic.gain);
+    deviceId = stream.getAudioTracks()[0]?.getSettings?.().deviceId || deviceId;
+  }
+
+  // Switch microphones without renegotiating: only the source feeding the
+  // gain stage changes, the outgoing track stays the same.
+  async function setDevice(id) {
+    deviceId = id;
+    if (!raw || !mic) return true;
+    let next;
+    try { next = await getMic(id); } catch { return false; }
+    raw.getTracks().forEach((t) => t.stop());
+    raw = next;
+    plug(raw);
+    return true;
+  }
+
+  function setGain(v) {
+    gain = v;
+    if (mic) mic.gain.gain.setTargetAtTime(v, actx.currentTime, 0.05);
+  }
+
+  async function devices() {
+    try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch { return []; }
   }
 
   function disable() {
     stopCam(); stopScreen();
     for (const id of [...conns.keys()]) hangup(id);
+    raw?.getTracks().forEach((t) => t.stop());
     local?.getTracks().forEach((t) => t.stop());
-    local = null;
+    raw = null; local = null; mic = null; lvl = 0;
     actx?.close(); actx = null;
   }
 
@@ -48,6 +96,21 @@ export function createVoice({ send, myId, onMedia = () => {} }) {
     muted = m;
     local?.getAudioTracks().forEach((t) => (t.enabled = !m));
   }
+
+  // Mic input level, 0..1 on a -60..0 dBFS scale, fast attack and slow release
+  // like a VU meter. Read once per frame by update().
+  function readMic(now) {
+    if (!mic) { lvl = 0; return; }
+    mic.analyser.getFloatTimeDomainData(mic.data);
+    let s = 0; for (const v of mic.data) s += v * v;
+    const db = 10 * Math.log10(s / mic.data.length + 1e-10);
+    const v = Math.max(0, Math.min(1, (db + 60) / 60));
+    lvl = v > lvl ? v : lvl * 0.85 + v * 0.15;
+    // Speech has gaps between words, so a run of talking only ends after
+    // half a second of quiet.
+    if (lvl > TALK) { loudSince ||= now; quietSince = 0; } else if ((quietSince ||= now) && now - quietSince > 500) loudSince = 0;
+  }
+  const TALK = 0.42; // about -35 dBFS
 
   async function startCam() {
     if (cam) return true;
@@ -170,9 +233,13 @@ export function createVoice({ send, myId, onMedia = () => {} }) {
   // Called every frame with my position and everyone else's.
   // deskScreen: I'm sharing my screen to my desk monitor (not in an A/V room).
   function update(me, peers, deafened, { deskScreen = false } = {}) {
-    const out = { meSpeaking: false, speaking: new Set() };
+    const out = { meSpeaking: false, mutedTalking: false, speaking: new Set() };
     if (!local) return out;
-    out.meSpeaking = !muted && level(local.analyser, local.data) > 18;
+    const now = performance.now();
+    readMic(now);
+    out.meSpeaking = !muted && lvl > TALK;
+    // Talking for a moment while muted: worth a nudge.
+    out.mutedTalking = muted && loudSince > 0 && now - loudSince > 350;
     const myZone = zoneAt(me.x, me.y);
     const avRoom = myZone?.av ? myZone : null;
     for (const p of peers) {
@@ -203,8 +270,10 @@ export function createVoice({ send, myId, onMedia = () => {} }) {
 
   return {
     enable, disable, setMuted, onSignal, update, conns, remote,
+    setDevice, setGain, devices,
     startCam, stopCam, startScreen, stopScreen,
-    get on() { return !!local; }, get muted() { return muted; },
+    get on() { return !!local; }, get muted() { return muted; }, get hasMic() { return !!mic; },
+    get level() { return lvl; }, get deviceId() { return deviceId; }, get gain() { return gain; },
     get cam() { return cam; }, get screen() { return screen; },
   };
 }

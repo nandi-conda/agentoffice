@@ -147,6 +147,27 @@ input, select, textarea { font: inherit; color: inherit; }
 .tb.mic { background: #efebe5; }
 .tb.mic.on { background: #22c55e; color: #fff; }
 .tb.mic.muted { background: #ef4444; color: #fff; }
+.mic-wrap { display: flex; align-items: center; gap: 1px; }
+.tb.mic { position: relative; overflow: hidden; }
+.tb.mic svg { position: relative; z-index: 1; }
+/* Live input level: a fill rising from the bottom of the mic button. */
+.tb.mic .lvl { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.38); transform: scaleY(0); transform-origin: bottom; transition: transform 60ms linear; pointer-events: none; }
+.tb.mic:not(.on):not(.muted) .lvl { display: none; }
+.tb.mic.muted .lvl { background: rgba(255, 255, 255, 0.3); }
+.tb.mic.nudge { animation: nudge 0.9s ease-in-out infinite; }
+@keyframes nudge { 50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.35); } }
+.tb.mic-more { min-width: 18px; width: 18px; padding: 0; border-radius: 7px; color: var(--muted); }
+.mic-hint { position: absolute; bottom: calc(100% + 10px); left: 0; white-space: nowrap; background: #ef4444; color: #fff; font: 600 12px Inter, system-ui; padding: 5px 9px; border-radius: 8px; box-shadow: var(--shadow); pointer-events: none; animation: pop 0.15s ease-out; }
+.mic-hint::after { content: ''; position: absolute; top: 100%; left: 14px; border: 5px solid transparent; border-top-color: #ef4444; }
+.mic-pop { width: 250px; display: grid; gap: 10px; left: 0; transform: none; }
+.mic-pop label { display: grid; gap: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.mic-pop .row { display: flex; justify-content: space-between; }
+.mic-pop output { font-weight: 600; text-transform: none; color: var(--ink); }
+.mic-pop select { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: #fff; font-size: 13.5px; font-weight: 500; text-transform: none; letter-spacing: 0; min-width: 0; }
+.mic-pop input[type=range] { width: 100%; accent-color: #22c55e; }
+.mic-pop .meter { height: 8px; border-radius: 4px; background: #efebe5; overflow: hidden; }
+.mic-pop .meter span { display: block; height: 100%; background: linear-gradient(90deg, #22c55e 0 70%, #eab308 70% 88%, #ef4444 88%); transform: scaleX(0); transform-origin: left; transition: transform 60ms linear; }
+.mic-pop .mic-note { margin: 0; }
 .status-btn { display: flex; gap: 7px; font-weight: 500; font-size: 13px; padding: 0 10px; }
 .status-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; flex: none; }
 .status-text { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -292,7 +313,8 @@ input, select, textarea { font: inherit; color: inherit; }
   .people-head, .channels-head { min-height: 40px; }
   .people-list li, .channel-list button { min-height: 44px; }
   .chat-grip { height: 18px; }
-  .chat-input, .login input, .modal input, .modal textarea, .status-pop select, .status-pop input, .book-form select { font-size: 16px; }
+  .chat-input, .login input, .modal input, .modal textarea, .status-pop select, .status-pop input, .mic-pop select, .book-form select { font-size: 16px; }
+  .tb.mic-more { min-width: 26px; width: 26px; }
   .prompt { min-height: 40px; }
   .day-nav button { width: 40px; height: 40px; }
   .modal .close { width: 44px; height: 44px; top: 4px; right: 4px; }
@@ -327,7 +349,7 @@ input, select, textarea { font: inherit; color: inherit; }
   /* Popovers become sheets docked above the bottom bar. */
   .pop-wrap { position: static; }
   .pop { left: 0; right: 0; bottom: calc(100% + 8px); transform: none; width: auto; }
-  .status-pop { width: auto; }
+  .status-pop, .mic-pop { width: auto; }
   .emotes { grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); }
   .emotes button { width: 100%; height: 52px; }
 
