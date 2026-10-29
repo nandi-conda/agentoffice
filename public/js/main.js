@@ -1262,7 +1262,9 @@ function walkTo(x, y, thenUse = null) {
 let pendingUse = null;
 
 // ---- movement ---------------------------------------------------------------------
-const SPEED = 4.4, RAD = 0.26;
+// Tiles per second: walking with keys or the joystick, and running an auto-path
+// (click or tap to walk, walk-to buttons, following someone).
+const SPEED = 6.5, RUN = 11, RAD = 0.26;
 function free(x, y) {
   const z = zoneAt(x, y);
   if (z?.bookable && z !== zoneAt(me.x, me.y) && lockedOut(bookings, z.id, me, serverNow())) return false;
@@ -1288,11 +1290,18 @@ function stepMe(dt) {
       if (p) { path = p.slice(1, -1); walkTarget = null; }
     }
   }
+  let reach = SPEED * dt;
   if (path && path.length) {
-    const t = path[0];
-    const dx = t.x - me.x, dy = t.y - me.y, d = Math.hypot(dx, dy);
-    if (d < 0.08) path.shift();
-    else { vx = dx / d; vy = dy / d; }
+    // Auto-paths run, and pass waypoints without stopping: aim at the spot
+    // this frame's run ends on, however many corners that takes.
+    let budget = RUN * dt, ax = me.x, ay = me.y;
+    while (path.length) {
+      const t = path[0], d = Math.hypot(t.x - ax, t.y - ay);
+      if (d > budget) { ax += ((t.x - ax) / d) * budget; ay += ((t.y - ay) / d) * budget; break; }
+      budget -= d; ax = t.x; ay = t.y; path.shift();
+    }
+    reach = Math.hypot(ax - me.x, ay - me.y);
+    if (reach > 1e-6) { vx = ax - me.x; vy = ay - me.y; }
     if (!path.length) {
       path = null; walkTarget = null;
       if (pendingUse) { const f = pendingUse; pendingUse = null; interact(f); }
@@ -1303,7 +1312,7 @@ function stepMe(dt) {
   if (moving) {
     const len = Math.hypot(vx, vy);
     const x0 = me.x, y0 = me.y;
-    const nx = me.x + (vx / len) * SPEED * dt, ny = me.y + (vy / len) * SPEED * dt;
+    const nx = me.x + (vx / len) * reach, ny = me.y + (vy / len) * reach;
     if (free(nx, me.y)) me.x = nx;
     if (free(me.x, ny)) me.y = ny;
     // Face where you actually go (sliding along a wall faces along it), or

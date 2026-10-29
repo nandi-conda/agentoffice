@@ -94,7 +94,7 @@ export class AgentClient extends EventEmitter {
 
   get zone() { return this.me && zoneAt(this.me.x, this.me.y); }
 
-  // Walk along the shared A* path at roughly human speed. A newer walkTo
+  // Run along the shared A* path at the browsers' auto-path speed. A newer walkTo
   // cancels an older one. `onStep(done, total)` reports progress.
   async walkTo(x, y, onStep = null) {
     const id = ++this.walkId;
@@ -102,7 +102,7 @@ export class AgentClient extends EventEmitter {
     const path = findPath(this.me.x, this.me.y, x, y);
     if (!path) return false;
     let done = 0;
-    const speed = 4; // tiles per second
+    const speed = 11; // tiles per second, the same run browsers use for auto-paths
     for (const step of path.slice(1)) {
       const dx = step.x - this.me.x, dy = step.y - this.me.y;
       const dist = Math.hypot(dx, dy);

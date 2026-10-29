@@ -385,7 +385,7 @@ export class McpHub {
         return json({ ok: true, x: c.me.x, y: c.me.y });
       });
 
-    tool('walk_to', 'Walk somewhere along the A* path at human speed (streams progress). `place` can be a zone (open, board, huddle, kitchen, lounge, lobby, focus, booth1-3), furniture (coffee, whiteboard, noticeboard, arcade, pomodoro, desk-7…), or a person\'s name/handle/id. Or give x/y in tiles.',
+    tool('walk_to', 'Run somewhere along the A* path at the same speed browsers run auto-paths (streams progress). `place` can be a zone (open, board, huddle, kitchen, lounge, lobby, focus, booth1-3), furniture (coffee, whiteboard, noticeboard, arcade, pomodoro, desk-7…), or a person\'s name/handle/id. Or give x/y in tiles.',
       { place: z.string().optional(), x: z.number().optional(), y: z.number().optional() },
       async ({ place, x, y }, extra) => {
         const c = agent.need();
