@@ -85,29 +85,6 @@ export function createRenderer(canvas) {
       floorRect(z, vis);
     }
     for (const z of ZONES) if (z.id.startsWith('booth')) floorRect(z, vis);
-    // zone names, set into the floor
-    ctx.save();
-    ctx.font = `600 ${Math.max(8, S(0.34))}px Inter, system-ui, sans-serif`;
-    ctx.textBaseline = 'top';
-    for (const z of ZONES) {
-      if (z.id === 'booths') continue;
-      ctx.fillStyle = 'rgba(41,37,36,0.28)';
-      const label = z.name.toUpperCase().split('').join(' ');
-      ctx.fillText(label, S(z.x0 + 0.35), S(z.y1 + 0.55));
-      // An area attached to a freeq channel wears the channel's name.
-      const fq = freeq[z.id];
-      if (fq) {
-        // The count is who's drawn here, so it always matches the avatars.
-        const n = fq.here ?? fq.members;
-        const tag = `${fq.channel} · freeq${n ? ` · ${n}` : ''}`;
-        const w = ctx.measureText(tag).width + S(0.5);
-        ctx.fillStyle = 'rgba(109,40,217,0.82)';
-        roundRect(ctx, S(z.x1 + 0.65) - w, S(z.y1 + 0.42), w, S(0.6), S(0.3)); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.fillText(tag, S(z.x1 + 0.65) - w + S(0.25), S(z.y1 + 0.55));
-      }
-    }
-    ctx.restore();
   }
 
   function floorRect(z, vis) {
@@ -316,37 +293,6 @@ export function createRenderer(canvas) {
     st.lights.push({ x: cx, y: top + 0.4, r: 0.7, c: state === 'busy' ? 'rgba(239,68,68,0.45)' : state === 'soon' ? 'rgba(245,158,11,0.45)' : 'rgba(34,197,94,0.4)' });
   }
 
-  function clipText(text, max) {
-    if (ctx.measureText(text).width <= max) return text;
-    let t = text;
-    while (t.length > 1 && ctx.measureText(`${t}…`).width > max) t = t.slice(0, -1);
-    return `${t}…`;
-  }
-
-  // Status tag in the corner of each bookable room, readable from outside.
-  function drawRoomTags(st) {
-    const now = st.serverNow();
-    ctx.font = '600 11px Inter, system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    for (const r of ROOMS) {
-      const { state, current, next } = roomStatus(st.bookings || [], r.id, now);
-      const a = toScreen(r.x0 + 0.15, r.y0 + 0.2), b = toScreen(r.x1 + 0.85, r.y0 + 0.2);
-      if (b.x < 0 || a.x > vw || a.y < -20 || a.y > vh) continue;
-      const small = r.x1 - r.x0 < 4;
-      const text = small ? (state === 'busy' ? (current.lock ? '🔒 busy' : 'busy') : state === 'soon' ? fmtTime(next.start) : 'free')
-        : state === 'busy' ? `${current.lock ? '🔒 ' : ''}${current.title} · until ${fmtTime(current.end)}`
-          : state === 'soon' ? `free until ${fmtTime(next.start)}` : r.av ? 'free · A/V' : 'free';
-      const label = clipText(text, Math.max(30, b.x - a.x - 26));
-      const lw = ctx.measureText(label).width + 22, lh = 18;
-      ctx.fillStyle = 'rgba(28,25,23,0.72)';
-      roundRect(ctx, a.x, a.y, lw, lh, 9); ctx.fill();
-      ctx.fillStyle = STATE_COLOR[state];
-      ctx.beginPath(); ctx.arc(a.x + 9, a.y + lh / 2, 3.5, 0, 7); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillText(label, a.x + 16, a.y + lh / 2 + 0.5);
-    }
-    ctx.textBaseline = 'alphabetic';
-  }
 
   function drawMug(x, y, c) {
     ctx.fillStyle = c; roundRect(ctx, S(x - 0.08), S(y - 0.1), S(0.16), S(0.18), S(0.03)); ctx.fill();
@@ -629,28 +575,6 @@ export function createRenderer(canvas) {
     st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.2, c: 'rgba(34,211,238,0.35)' });
   }
 
-  // Speech bubbles and status labels over plugin objects.
-  function drawObjectLabels(st) {
-    for (const f of FURNITURE) {
-      const o = f.plugin && st.objects?.[f.id];
-      if (!o) continue;
-      const s = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5));
-      let top = s.y - 6;
-      const label = o.display?.label && (!o.display.until || o.display.until > st.serverNow()) ? o.display.label : null;
-      if (label) {
-        ctx.font = '600 11px Inter, system-ui, sans-serif';
-        const lw = ctx.measureText(label).width + 14, lh = 18;
-        ctx.fillStyle = 'rgba(28,25,23,0.78)';
-        roundRect(ctx, s.x - lw / 2, top - lh, lw, lh, 9); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
-        ctx.fillText(label, s.x - lw / 2 + 7, top - lh / 2 + 0.5);
-        ctx.textBaseline = 'alphabetic';
-        top -= lh + 4;
-      }
-      if (o.bubble && st.time - o.bubble.at < 8000) drawBubble(s.x, top, o.bubble.text, Math.min(1, (8000 - (st.time - o.bubble.at)) / 600), '#ecfeff');
-    }
-  }
-
   function drawWhiteboard(f, st) {
     const { x, y, w, h } = f;
     const hgt = HEIGHTS.whiteboard;
@@ -800,51 +724,185 @@ export function createRenderer(canvas) {
 
   function pingPong(n) { const a = []; for (let i = 0; i < n; i++) a.push(i); for (let i = n - 2; i > 0; i--) a.push(i); return a; }
 
-  function drawLabels(p, st, isMe) {
-    const s = toScreen(p.rx, p.ry);
-    const top = p.headY ?? s.y - S(1.4);
-    ctx.font = '600 11px Inter, system-ui, sans-serif';
-    const name = (p.kind === 'agent' ? '◆ ' : p.kind === 'freeq' ? '# ' : '') + p.name;
-    const tw = ctx.measureText(name).width;
-    const lw = tw + 22, lh = 18;
-    const lx = Math.round(s.x - lw / 2), ly = Math.round(top - lh - 2);
-    ctx.fillStyle = isMe ? 'rgba(37,99,235,0.92)' : p.kind === 'agent' ? 'rgba(8,145,178,0.9)' : p.kind === 'freeq' ? 'rgba(109,40,217,0.85)' : 'rgba(28,25,23,0.78)';
-    roundRect(ctx, lx, ly, lw, lh, 9); ctx.fill();
-    ctx.fillStyle = statusColor(p.status);
-    ctx.beginPath(); ctx.arc(lx + 9, ly + lh / 2, 3.5, 0, 7); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
-    ctx.fillText(name, lx + 16, ly + lh / 2 + 0.5);
-    if (p.audio) {
-      ctx.fillStyle = p.speaking ? '#4ade80' : 'rgba(255,255,255,0.6)';
-      ctx.beginPath(); ctx.arc(lx + lw + 6, ly + lh / 2, 3, 0, 7); ctx.fill();
+  // ---- labels ------------------------------------------------------------
+  // Every in-world label is a pill drawn in screen space after the lighting, so
+  // walls and furniture never cover it. Labels are laid out in priority order
+  // (you, nearby people, objects, rooms) and one that would land on another is
+  // nudged up or left out. They grow a little with zoom and thin out with distance.
+  const PILL = { dark: 'rgba(28,25,23,0.8)', me: 'rgba(37,99,235,0.94)', agent: 'rgba(8,145,178,0.92)', freeq: 'rgba(109,40,217,0.9)' };
+  const ZONE_DOT = { open: '#22c55e', room: '#a78bfa', quiet: '#f87171' };
+  let placed = [], lsc = 1;
+  const font = (w = 600) => `${w} ${Math.round(11 * lsc)}px Inter, system-ui, sans-serif`;
+  const hits = (r) => placed.some((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
+
+  // Measures a pill: { text, bg, dot?, caps? } -> its width at the current scale.
+  function pillWidth(pl) {
+    ctx.font = font();
+    const tw = ctx.measureText(pl.text).width + (pl.caps ? pl.text.length * 0.6 * lsc : 0);
+    return Math.ceil(tw + (pl.text ? 14 : 4) * lsc + (pl.dot ? 9 * lsc : 0) + (pl.text ? 0 : 6 * lsc));
+  }
+  function drawPill(pl, x, y, w, h) {
+    ctx.fillStyle = pl.bg;
+    roundRect(ctx, x, y, w, h, h / 2); ctx.fill();
+    let tx = x + 7 * lsc;
+    if (pl.dot) {
+      ctx.fillStyle = pl.dot;
+      ctx.beginPath(); ctx.arc(tx + 2.5 * lsc, y + h / 2, 3.5 * lsc, 0, 7); ctx.fill();
+      tx += 9 * lsc;
     }
-    if (p.video || p.screen) {
-      ctx.font = '11px system-ui';
-      ctx.fillText(`${p.video ? '📹' : ''}${p.screen ? '🖥️' : ''}`, lx + lw + 12, ly + lh / 2 + 4);
-      ctx.font = '600 11px Inter, system-ui, sans-serif';
-    }
-    let by = ly - 6;
-    // emote fallback (no rpg.actor sheet for it)
-    if (p.emote && !(p.sheets?.emotes?.[p.emote])) {
-      const e = EMOJI[p.emote] || '✨';
-      ctx.font = '20px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText(e, s.x + lw / 2 + 12, ly - 4);
-      ctx.textAlign = 'left';
-    }
-    if (p.bubble && st.time - p.bubble.at < 7000) {
-      drawBubble(s.x, by, p.bubble.text, Math.min(1, (7000 - (st.time - p.bubble.at)) / 600), p.bubble.scope === 'office' ? '#fef3c7' : '#ffffff');
-    }
+    if (!pl.text) return;
+    ctx.font = font(); ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+    if (pl.caps && 'letterSpacing' in ctx) ctx.letterSpacing = `${0.6 * lsc}px`;
+    ctx.fillText(pl.text, tx, y + h / 2 + 0.5);
+    if (pl.caps && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
     ctx.textBaseline = 'alphabetic';
   }
+  // Lays out a row of pills. anchor: 'center' puts the row's bottom centre at
+  // (x, y); 'left' puts its top-left there. Tries `nudges` steps upward on a
+  // collision and returns the placed rect, or null when there was no room.
+  function placeRow(pills, x, y, { anchor = 'center', nudges = 2, force = false, alpha = 1, maxW = Infinity } = {}) {
+    const h = Math.round(18 * lsc), gap = Math.round(4 * lsc);
+    let ws = pills.map(pillWidth);
+    // Too wide for its space: drop trailing pills, then clip the first one.
+    while (pills.length > 1 && ws.reduce((a, b) => a + b + gap, -gap) > maxW) { pills = pills.slice(0, -1); ws = ws.slice(0, -1); }
+    if (ws[0] > maxW) {
+      ctx.font = font();
+      pills = [{ ...pills[0], text: clipText(pills[0].text, Math.max(16, maxW - (ws[0] - ctx.measureText(pills[0].text).width))) }];
+      ws = [Math.min(ws[0], maxW)];
+    }
+    const w = ws.reduce((a, b) => a + b + gap, -gap);
+    let rx = Math.round(anchor === 'center' ? x - w / 2 : x), ry = Math.round(anchor === 'center' ? y - h : y);
+    if (rx + w < 0 || rx > vw || ry + h < 0 || ry > vh) return null;
+    let i = 0;
+    while (hits({ x: rx, y: ry, w, h }) && i < nudges) { ry -= h + gap; i++; }
+    if (!force && hits({ x: rx, y: ry, w, h })) return null;
+    const r = { x: rx, y: ry, w, h };
+    placed.push(r);
+    ctx.globalAlpha = alpha;
+    pills.forEach((pl, j) => { drawPill(pl, rx, ry, ws[j], h); rx += ws[j] + gap; });
+    ctx.globalAlpha = 1;
+    return r;
+  }
 
+  function clipText(text, max) {
+    if (ctx.measureText(text).width <= max) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(`${t}…`).width > max) t = t.slice(0, -1);
+    return `${t}…`;
+  }
+
+  // How visible a label at world (x, y) should be from where you stand.
+  const fade = (me, x, y, near, far) => {
+    if (!me) return 1;
+    const d = Math.hypot(me.rx - x, me.ry - y);
+    return d <= near ? 1 : d >= far ? 0 : 1 - (d - near) / (far - near);
+  };
+
+  function drawPeerLabel(p, st, me, later) {
+    const isMe = p === me;
+    const s = toScreen(p.rx, p.ry);
+    const top = p.headY ?? s.y - S(1.4);
+    const talking = p.bubble && st.time - p.bubble.at < 7000;
+    const alpha = isMe || talking ? 1 : fade(me, p.rx, p.ry, 8, 15);
+    let r = null;
+    if (alpha > 0.05) {
+      const name = (p.kind === 'agent' ? '◆ ' : p.kind === 'freeq' ? '# ' : '') + p.name;
+      const extra = `${p.video ? ' 📹' : ''}${p.screen ? ' 🖥️' : ''}${p.audio ? (p.speaking ? ' 🔊' : ' 🎙️') : ''}`;
+      r = placeRow([{ text: name + extra, bg: isMe ? PILL.me : PILL[p.kind] || PILL.dark, dot: statusColor(p.status) }], s.x, top - 2, { force: isMe || talking, alpha });
+    }
+    // Crowded or far away: a status dot still says someone's there.
+    if (!r && alpha > 0.05) {
+      ctx.globalAlpha = alpha; ctx.fillStyle = statusColor(p.status);
+      ctx.beginPath(); ctx.arc(s.x, top - 6 * lsc, 3.5 * lsc, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    const ly = r ? r.y : top - 2;
+    // emote fallback (no rpg.actor sheet for it)
+    if (p.emote && !(p.sheets?.emotes?.[p.emote])) {
+      later.push(() => {
+        ctx.font = `${Math.round(20 * lsc)}px system-ui`; ctx.textAlign = 'center';
+        ctx.fillText(EMOJI[p.emote] || '✨', r ? r.x + r.w + 12 * lsc : s.x + 16 * lsc, ly - 2);
+        ctx.textAlign = 'left';
+      });
+    }
+    if (talking) {
+      // Reserve the bubble's space so other names keep clear of it.
+      const { bw, bh } = bubbleSize(p.bubble.text);
+      let bottom = ly - 4;
+      for (let i = 0; i < 6 && hits({ x: s.x - bw / 2, y: bottom - bh - 6, w: bw, h: bh + 6 }); i++) bottom -= 10;
+      placed.push({ x: s.x - bw / 2, y: bottom - bh - 6, w: bw, h: bh + 6 });
+      later.push(() => drawBubble(s.x, bottom, p.bubble.text, Math.min(1, (7000 - (st.time - p.bubble.at)) / 600), p.bubble.scope === 'office' ? '#fef3c7' : '#ffffff'));
+    }
+  }
+
+  // Status labels and speech over plugin objects (the jukebox's song, etc).
+  function drawObjectLabel(f, st, me, later) {
+    const o = f.plugin && st.objects?.[f.id];
+    if (!o) return;
+    const lift = f.type === 'jukebox' ? 0.75 : 0.15; // clear of the jukebox's floating notes
+    const s = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - lift);
+    const label = o.display?.label && (!o.display.until || o.display.until > st.serverNow()) ? o.display.label : null;
+    let top = s.y;
+    if (label) {
+      const r = placeRow([{ text: label, bg: PILL.dark }], s.x, s.y, { alpha: fade(me, f.x, f.y, 10, 18) });
+      if (r) top = r.y;
+    }
+    if (o.bubble && st.time - o.bubble.at < 8000) later.push(() => drawBubble(s.x, top - 4, o.bubble.text, Math.min(1, (8000 - (st.time - o.bubble.at)) / 600), '#ecfeff'));
+  }
+
+  // Each area's name in its top-left corner, with the booking state of a
+  // bookable room and the freeq channel it's bridged to alongside.
+  function drawZoneLabel(z, st) {
+    if (z.id === 'booths') return;
+    const a = toScreen(z.x0 + 0.15, z.y0 + 0.15), b = toScreen(z.x1 + 0.85, z.y1 + 0.6);
+    // Stick to the visible part of the area, so its name stays in view while you're in it.
+    const x = Math.max(a.x, 8), y = Math.max(a.y, 8);
+    if (x > b.x - 40 || y > b.y - 20) return;
+    const maxW = b.x - x;
+    const pills = [];
+    const room = z.bookable && ROOMS.find((r) => r.id === z.id);
+    const small = z.x1 - z.x0 < 4;
+    let dot = ZONE_DOT[z.kind] || ZONE_DOT.open;
+    if (room) {
+      const { state, current, next } = roomStatus(st.bookings || [], room.id, st.serverNow());
+      dot = STATE_COLOR[state];
+      if (small) pills.push({ text: state === 'busy' ? `${z.name} · busy` : state === 'soon' ? `${z.name} · ${fmtTime(next.start)}` : z.name, bg: PILL.dark, dot });
+      else {
+        pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, caps: true });
+        pills.push({ text: state === 'busy' ? `${current.lock ? '🔒 ' : ''}${current.title} · until ${fmtTime(current.end)}` : state === 'soon' ? `free until ${fmtTime(next.start)}` : room.av ? 'free · A/V' : 'free', bg: PILL.dark, dot });
+      }
+    } else pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, dot, caps: true });
+    const fq = st.freeq?.[z.id];
+    // The count is who's drawn here, so it always matches the avatars.
+    if (fq) { const n = fq.here ?? fq.members; pills.push({ text: `${fq.channel}${n ? ` · ${n}` : ''}`, bg: PILL.freeq }); }
+    placeRow(pills, x, y, { anchor: 'left', nudges: 0, maxW, alpha: 0.92 });
+  }
+
+  function drawLabelLayer(st) {
+    placed = [];
+    lsc = Math.max(0.85, Math.min(1.3, Math.sqrt(view.k / dpr)));
+    const me = st.peers.find((p) => p.id === st.meId);
+    const later = [];
+    const byDist = (x, y) => (me ? Math.hypot(me.rx - x, me.ry - y) : 0);
+    if (me) drawPeerLabel(me, st, me, later);
+    // People talking keep their names, so they're placed before the rest.
+    const talking = (p) => (p.bubble && st.time - p.bubble.at < 7000 ? 0 : 1);
+    const others = st.peers.filter((q) => q !== me).sort((a, b) => talking(a) - talking(b) || byDist(a.rx, a.ry) - byDist(b.rx, b.ry));
+    for (const p of others) drawPeerLabel(p, st, me, later);
+    for (const f of FURNITURE) drawObjectLabel(f, st, me, later);
+    for (const z of ZONES) drawZoneLabel(z, st);
+    for (const fn of later) fn();
+  }
+
+  function bubbleSize(text) {
+    ctx.font = '500 12.5px Inter, system-ui, sans-serif';
+    const lines = wrapText(ctx, text, 200).slice(0, 4);
+    return { lines, bw: Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18, bh: lines.length * 16 + 10 };
+  }
   // A speech bubble whose tail points down at (x, bottom).
   function drawBubble(x, bottom, text, alpha, fill) {
     ctx.globalAlpha = alpha;
-    ctx.font = '500 12.5px Inter, system-ui, sans-serif';
-    const lines = wrapText(ctx, text, 200).slice(0, 4);
-    const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18;
-    const bh = lines.length * 16 + 10;
-    const bx = Math.round(x - bw / 2), byy = Math.round(bottom - bh - 6);
+    const { lines, bw, bh } = bubbleSize(text);
+    const bx = Math.round(Math.max(6, Math.min(vw - bw - 6, x - bw / 2))), byy = Math.round(bottom - bh - 6);
     ctx.fillStyle = fill;
     ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
     roundRect(ctx, bx, byy, bw, bh, 10); ctx.fill();
@@ -958,9 +1016,7 @@ export function createRenderer(canvas) {
 
     // labels sit above the lighting so they stay readable at night
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawRoomTags(st);
-    drawObjectLabels(st);
-    for (const p of st.peers) drawLabels(p, st, p.id === st.meId);
+    drawLabelLayer(st);
     const z = zoneAt(st.cam.x, st.cam.y);
     return z;
   }
