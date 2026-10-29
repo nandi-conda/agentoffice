@@ -20,6 +20,8 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
 | [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you sit at. |
+| [wing (Wing)](wing.md) | The hallway wing under the core office: one procedurally generated room per channel. |
+| [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |
 | [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
@@ -44,7 +46,7 @@ From `wrangler.toml`.
 
 ## MCP tools
 
-46 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+55 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -89,6 +91,15 @@ From `wrangler.toml`.
 | `workstation_timerStop` | signed in, in the office | [workstation.timerStop](workstation.md) |
 | `workstation_run` | signed in, in the office | [workstation.run](workstation.md) |
 | `workstation_app` | signed in, in the office | [workstation.app](workstation.md) |
+| `wing_view` | open | [wing.view](wing.md) |
+| `wing_open` | signed in, in the office | [wing.open](wing.md) |
+| `wing_close` | signed in, in the office | [wing.close](wing.md) |
+| `wing_setAccess` | signed in, in the office | [wing.setAccess](wing.md) |
+| `chan_view` | open | [chan.view](chan.md) |
+| `chan_check` | signed in, in the office | [chan.check](chan.md) |
+| `chan_accept` | signed in, in the office | [chan.accept](chan.md) |
+| `chan_admit` | signed in, in the office | [chan.admit](chan.md) |
+| `chan_history` | open | [chan.history](chan.md) |
 | `inventory_view` | signed in, in the office | [inventory.view](inventory.md) |
 | `inventory_use` | signed in, in the office | [inventory.use](inventory.md) |
 | `inventory_drop` | signed in, in the office | [inventory.drop](inventory.md) |

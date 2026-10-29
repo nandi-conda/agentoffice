@@ -76,6 +76,8 @@ export class OfficeRoom extends DurableObject {
         url: env.FREEQ_URL || FREEQ_URL,
         rooms: env.FREEQ_ROOMS || '',
         minMembers: Number(env.FREEQ_MIN_MEMBERS) || 2,
+        // Channels that always get a room (they may be unlisted, like #freeq).
+        always: env.FREEQ_CHANNELS ?? '#freeq',
         openSocket: openOutboundSocket,
         keyStore: {
           get: async () => { const row = this.sql.exec("SELECT v FROM meta WHERE k = 'freeq-key'").toArray()[0]; return row && JSON.parse(row.v); },

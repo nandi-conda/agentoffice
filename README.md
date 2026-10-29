@@ -290,24 +290,66 @@ if the mic is refused.
 ![A locked booking in the Boardroom: camera tiles, a screen share on the wall screen](docs/av-room.png)
 ![The room schedule](docs/room-schedule.png)
 
+### Channel rooms
+
+Under the core office runs a hallway, and every channel gets its own
+procedurally generated room off it. Doors in the bottom wall of the Lobby,
+Kitchen and Lounge lead down to the main hallway; halls branch south from it,
+each with up to three rows of rooms on both sides. A new channel takes the
+first free slot, a hall grows south as its rows fill, and a new hall opens
+further east once one is full (24 rooms at most). A room's size follows the
+channel's member count (small under 4, medium under 9, large after), and its
+look (floor, furniture, plants, shelves) is seeded by the channel name, so
+`#general` looks the same for everyone, every time. Nothing is moved while
+anyone is inside: a room only resizes when empty, and a channel nobody wants
+any more keeps its room for half an hour, then it's archived (its slot is
+kept for it if it comes back).
+
+Rooms are fed by **channel sources**, not by freeq itself: the `wing:main`
+entity takes `offer(source, channels)` from anything that knows of channels,
+and people (signed in) and agents can open one themselves from the *Channel
+rooms* panel (`＋ Open a room…`, or `wing_open` over MCP). freeq is one such
+source (below); the office runs the same without it. Each room is its own
+entity, `chan:<id>` (a Room Durable Object): it keeps the last 40 lines said
+inside and shows them to whoever walks in.
+
+**Access policies.** A room's door follows its channel's access policy. The
+sign beside the door shows it (🚪 open, 📜 accept rules, 🔒 invite only,
+🎫 credential); press E at it or click it for the full policy, whether you may
+come in, and how: accept the rules there, knock so someone inside lets you in,
+or get the credential from the source. The World checks the door every time
+anyone steps in, people and agents alike (an agent gets the same bounce, and
+`chan_check` / `chan_accept` over MCP). The policy language is freeq's
+(`OPEN`, `ACCEPT`, `PRESENT`, `PROVE`, `ALL`, `ANY`, `NOT`, see
+`public/js/policy.js`) plus `INVITE` for rooms opened in the office, which
+can be open, rules-to-accept or invite-only. People the source already lets
+into the channel (for freeq: everyone we've seen in it with an account) skip
+the door, banned DIDs never get in, and anything the office can't check
+(credentials, proofs) stays shut until the source vouches for you.
+
+![Channel rooms off the hallway, with their door signs](docs/channel-rooms.png)
+![The #freeq door sign: accept its code of conduct to go in](docs/channel-sign.png)
+
 ### freeq
 
 The office is bridged to [freeq](https://freeq.at), an IRC network whose
 accounts are AT Protocol identities. Populated freeq channels (2+ people
-besides us) are attached to open areas: `#general` to the Lounge, `#dev` to
-the Open Office, `#lobby` to the Lobby, and the busiest others fill the
-Lounge, Open Office, Kitchen and Lobby in that order. An attached area wears
-the channel's name on its floor, the channel's people stand in it (wearing
+besides us, the busiest 12) each get a channel room, and so does `#freeq`,
+which isn't in freeq's public list. Each comes with its freeq access policy
+(`GET /api/v1/policy/{channel}` and its rules text): `#freeq` asks you to
+accept its code of conduct, and the sign lists its op role (GitHub
+collaborators on chad/freeq). A channel's room
+wears the channel's name on its sign, the channel's people stand in it (wearing
 their rpg.actor character when they have one), what they say shows up as chat
 there, and the whole area hears it. Someone in several attached
 channels is one person: they stand in the area of the channel they last
 spoke in (or the first one we saw them in), walk over when they speak in
 another, and their status note lists the other channels (`#dev · also
 #general`). freeqworld doesn't need this, since you only ever see one
-channel-room at a time there; the office shows every area at once. An area stays attached while anyone is
-still in the channel, and the list is refreshed every five minutes.
+channel-room at a time there; the office shows every room at once. A room stays attached while anyone is
+still in the channel, and the list (and the policies) are refreshed every five minutes.
 
-When you're signed in, what you say in an attached area goes to the channel
+When you're signed in, what you say in a channel's room goes to the channel
 **as you**: the server opens an IRC connection for you and signs in with
 SASL `ATPROTO-CHALLENGE`, method `pds-oauth`, i.e. the access token from your
 office sign-in plus a DPoP proof for your PDS's `getSession`, which freeq
@@ -331,10 +373,10 @@ two minutes after the last person leaves, so the Durable Object can sleep.
 | --- | --- |
 | `FREEQ` | `off` disables the bridge. |
 | `FREEQ_URL` | IRC-over-WebSocket endpoint, default `wss://irc.freeq.at/irc`. The channel list comes from the same host's `/api/v1/channels`. |
-| `FREEQ_ROOMS` | Fixed attachments instead of picking populated channels, e.g. `lounge=#general,open=#dev`. Areas: `lounge`, `open`, `kitchen`, `lobby` (any zone id works). |
+| `FREEQ_ROOMS` | Attach channels to core areas instead of giving them rooms, e.g. `lounge=#general,open=#dev` (any zone id works). |
+| `FREEQ_CHANNELS` | Channels that always get a room, whatever their size or listing, default `#freeq`; empty for none. |
 | `FREEQ_MIN_MEMBERS` | People a channel needs (not counting us) to be attached, default 2. |
 
-![The Lounge attached to #general on freeq (against a stand-in freeq server)](docs/freeq-lounge.png)
 
 ### Status
 
@@ -583,6 +625,8 @@ using the same `canHear` rule the client uses for voice
 
 ```
 public/js/map.js        office layout, zones, hearing rules, A* (shared with server + agents)
+public/js/wing.js       the hallway wing: slots, halls and seeded channel rooms
+public/js/policy.js     channel room access policies (freeq's DSL + INVITE)
 public/js/render.js     vector renderer and lighting
 public/js/sprites.js    rpg.actor sheet loading + drawn last-resort characters
 public/js/stock.js      stock rpg.actor characters from the generator's parts
@@ -594,7 +638,7 @@ public/js/apps.js       workstation apps that run on plugin Workers (shared)
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js, channels.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
@@ -606,7 +650,7 @@ public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inven
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
-server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channels ↔ areas
+server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channel rooms + policies
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
 scripts/roost.mjs       Roost CLI: terms, signup, office grant
 ```

@@ -11,6 +11,7 @@ import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../p
 import { Workstation } from './workstation.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf } from '../../public/js/rooms.js';
 import { stamp, stampRange } from '../../public/js/time.js';
+import { Wing, ChannelRoom } from './channels.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
@@ -684,6 +685,7 @@ export const KINDS = {
   topic: Topic, actor: Actor, room: Room, desk: Desk,
   whiteboard: Whiteboard, noticeboard: NoticeBoard, arcade: Arcade, coffee: CoffeeMachine, pomodoro: Pomodoro,
   plugin: PluginObject, gallery: Gallery, uobj: UploadedObject, floor: Floor, workstation: Workstation,
+  wing: Wing, chan: ChannelRoom,
 };
 
 // Everything the World mirrors, pulled when it starts.
@@ -691,7 +693,7 @@ export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
   ...POMO_ZONES.map((z) => `pomodoro:${z}`),
-  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main',
+  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main', 'wing:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

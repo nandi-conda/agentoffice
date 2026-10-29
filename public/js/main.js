@@ -1,4 +1,5 @@
-import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
+import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable, applyWing, grid } from './map.js';
+import { summary as accessOf, describe as describeAccess } from './policy.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
 import { STATUS, statusColor, colorFor } from './style.js';
@@ -28,6 +29,7 @@ let me = null;
 let net = null;
 let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
 let freeqRooms = {}; // area id -> { channel, members, topic } attached from freeq
+let wing = []; // channel rooms off the hallway: { id, channel, slot, tier, topic, members, sources, policy, access }
 let objects = {}; // plugin object id -> { display, bubble } (see objects.js)
 let gallery = []; // objects people uploaded (see gallery.js)
 const galleryWait = new Map(); // request id -> resolve, for { t: 'galleryres' }
@@ -258,6 +260,9 @@ function onMessage(m) {
     case 'welcome': {
       serverOffset = (m.now || Date.now()) - Date.now();
       peers.clear();
+      // The channel wing first: it decides what the map looks like.
+      wing = m.wing || [];
+      applyWing(wing);
       const pos = me ? { x: me.x, y: me.y } : null;
       me = { ...m.you, rx: m.you.x, ry: m.you.y, sheets: null };
       if (pos) { me.x = me.rx = pos.x; me.y = me.ry = pos.y; net.send({ t: 'move', x: me.x, y: me.y, dir: me.dir, moving: false, teleport: true }); }
@@ -332,6 +337,38 @@ function onMessage(m) {
       break;
     }
     case 'freeq': freeqRooms = m.rooms || {}; if (me) zoneChanged(lastZone, true); refreshChannels(); break;
+    case 'wing': {
+      const had = new Set(wing.map((r) => r.id));
+      wing = m.rooms || [];
+      applyWing(wing);
+      // A path planned over the old map may cross a wall now.
+      if (path) walkTo(walkTarget?.x ?? me.x, walkTarget?.y ?? me.y);
+      refreshChannels();
+      if (modal.sign) modal.sign();
+      const fresh = wing.filter((r) => !had.has(r.id));
+      if (had.size && fresh.length === 1) sys(`🚪 A room for ${fresh[0].channel} opened off the hallway.`);
+      break;
+    }
+    // What was said in a channel room before you walked in.
+    case 'chanlog': {
+      if (!m.lines?.length) break;
+      sys(`Earlier in ${m.channel || 'this room'}:`);
+      for (const l of m.lines) logChat({ id: `log:${l.name}`, name: l.name, text: l.text, ts: l.ts, scope: m.channel || '', backfill: true, earlier: true });
+      break;
+    }
+    case 'chan': {
+      if (m.op === 'open') {
+        const r = m.room;
+        if (!r) break;
+        toast(`🚪 ${esc(r.channel)} is ${r.access?.open ? 'open' : esc(r.access?.text || '')} off the hallway.`, [['Walk there', () => walkToZone(ZONES.find((z) => z.id === r.id))]], 8000);
+      } else if (m.op === 'accept') {
+        toast('📜 Rules accepted. The door is open to you.', [['Walk in', () => walkToZone(ZONES.find((z) => z.id === m.room))]], 6000);
+        if (modal.sign) modal.sign();
+      } else if (m.op === 'check' && modal.signCheck) modal.signCheck(m.result);
+      else if (m.op === 'knock') toast(`🚪 You knocked. ${m.result?.inside === 1 ? 'The person' : 'Everyone'} inside can let you in.`);
+      else if (m.op === 'access' && modal.sign) modal.sign();
+      break;
+    }
     case 'notes': notes = m.notes; if (modal.notesOpen) openNotes(); break;
     case 'pomo': {
       if (m.now) serverOffset = m.now - Date.now();
@@ -355,10 +392,13 @@ function onMessage(m) {
       const z = zoneAt(me.x, me.y);
       const b = z?.bookable && activeBooking(bookings, z.id, serverNow());
       const letIn = m.kind === 'knock' && p && b && b.lock && isHolder(b, me) && !isHolder(b, p);
-      toast(`${m.kind === 'knock' ? '🚪' : '👋'} <b>${esc(m.name)}</b> ${m.kind === 'knock' ? 'is knocking' : 'waved at you'}`, p ? [
+      // A knock on a channel room's door: anyone inside can let them in.
+      const chanIn = m.kind === 'knock' && p && m.chanRoom;
+      toast(`${m.kind === 'knock' ? '🚪' : '👋'} <b>${esc(m.name)}</b> ${m.kind === 'knock' ? `is knocking${chanIn ? ` on ${esc(wing.find((r) => r.id === m.chanRoom)?.channel || 'the door')}` : ''}` : 'waved at you'}`, p ? [
         ...(letIn ? [['Let in', () => net.send({ t: 'book', op: 'admit', id: b.id, to: p.id })]] : []),
+        ...(chanIn ? [['Let in', () => net.send({ t: 'chan', op: 'admit', room: m.chanRoom, to: p.id })]] : []),
         ['Walk over', () => walkTo(p.x, p.y)], ['Wave back', () => net.send({ t: 'wave', to: p.id })],
-      ] : [], letIn ? 15000 : 6000);
+      ] : [], letIn || chanIn ? 15000 : 6000);
       break;
     }
     case 'bookings': {
@@ -387,7 +427,9 @@ function onMessage(m) {
       path = null; walkTarget = null; pendingUse = null; follow = null;
       if (performance.now() - (onMessage.bounced || 0) > 4000) {
         onMessage.bounced = performance.now();
-        toast(esc(localize(m.text)), [['Knock', () => knock(m.room)]], 8000);
+        // A channel room's door: the sign says how to get in.
+        if (m.door) toast(esc(localize(m.text)), [['Read the sign', () => openSign(m.room)]], 8000);
+        else toast(esc(localize(m.text)), [['Knock', () => knock(m.room)]], 8000);
       }
       break;
     }
@@ -414,7 +456,7 @@ function logChat(m) {
   d.className = `m ${m.scope === 'office' ? 'office' : ''} ${m.mention ? 'mention' : ''}`;
   const scope = m.scope === 'nearby' ? '' : `<span class="sc">${esc(m.scope === 'office' ? '📣 office' : m.scope)}</span>`;
   // Said on freeq while the office wasn't listening, caught up after a restart.
-  const when = m.backfill ? `<span class="missed" title="Said on freeq while the office was away">${esc(fmtTime(m.ts))}</span> ` : '';
+  const when = m.backfill ? `<span class="missed" title="${m.earlier ? 'Said before you walked in' : 'Said on freeq while the office was away'}">${esc(fmtTime(m.ts))}</span> ` : '';
   if (m.action) d.classList.add('act');
   d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
   pushLog(d);
@@ -785,21 +827,108 @@ const ago = (t) => {
   const s = Math.max(0, (serverNow() - t) / 1000);
   return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 };
+// Channel rooms off the hallway (and any core area a source attached a
+// channel to), busiest and most recent first.
 function refreshChannels() {
   const here = me && zoneAt(me.x, me.y)?.id;
-  const list = Object.entries(freeqRooms).map(([zoneId, c]) => ({ ...c, zone: ZONES.find((z) => z.id === zoneId) })).filter((c) => c.zone)
-    .sort((a, b) => (b.last || 0) - (a.last || 0) || b.members - a.members || a.channel.localeCompare(b.channel));
-  $('.channels').hidden = !list.length;
+  const rooms = new Map();
+  for (const r of wing) rooms.set(r.id, { id: r.id, channel: r.channel, members: r.members, topic: r.topic, access: r.access, sources: r.sources });
+  for (const [zoneId, c] of Object.entries(freeqRooms)) rooms.set(zoneId, { ...rooms.get(zoneId), ...c, id: zoneId, freeq: true, sources: [...new Set([...(rooms.get(zoneId)?.sources || []), 'freeq'])] });
+  const list = [...rooms.values()].map((c) => ({ ...c, zone: ZONES.find((z) => z.id === c.id) })).filter((c) => c.zone)
+    .sort((a, b) => (b.last || 0) - (a.last || 0) || (b.members || 0) - (a.members || 0) || a.channel.localeCompare(b.channel));
+  const canOpen = !!(me?.did || me?.kind === 'agent');
+  $('.channels').hidden = !list.length && !canOpen;
   $('.channels .count').textContent = list.length;
   $('.channel-list').innerHTML = list.map((c) => {
     const live = c.last && serverNow() - c.last < 5 * 60000;
-    const sub = [c.zone.name, c.last ? ago(c.last) : c.topic].filter(Boolean).join(' · ');
-    return `<li class="${c.zone.id === here ? 'here' : ''}"><button type="button" data-zone="${c.zone.id}" title="${esc(c.topic ? `${c.channel}: ${c.topic}` : c.channel)}. Walk to the ${esc(c.zone.name)}">`
-      + `<span class="hash" aria-hidden="true">#</span><span class="who"><b>${live ? '<span class="live" title="Active in the last 5 minutes"></span>' : ''}${esc(c.channel.replace(/^#/, ''))}</b><span>${esc(sub)}</span></span>`
-      + `<span class="members" title="${c.members} in the channel${c.here !== undefined && c.here !== c.members ? `, ${c.here} standing in the ${esc(c.zone.name)} (the rest are drawn in another area they're in)` : ''}">${c.members} 👤</span></button></li>`;
-  }).join('');
-  $('.channel-list').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => walkToZone(ZONES.find((z) => z.id === b.dataset.zone))));
+    const a = c.access || accessOf(null);
+    const where = c.zone.gen ? (c.sources?.includes('freeq') ? 'freeq' : 'office') : c.zone.name;
+    const sub = [`${a.icon} ${a.text}`, where, c.last ? ago(c.last) : c.topic].filter(Boolean).join(' · ');
+    return `<li class="${c.zone.id === here ? 'here' : ''}"><button type="button" data-zone="${c.zone.id}" title="${esc(c.topic ? `${c.channel}: ${c.topic}` : c.channel)}. ${a.open ? 'Walk there' : 'Walk to the door'}">`
+      + `<span class="hash ${a.open ? '' : 'gated'}" aria-hidden="true">${a.open ? '#' : a.icon.split(/(?=\p{Extended_Pictographic})/u)[0]}</span><span class="who"><b>${live ? '<span class="live" title="Active in the last 5 minutes"></span>' : ''}${esc(c.channel.replace(/^#/, ''))}</b><span>${esc(sub)}</span></span>`
+      + `<span class="members" title="${c.members || 0} in the channel${c.here !== undefined && c.here !== c.members ? `, ${c.here} standing in the room (the rest are drawn in another one they're in)` : ''}">${c.members || 0} 👤</span></button></li>`;
+  }).join('') + (canOpen ? '<li class="open-room"><button type="button" class="new-room">＋ Open a room…</button></li>' : '');
+  $('.channel-list').querySelectorAll('button[data-zone]').forEach((b) => b.addEventListener('click', () => walkToZone(ZONES.find((z) => z.id === b.dataset.zone))));
+  $('.channel-list .new-room')?.addEventListener('click', openNewRoom);
 }
+
+// Open a room for a channel: it's built off the hallway for everyone.
+function openNewRoom() {
+  modal.open(`
+    <h2>Open a room</h2>
+    <p class="small muted">A room for a channel, built off the hallway under the office. Rooms nobody uses for a week are let go.</p>
+    <form class="new-room-form">
+      <label>Channel <input name="name" required maxlength="33" placeholder="#design" pattern="#?[\\p{L}\\p{N}][\\p{L}\\p{N}_.\\-]{0,31}"></label>
+      ${accessFields('open', '')}
+      <div class="row"><button class="btn primary">Open it</button></div>
+    </form>`);
+  const form = modal.body.querySelector('form');
+  wireAccess(form);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    net.send({ t: 'chan', op: 'open', name: fd.get('name'), access: fd.get('access'), rules: fd.get('rules') || undefined });
+    modal.close();
+  });
+}
+
+const accessFields = (access, rules) => `
+  <fieldset class="access-pick"><legend>Who can walk in</legend>
+    <label><input type="radio" name="access" value="open" ${access === 'open' ? 'checked' : ''}> 🚪 Anyone</label>
+    <label><input type="radio" name="access" value="rules" ${access === 'rules' ? 'checked' : ''}> 📜 People who accept the rules</label>
+    <label><input type="radio" name="access" value="invite" ${access === 'invite' ? 'checked' : ''}> 🔒 Invite only (knock, someone inside lets you in)</label>
+  </fieldset>
+  <label class="rules-text" ${access === 'rules' ? '' : 'hidden'}>Rules <textarea name="rules" maxlength="2000" rows="4" placeholder="Be kind. Stay on topic.">${esc(rules || '')}</textarea></label>`;
+function wireAccess(form) {
+  const sync = () => { const v = new FormData(form).get('access'); form.querySelector('.rules-text').hidden = v !== 'rules'; form.querySelector('textarea').required = v === 'rules'; };
+  form.querySelectorAll('input[name=access]').forEach((i) => i.addEventListener('change', sync));
+  sync();
+}
+
+// The sign by a channel room's door: who may come in, whether you may, and how.
+function openSign(roomId) {
+  let check = null;
+  const render = () => {
+    const r = wing.find((x) => x.id === roomId);
+    if (!r) return modal.close();
+    const p = r.policy, a = r.access || accessOf(p);
+    const mine = r.sources?.includes('office') && r.by === me.name && me.did;
+    const inside = zoneAt(me.x, me.y)?.id === roomId;
+    const needs = check?.needs || [];
+    const from = r.sources?.includes('freeq') ? `<a href="https://freeq.at" target="_blank" rel="noopener">freeq</a>` : r.by ? `opened by ${esc(r.by)}` : 'the office';
+    const roles = Object.entries(p?.roles || {}).map(([role, req]) => `<li><b>${esc(role)}</b>: ${esc(describeAccess(req, p))}</li>`).join('');
+    const needRow = (n) => {
+      if (n.type === 'ACCEPT') return `<li>${n.or ? '<i>or</i> ' : ''}📜 Accept the rules below <button class="btn primary accept" data-hash="${esc(n.hash)}">I accept</button></li>`;
+      if (n.type === 'INVITE') return `<li>${n.or ? '<i>or</i> ' : ''}🔒 Knock: someone inside can let you in <button class="btn knock">🚪 Knock</button></li>`;
+      if (n.type === 'PRESENT') return `<li>${n.or ? '<i>or</i> ' : ''}🎫 ${esc(n.label)}${n.url ? ` <a class="btn ghost" href="${esc(n.url)}" target="_blank" rel="noopener">Get it on freeq</a>` : ''}<br><span class="small muted">Once freeq lets you into ${esc(r.channel)}, the door opens to you too.</span></li>`;
+      return `<li>${n.or ? '<i>or</i> ' : ''}⛔ ${esc(n.label)}</li>`;
+    };
+    modal.open(`
+      <h2 class="sign-title"><span class="sign-icon">${a.icon}</span> ${esc(r.channel)}</h2>
+      <p class="small muted">${esc(a.text)} · ${from}${r.topic ? ` · ${esc(r.topic)}` : ''} · ${r.members || 0} in the channel</p>
+      <div class="room-now ${check ? (check.ok ? 'free' : 'busy') : ''}"><div>${!check ? 'Checking the door…' : check.ok ? (inside ? '<b>You\'re in.</b>' : '<b>You may walk in.</b>') : `<b>The door is shut to you.</b> To get in, ${esc(check.require || 'meet the policy')}.`}</div></div>
+      ${check && !check.ok && needs.length ? `<ul class="needs">${needs.map(needRow).join('')}</ul>` : ''}
+      ${p?.rules ? `<h3>Rules</h3><div class="rules">${esc(p.rules)}</div>` : ''}
+      ${roles ? `<h3>Roles</h3><ul class="small">${roles}</ul>` : ''}
+      <div class="row">${check?.ok && !inside ? '<button class="btn primary go">Walk in</button>' : ''}</div>
+      ${mine ? `<form class="access-form"><h3>Who can walk in (you opened it)</h3>${accessFields(p?.require?.type === 'INVITE' ? 'invite' : p?.rules ? 'rules' : 'open', p?.rules)}<div class="row"><button class="btn">Save</button></div></form>` : ''}`, 'sign-modal');
+    const body = modal.body;
+    body.querySelector('.accept')?.addEventListener('click', (e) => net.send({ t: 'chan', op: 'accept', room: roomId, hash: e.target.dataset.hash }));
+    body.querySelector('.knock')?.addEventListener('click', () => net.send({ t: 'chan', op: 'knock', room: roomId }));
+    body.querySelector('.go')?.addEventListener('click', () => { modal.close(); walkToZone(ZONES.find((z) => z.id === roomId)); });
+    const form = body.querySelector('.access-form');
+    if (form) {
+      wireAccess(form);
+      form.addEventListener('submit', (e) => { e.preventDefault(); const fd = new FormData(form); net.send({ t: 'chan', op: 'access', name: r.channel, access: fd.get('access'), rules: fd.get('rules') || undefined }); });
+    }
+    modal.sign = () => { check = null; net.send({ t: 'chan', op: 'check', room: roomId }); render(); };
+    modal.signCheck = (c) => { check = c; render(); };
+    modal.onclose = () => { modal.sign = null; modal.signCheck = null; };
+  };
+  render();
+  net.send({ t: 'chan', op: 'check', room: roomId });
+}
+
 setInterval(refreshChannels, 30000);
 
 // Walk into an area: its middle, or the open tile nearest it when that's furniture.
@@ -817,12 +946,20 @@ function walkToZone(z) {
 const mini = $('#minimap');
 const mg = mini.getContext('2d');
 function drawMinimap() {
+  // The map grows with the channel wing, so the minimap keeps its shape.
+  const aspect = `${W} / ${H}`;
+  if (mini.style.aspectRatio !== aspect) {
+    mini.style.aspectRatio = aspect;
+    mini.height = Math.round(mini.width * H / W);
+    mini.classList.toggle('tall', H > W * 0.75);
+  }
   const sx = mini.width / W, sy = mini.height / H;
   mg.clearRect(0, 0, mini.width, mini.height);
-  mg.fillStyle = '#f5f2ec'; mg.fillRect(0, 0, mini.width, mini.height);
+  mg.fillStyle = '#3a3430'; mg.fillRect(0, 0, mini.width, mini.height);
+  mg.fillStyle = '#f5f2ec'; mg.fillRect(0, 0, 48 * sx, 32 * sy);
   const tint = { open: '#e7dcc9', room: '#d7e7d7', quiet: '#d6deee' };
   for (const z of ZONES) {
-    mg.fillStyle = z.id.startsWith('booth') && z.kind === 'room' ? '#e4d6e8' : tint[z.kind];
+    mg.fillStyle = z.channel ? (wing.find((r) => r.id === z.id)?.access?.open === false ? '#e9d5ff' : '#ddd6fe') : z.id.startsWith('booth') && z.kind === 'room' ? '#e4d6e8' : z.gen ? '#e7e2da' : tint[z.kind];
     mg.fillRect(z.x0 * sx, z.y0 * sy, (z.x1 - z.x0 + 1) * sx, (z.y1 - z.y0 + 1) * sy);
   }
   mg.fillStyle = '#57534e';
@@ -913,6 +1050,10 @@ function promptFor(f) {
     case 'noticeboard': return 'Read the notice board';
     case 'arcade': return 'Play Byte Snake';
     case 'plugin': return f.prompt || `Use the ${f.name}`;
+    case 'sign': {
+      const r = wing.find((x) => x.id === f.zone);
+      return r ? `${r.access?.icon || '🚪'} ${r.channel} · ${r.access?.text || 'open'}: read the sign` : null;
+    }
     case 'room': {
       const { state, current, next } = roomStatus(bookings, f.zone, serverNow());
       const name = roomById(f.zone).name;
@@ -960,6 +1101,7 @@ function interact(f) {
     }
     case 'noticeboard': openNotes(); break;
     case 'room': openRoom(f.zone); break;
+    case 'sign': openSign(f.zone); break;
     case 'plugin': modal.obj = openObject(modal, f, (m) => net.send(m)); modal.onclose = () => (modal.obj = null); break;
     case 'arcade': modal.snake = openSnake(modal, { scores, onScore: (score) => net.send({ t: 'score', score }) }); { const prev = modal.onclose; modal.onclose = () => { prev?.(); modal.snake = null; }; } break;
   }
@@ -1585,8 +1727,10 @@ function zoneChanged(z, freeqOnly = false) {
   scope.className = `scope ${fq ? 'freeq' : z?.kind || 'open'}`;
   if (freeqOnly) return;
   if (fq) toast(`💬 ${esc(z.name)} is attached to <b>${esc(fq.channel)}</b> on freeq${fq.topic ? ` (${esc(fq.topic)})` : ''}. ${me.did ? 'What you say here goes there as you.' : 'Sign in to talk there as yourself; for now you can listen.'}`, [], 6000);
-  if (z?.kind === 'room' && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }
-  else if (autoStatus === 'meeting' && z?.kind !== 'room') { autoStatus = null; setStatus('available'); }
+  // Meeting rooms put you in a meeting; channel rooms are just somewhere to talk.
+  const meeting = z?.kind === 'room' && !z.channel;
+  if (meeting && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }
+  else if (autoStatus === 'meeting' && !meeting) { autoStatus = null; setStatus('available'); }
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
   // Camera and screen share belong to A/V rooms; they stop at the door.
   camBtn.hidden = shareBtn.hidden = !z?.av;
@@ -1703,7 +1847,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others),
+      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }

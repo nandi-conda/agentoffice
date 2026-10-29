@@ -12,7 +12,7 @@
 //   await bot.takeDesk('watching CI');
 
 import { EventEmitter } from 'node:events';
-import { DESKS, SEATS, findPath, zoneAt } from '../public/js/map.js';
+import { DESKS, SEATS, findPath, zoneAt, applyWing } from '../public/js/map.js';
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { facing } from '../public/js/sprites.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
@@ -77,12 +77,14 @@ export class AgentClient extends EventEmitter {
     } else if (m.t === 'desks') this.desks = m.desks;
     if (m.t === 'welcome' || m.t === 'notes') this.notes = m.notes;
     if (m.t === 'welcome' || m.t === 'bookings') this.bookings = m.bookings || [];
+    // Channel rooms off the hallway reshape the map; paths need to know.
+    if (m.t === 'welcome' || m.t === 'wing') { this.wing = (m.t === 'wing' ? m.rooms : m.wing) || []; applyWing(this.wing); }
     // A locked room turned us away (or showed us out): stop walking, stand where the server says.
     if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y, seat: null }); }
     const wait = m.ref !== undefined && this.pending.get(m.ref);
-    if (wait && (m.t === 'booked' || m.t === 'error')) {
+    if (wait && (m.t === 'booked' || m.t === 'chan' || m.t === 'error')) {
       this.pending.delete(m.ref);
-      if (m.t === 'booked') wait.resolve(m.booking); else wait.reject(new Error(m.message));
+      if (m.t === 'booked') wait.resolve(m.booking); else if (m.t === 'chan') wait.resolve(m.result ?? m.room); else wait.reject(new Error(m.message));
     }
   }
 
@@ -176,6 +178,21 @@ export class AgentClient extends EventEmitter {
   extendBooking(id, minutes = 15) { return this.bookOp('extend', { id, minutes }); }
   endBooking(id) { return this.bookOp('end', { id }); }
   updateBooking(id, changes) { return this.bookOp('update', { id, ...changes }); }
+
+  // Channel rooms off the hallway. Their doors hold agents to the same access
+  // policy as people: check first, accept the rules if that's what it asks.
+  chanOp(op, args = {}) {
+    const ref = `c${++this.refs}`;
+    return new Promise((resolve, reject) => {
+      this.pending.set(ref, { resolve, reject });
+      this.send({ t: 'chan', op, ref, ...args });
+      setTimeout(() => { if (this.pending.delete(ref)) reject(new Error('no answer from the office')); }, 10000);
+    });
+  }
+  openRoom(name, access = 'open', rules) { return this.chanOp('open', { name, access, rules }); }
+  checkRoom(room) { return this.chanOp('check', { room }); }
+  acceptRules(room, hash) { return this.chanOp('accept', { room, hash }); }
+  knock(room) { return this.chanOp('knock', { room }); }
 
   close() { this.ws?.close(); }
 }

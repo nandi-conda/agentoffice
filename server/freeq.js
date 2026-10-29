@@ -1,8 +1,9 @@
 // Bridge to freeq (https://freeq.at), an IRC network whose accounts are AT
-// Protocol identities. Populated freeq channels are attached to open areas of
-// the office: the channel's people stand in that area, what they say shows up
-// as chat there, and what signed-in office people say there goes to the
-// channel as themselves.
+// Protocol identities. Populated freeq channels each get a generated room off
+// the office's hallway wing (offered to the office as a channel source, see
+// server/entities/channels.js; the office knows nothing of freeq): the
+// channel's people stand in that room, what they say shows up as chat there,
+// and what signed-in office people say there goes to the channel as themselves.
 //
 // Two kinds of IRC connection, both over wss://irc.freeq.at/irc (one IRC line
 // per WebSocket text frame) and both signed in with SASL ATPROTO-CHALLENGE:
@@ -17,13 +18,12 @@
 // fetch upgrade inside the Durable Object).
 
 import { ZONES, isBlocked } from '../public/js/map.js';
+import { channelKey } from '../public/js/wing.js';
 import { Seen, Saver, missedSince, tagSeconds, usable, SNAPSHOT_VERSION } from './freeq-sync.js';
 
 export const FREEQ_URL = 'wss://irc.freeq.at/irc';
-// Open areas a channel can be attached to, in the order they fill up.
-export const SLOTS = ['lounge', 'open', 'kitchen', 'lobby'];
-// Channels that have a natural home when they're populated.
-const HOMES = { '#general': 'lounge', '#dev': 'open', '#lobby': 'lobby' };
+export const MAX_ROOMS = 12; // channels offered for rooms, busiest first
+const POLICY_TTL = 10 * 60 * 1000;
 const MAX_PEOPLE = 12; // freeq people drawn per area
 const REFRESH_MS = 5 * 60 * 1000;
 const IDLE_CLOSE_MS = 2 * 60 * 1000; // listener hangs up this long after the office empties
@@ -281,7 +281,8 @@ export const oauthResponder = (creds) => async (bytes, challenge, irc) => {
 
 // ---- the bridge -------------------------------------------------------------
 
-const zoneById = Object.fromEntries(ZONES.map((z) => [z.id, z]));
+// Zones come and go with the channel wing, so look them up each time.
+const zoneById = (id) => ZONES.find((z) => z.id === id) || null;
 const lower = (s) => String(s || '').toLowerCase();
 
 // A free spot inside an area, a little away from its walls.
@@ -305,12 +306,16 @@ export class FreeqBridge {
   //
   // The office never waits on freeq: nothing here is awaited by joins, chat
   // or sign-in, and when freeq is unreachable the areas just stay plain.
-  constructor({ office, auth, openSocket, keyStore, stateStore = null, url = FREEQ_URL, rooms = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS, graceMs = STALE_MS }) {
+  constructor({ office, auth, openSocket, keyStore, stateStore = null, url = FREEQ_URL, rooms = '', always = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS, graceMs = STALE_MS }) {
     Object.assign(this, { office, auth, openSocket, keyStore, stateStore, url, minMembers, log, signInMs, graceMs });
     // Wrapped: calling a stored fetch as this.fetch() throws "Illegal invocation" on Workers.
     this.fetch = (...a) => fetchImpl(...a);
     this.api = url.replace(/^ws/, 'http').replace(/\/irc\/?$/, '');
     this.fixed = parseRooms(rooms);
+    // Channels offered whatever their size: policy-gated ones like #freeq
+    // aren't in freeq's public channel list at all.
+    this.always = String(always || '').split(',').map((c) => c.trim()).filter(Boolean).map((c) => (c.startsWith('#') ? c : `#${c}`));
+    this.policies = new Map(); // lower(channel) -> { at, policy }
     this.bindings = new Map(); // zoneId -> { channel, members, topic }
     this.listener = null;
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
@@ -445,17 +450,19 @@ export class FreeqBridge {
   // says who's still there.
   async restore() {
     if (!this.stateStore) return;
+    // Channel rooms are part of the map only once the office has its wing.
+    await this.office.ready;
     let snap = null;
     try { snap = await this.stateStore.get(); } catch (e) { return this.failed(e); }
     if (!snap) return;
     this.seen = new Seen(snap.seen);
     if (!usable(snap) || this.bindings.size || this.people.size) return;
     for (const [zoneId, b] of Object.entries(snap.bindings || {})) {
-      if (zoneById[zoneId] && b?.channel) this.bindings.set(zoneId, { channel: b.channel, topic: b.topic || null, members: b.members || 0, last: b.last || null });
+      if (zoneById(zoneId) && b?.channel) this.bindings.set(zoneId, { channel: b.channel, topic: b.topic || null, members: b.members || 0, last: b.last || null });
     }
     for (const r of snap.people || []) {
       const channels = (r.channels || []).filter((ch) => this.zoneFor(ch));
-      if (!r.nick || !channels.length || !zoneById[r.zone] || this.people.has(lower(r.nick))) continue;
+      if (!r.nick || !channels.length || !zoneById(r.zone) || this.people.has(lower(r.nick))) continue;
       const f = { nick: r.nick, channels: new Map(channels.map((c) => [lower(c), c])), active: channels.includes(r.active) ? r.active : channels[0], peer: null };
       f.peer = this.office.addRemote({ name: r.nick, kind: 'freeq', x: r.x, y: r.y, freeqZone: r.zone, did: r.did || null, handle: r.handle || null, actor: r.actor || null });
       this.people.set(lower(r.nick), f);
@@ -523,7 +530,7 @@ export class FreeqBridge {
   async refresh() {
     if (!this.listener) return;
     const list = await this.channels();
-    this.apply(this.plan(list));
+    this.apply(await this.plan(list));
     // Ask who's there rather than counting on the reply to JOIN; it also
     // brings back anyone missed, e.g. after a restart. Whoever we have down
     // as in the channel but the reply doesn't list has left (see settle()).
@@ -535,8 +542,8 @@ export class FreeqBridge {
     this.saver.soon(); // keeps the snapshot fresh enough to restore from
   }
 
-  // Pick channels for areas. Our own connections don't count as people.
-  plan(list) {
+  // Pick channels and get each a room. Our own connections don't count as people.
+  async plan(list) {
     const ours = (ch) => (this.listener?.channels.has(ch) ? 1 : 0) + [...this.users.values()].filter((u) => u.irc.channels.has(ch)).length;
     const info = new Map(list.filter((c) => c.name?.startsWith('#')).map((c) => [lower(c.name), { channel: c.name, members: Math.max(0, (c.members || 0) - ours(c.name)), topic: c.topic || null }]));
     const out = new Map();
@@ -544,23 +551,64 @@ export class FreeqBridge {
       for (const [zoneId, ch] of this.fixed) out.set(zoneId, info.get(lower(ch)) || { channel: ch, members: 0, topic: null });
       return out;
     }
-    const free = new Set(SLOTS);
-    const place = (zoneId, c) => { out.set(zoneId, c); free.delete(zoneId); info.delete(lower(c.channel)); };
-    // Stay put while anyone is still there, so areas don't reshuffle under people.
-    for (const [zoneId, b] of this.bindings) {
-      const c = info.get(lower(b.channel));
-      if (c && c.members > 0) place(zoneId, c);
-    }
-    const populated = [...info.values()].filter((c) => c.members >= this.minMembers).sort((a, b) => b.members - a.members || a.channel.localeCompare(b.channel));
-    for (const c of populated) {
-      const home = HOMES[lower(c.channel)];
-      if (home && free.has(home)) place(home, c);
-    }
-    for (const c of populated) {
-      if (!info.has(lower(c.channel)) || !free.size) continue;
-      place([...free][0], c);
+    // Busy channels, plus any we're attached to that still have someone,
+    // so a room doesn't vanish under people when a channel quietens.
+    const keep = new Set([...this.bindings.values()].map((b) => lower(b.channel)));
+    const always = this.always.map((ch) => info.get(lower(ch)) || { channel: ch, members: 0, topic: null });
+    const wanted = [...always, ...[...info.values()]
+      .filter((c) => !this.always.some((ch) => lower(ch) === lower(c.channel)))
+      .filter((c) => c.members >= this.minMembers || (keep.has(lower(c.channel)) && c.members > 0))
+      .sort((a, b) => b.members - a.members || a.channel.localeCompare(b.channel))]
+      .slice(0, MAX_ROOMS);
+    if (!this.office.offerChannels) return out;
+    const policies = await Promise.all(wanted.map((c) => this.policyFor(c.channel)));
+    const zones = await this.office.offerChannels('freeq', wanted.map((c, i) => ({
+      name: c.channel, members: c.members, topic: c.topic, policy: policies[i], allow: this.allowed(c.channel),
+    })));
+    for (const c of wanted) {
+      const zoneId = zones[channelKey(c.channel)];
+      if (zoneId && zoneById(zoneId)) out.set(zoneId, c);
     }
     return out;
+  }
+
+  // A channel's access policy (freeq docs/POLICY.md, GET /api/v1/policy/{channel}),
+  // in the office's generic shape (public/js/policy.js). Null when it has none.
+  async policyFor(channel) {
+    const key = lower(channel), hit = this.policies.get(key);
+    if (hit && Date.now() - hit.at < POLICY_TTL) return hit.policy;
+    let policy = hit?.policy ?? null;
+    try {
+      const get = async (path) => {
+        const r = await this.fetch(`${this.api}/api/v1/policy/${encodeURIComponent(channel)}${path}`, { headers: { accept: 'application/json' } });
+        return r.ok ? r.json() : r.status === 404 ? null : Promise.reject(new Error(`HTTP ${r.status}`));
+      };
+      const doc = (await get(''))?.policy;
+      policy = null;
+      if (doc && typeof doc === 'object' && doc.requirements) {
+        const hash = findAccept(doc.requirements);
+        const rules = hash ? await get('/rules').catch(() => null) : null;
+        policy = {
+          source: 'freeq', version: doc.version, require: doc.requirements, roles: doc.role_requirements || {},
+          rules: rules?.hash === hash ? rules.text : null, rulesHash: hash || null,
+          endpoints: Object.fromEntries(Object.entries(doc.credential_endpoints || {}).map(([k, e]) => [k, { label: e.label || k, url: e.url ? new URL(e.url, this.api).href : undefined }])),
+          url: `https://freeq.at`,
+        };
+      }
+    } catch (e) {
+      this.log(`freeq: couldn't read the policy of ${channel}: ${e.message}`);
+    }
+    this.policies.set(key, { at: Date.now(), policy });
+    return policy;
+  }
+
+  // Who freeq already lets into a channel: everyone we've seen there with an
+  // account, and office people whose own connection is in it.
+  allowed(channel) {
+    const key = lower(channel), out = new Set();
+    for (const f of this.people.values()) if (f.channels.has(key) && f.peer?.did) out.add(f.peer.did);
+    for (const [did, u] of this.users) if (u.irc.channels.has(channel) || u.irc.channels.has(key)) out.add(did);
+    return [...out];
   }
 
   apply(plan) {
@@ -574,7 +622,7 @@ export class FreeqBridge {
       this.listener?.join(c.channel);
       if (cur) { cur.members = c.members; cur.topic = c.topic; continue; }
       this.bindings.set(zoneId, { ...c });
-      this.log(`freeq: ${c.channel} → ${zoneById[zoneId].name}`);
+      this.log(`freeq: ${c.channel} → ${zoneById(zoneId).name}`);
     }
     this.announce();
   }
@@ -662,7 +710,7 @@ export class FreeqBridge {
       if (f.peer?.freeqZone === zoneId) { f.active = ch; return this.describe(f); }
       const here = [...this.people.values()].filter((g) => g.peer && g !== f && g.peer.freeqZone === zoneId).map((g) => g.peer);
       if (here.length >= MAX_PEOPLE) continue;
-      const at = spotIn(zoneById[zoneId], here);
+      const at = spotIn(zoneById(zoneId), here);
       f.active = ch;
       if (f.peer) {
         f.peer.freeqZone = zoneId;
@@ -877,12 +925,20 @@ export class FreeqBridge {
   }
 }
 
+// The rules hash an ACCEPT requirement asks for, anywhere in the tree.
+function findAccept(r, depth = 0) {
+  if (!r || depth > 8) return null;
+  if (String(r.type).toUpperCase() === 'ACCEPT') return r.hash || null;
+  for (const x of r.requirements || []) { const h = findAccept(x, depth + 1); if (h) return h; }
+  return r.requirement ? findAccept(r.requirement, depth + 1) : null;
+}
+
 // "lounge=#general, open=#dev" -> Map(zoneId -> channel)
 export function parseRooms(s) {
   const out = new Map();
   for (const part of String(s || '').split(',')) {
     const [z, ch] = part.split('=').map((x) => x?.trim());
-    if (z && ch && zoneById[z]) out.set(z, ch.startsWith('#') ? ch : `#${ch}`);
+    if (z && ch && zoneById(z)) out.set(z, ch.startsWith('#') ? ch : `#${ch}`);
   }
   return out;
 }

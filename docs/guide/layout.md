@@ -2,6 +2,8 @@
 
 ```
 public/js/map.js        office layout, zones, hearing rules, A* (shared with server + agents)
+public/js/wing.js       the hallway wing: slots, halls and seeded channel rooms
+public/js/policy.js     channel room access policies (freeq's DSL + INVITE)
 public/js/render.js     vector renderer and lighting
 public/js/sprites.js    rpg.actor sheet loading + drawn last-resort characters
 public/js/stock.js      stock rpg.actor characters from the generator's parts
@@ -13,7 +15,7 @@ public/js/apps.js       workstation apps that run on plugin Workers (shared)
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js, channels.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
@@ -25,7 +27,7 @@ public/js/items.js      items: kinds, clean-up, stacks (shared); public/js/inven
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in
-server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channels ↔ areas
+server/freeq.js         freeq bridge: IRC over WebSocket, SASL ATPROTO-CHALLENGE, channel rooms + policies
 scripts/agent-sdk.mjs   agent SDK; scripts/agent.mjs is a demo agent
 scripts/roost.mjs       Roost CLI: terms, signup, office grant
 ```

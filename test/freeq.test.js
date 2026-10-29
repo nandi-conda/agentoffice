@@ -1,9 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Office } from '../server/office.js';
+import { LocalRuntime } from '../server/entities/runtime.js';
+import { KINDS } from '../server/entities/kinds.js';
+import { ZONES, isBlocked } from '../public/js/map.js';
 import { FreeqBridge, IrcClient, parseLine, saslLines, loadIdentity, cryptoResponder, oauthResponder, didKeyFor, base58btc, unb64url, b64url, parseRooms, ircNick } from '../server/freeq.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
+// Stand someone on a free tile inside a zone (a channel's room is ch-<name>).
+function stand(p, zoneId) {
+  const z = ZONES.find((x) => x.id === zoneId);
+  assert.ok(z, `no zone ${zoneId}`);
+  for (let y = z.y0; y <= z.y1; y++) for (let x = z.x0; x <= z.x1; x++) if (!isBlocked(x, y)) { p.x = x + 0.5; p.y = y + 0.5; return; }
+  assert.fail(`nowhere to stand in ${zoneId}`);
+}
 const enc = new TextEncoder();
 
 // A pretend freeq: just enough IRC to register, run SASL ATPROTO-CHALLENGE
@@ -165,7 +175,7 @@ test('a person signs in with pds-oauth, retrying with the DPoP nonce freeq relay
   for (const l of answers) assert.equal(JSON.parse(new TextDecoder().decode(unb64url(l.slice(13)))).method, 'pds-oauth');
 });
 
-test('populated channels attach to areas, and talk flows both ways', async () => {
+test('populated channels get their own rooms off the hallway, and talk flows both ways', async () => {
   const server = fakeFreeq({ verify: async (r) => r.method === 'crypto' || r.method === 'pds-oauth' });
   const office = new Office({}, { loadActor: null });
   const said = [];
@@ -188,14 +198,20 @@ test('populated channels attach to areas, and talk flows both ways', async () =>
   await office.handle(me, { t: 'hello', name: 'Alice' });
   await bridge.start();
   await tick();
-  assert.equal(bridge.bindings.get('lounge')?.channel, '#general'); // its natural home
-  assert.equal(bridge.bindings.get('open')?.channel, '#provisio'); // biggest one next
+  assert.equal(bridge.bindings.get('ch-general')?.channel, '#general');
+  assert.equal(bridge.bindings.get('ch-provisio')?.channel, '#provisio');
   assert.ok(![...bridge.bindings.values()].some((b) => b.channel === '#quiet'));
-  assert.ok(said.some((m) => m.t === 'freeq' && m.rooms.lounge.channel === '#general'));
+  assert.ok(said.some((m) => m.t === 'freeq' && m.rooms['ch-general'].channel === '#general'));
+  // The rooms are part of everyone's map, the busiest one biggest.
+  const wing = said.filter((m) => m.t === 'wing').pop().rooms;
+  assert.deepEqual(wing.map((r) => r.channel).sort(), ['#general', '#provisio']);
+  assert.equal(wing.find((r) => r.channel === '#provisio').tier, 'm'); // 9 minus the listener
+  assert.equal(wing.find((r) => r.channel === '#general').tier, 's');
+  assert.equal(ZONES.find((z) => z.id === 'ch-general').kind, 'room');
   // bob is drawn in the Lounge.
   const bobPeer = [...office.peers.values()].find((p) => p.kind === 'freeq' && p.name === 'bob');
   assert.ok(bobPeer);
-  me.x = 36; me.y = 25; // Lounge
+  stand(me, 'ch-general');
 
   // freeq -> office
   bob.say('#general', 'hi office');
@@ -222,7 +238,7 @@ test('populated channels attach to areas, and talk flows both ways', async () =>
   const gsaid = [];
   const guest = office.open({ readyState: 1, send: (s) => gsaid.push(JSON.parse(s)) });
   await office.handle(guest, { t: 'hello', name: 'Gus' });
-  guest.x = 36; guest.y = 26;
+  stand(guest, 'ch-general');
   await office.handle(guest, { t: 'chat', text: 'can anyone hear me' });
   await tick();
   assert.ok(gsaid.some((m) => m.t === 'freeq-note' && /signed-in/.test(m.text)));
@@ -259,7 +275,7 @@ test('someone in several channels is one person, standing where they last spoke'
   assert.match(p.note, /also #/);
 
   // Speaking in the other channel walks bob over there.
-  const other = first === 'lounge' ? '#dev' : '#general';
+  const other = first === 'ch-general' ? '#dev' : '#general';
   bob.say(other, 'over here now');
   await tick();
   assert.equal(p.freeqZone, bridge.zoneFor(other));
@@ -293,7 +309,7 @@ test('a failed freeq sign-in or a refused message tells the speaker why', async 
   await office.handle(me, { t: 'hello', name: 'Alice' });
   await bridge.start();
   await tick();
-  me.x = 36; me.y = 25;
+  stand(me, 'ch-general');
   await office.handle(me, { t: 'chat', text: 'one' });
   for (let i = 0; i < 20 && !said.some((m) => m.t === 'freeq-note'); i++) await tick();
   const fail = said.find((m) => m.t === 'freeq-note');
@@ -334,7 +350,7 @@ test('agents talk on freeq too: as their DID with a token, else as a did:key of 
     const said = [];
     const p = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did });
     await office.handle(p, { t: 'hello', name, kind: 'agent' });
-    p.x = 36; p.y = 25; // Lounge = #general
+    stand(p, 'ch-general');
     return { p, said };
   };
   bridge.rememberAgentToken('did:plc:bodhi', 'rmcp_secret', 'https://roost.latha.org/');
@@ -412,7 +428,7 @@ test('after a restart, only real comings and goings show, and missed messages ar
   await office1.handle(a1, { t: 'hello', name: 'Alice' });
   await bridge1.start();
   await tick();
-  assert.equal(bridge1.bindings.get('lounge')?.channel, '#general');
+  assert.equal(bridge1.bindings.get('ch-general')?.channel, '#general');
   bob.say('#general', 'before the restart');
   await tick();
   const before = Object.fromEntries([...office1.peers.values()].filter((p) => p.kind === 'freeq').map((p) => [p.name, { x: p.x, y: p.y }]));
@@ -427,12 +443,13 @@ test('after a restart, only real comings and goings show, and missed messages ar
   dave.join('#general');
   bob.say('#general', 'said while you were away');
 
-  // After: a fresh office, Alice back in the Lounge.
-  const office2 = new Office({}, { loadActor: null });
+  // After: a fresh office over the same entities (the wing remembers the room), Alice back in #general.
+  const office2 = new Office({}, { loadActor: null, runtime: new LocalRuntime({ kinds: KINDS, data: office1.runtime.data }) });
+  await office2.ready;
   const said = [];
   const a2 = office2.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) });
   await office2.handle(a2, { t: 'hello', name: 'Alice' });
-  a2.x = 36; a2.y = 25; // Lounge
+  stand(a2, 'ch-general');
   const bridge2 = new FreeqBridge({ office: office2, log: () => {}, keyStore, stateStore, openSocket: async () => server.open().socket, fetch: server.fetch(list) });
   await bridge2.restored;
   // bob and carol are back where they stood, before freeq has said anything.
@@ -460,8 +477,8 @@ test('after a restart, only real comings and goings show, and missed messages ar
   // The area's count is who's drawn there.
   await new Promise((r) => setTimeout(r, 300));
   const rooms = said.filter((m) => m.t === 'freeq').pop().rooms;
-  assert.equal(rooms.lounge.members, 2);
-  assert.equal(rooms.lounge.here, 2);
+  assert.equal(rooms['ch-general'].members, 2);
+  assert.equal(rooms['ch-general'].here, 2);
 
   // Someone who vanished without a PART we heard is gone after the next NAMES.
   const room = server.members.get('#general');

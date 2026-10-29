@@ -2,9 +2,16 @@
 // server, so it must stay free of DOM APIs.
 //
 // Coordinates are in tiles: x grows to the right, y grows downward.
+//
+// The core office below is fixed. Under it, a hallway wing of generated
+// channel rooms comes and goes (wing.js): applyWing() rebuilds the map
+// around it, so W, H, grid and blocked are live bindings and ZONES,
+// FURNITURE and SEATS are the same arrays with the wing's entries swapped.
 
-export const W = 48;
-export const H = 32;
+import { CORE_W, CORE_H, buildWing } from './wing.js';
+
+export let W = CORE_W;
+export let H = CORE_H;
 
 // Zone kinds decide who hears whom:
 //   open  - proximity: you hear people within HEAR_RADIUS tiles
@@ -153,13 +160,13 @@ add({ type: 'plant', id: 'p-open2', x: 33, y: 19, w: 1, h: 1, solid: true });
 
 // ---- walls ---------------------------------------------------------------
 // 0 floor, 1 wall, 2 glass, 3 void (outside)
-export const grid = new Uint8Array(W * H);
-const set = (x, y, v) => { if (x >= 0 && y >= 0 && x < W && y < H) grid[y * W + x] = v; };
+const core = new Uint8Array(CORE_W * CORE_H);
+const set = (x, y, v) => { if (x >= 0 && y >= 0 && x < CORE_W && y < CORE_H) core[y * CORE_W + x] = v; };
 const hline = (x0, x1, y, v = 1) => { for (let x = x0; x <= x1; x++) set(x, y, v); };
 const vline = (x, y0, y1, v = 1) => { for (let y = y0; y <= y1; y++) set(x, y, v); };
 const door = (x, y) => set(x, y, 0);
 
-hline(0, W - 1, 0); hline(0, W - 1, H - 1); vline(0, 0, H - 1); vline(W - 1, 0, H - 1);
+hline(0, CORE_W - 1, 0); hline(0, CORE_W - 1, CORE_H - 1); vline(0, 0, CORE_H - 1); vline(CORE_W - 1, 0, CORE_H - 1);
 // Den
 hline(0, 13, 13); vline(13, 0, 13); door(13, 10);
 // Booth strip
@@ -170,29 +177,60 @@ hline(1, 3, 17, 2); hline(5, 7, 17, 2); hline(9, 11, 17, 2);
 door(2, 17); door(6, 17); door(10, 17);
 vline(12, 13, 17, 2);
 // Lobby -> rest of office
-vline(13, 19, H - 1); door(13, 24); door(13, 25);
+vline(13, 19, CORE_H - 1); door(13, 24); door(13, 25);
 // Boardroom (glass)
-vline(34, 1, 11, 2); hline(35, W - 2, 11, 2); door(34, 6); door(34, 7);
+vline(34, 1, 11, 2); hline(35, CORE_W - 2, 11, 2); door(34, 6); door(34, 7);
 // Huddle (glass)
-vline(34, 11, 20, 2); hline(35, W - 2, 20, 2); door(34, 16);
+vline(34, 11, 20, 2); hline(35, CORE_W - 2, 20, 2); door(34, 16);
 // Kitchen / lounge separator and the corridor wall above them
 hline(13, 33, 20); door(21, 20); door(22, 20); door(29, 20); door(30, 20);
-vline(27, 20, H - 1); door(27, 24); door(27, 25);
+vline(27, 20, CORE_H - 1); door(27, 24); door(27, 25);
+
+const CORE_ZONES = [...ZONES], CORE_FURNITURE = [...FURNITURE], CORE_SEATS = [...SEATS];
+
+export let grid = core;
+// Blocked tiles combine walls and solid furniture footprints.
+export let blocked = new Uint8Array(0);
+// The channel rooms the map was last built with ({ id, channel, slot, tier }).
+export let WING = [];
+
+function rebuild(wing) {
+  W = wing.W; H = wing.H;
+  const g = new Uint8Array(W * H).fill(3);
+  for (let y = 0; y < CORE_H; y++) g.set(core.subarray(y * CORE_W, (y + 1) * CORE_W), y * W);
+  for (const c of wing.cells) if (c.x >= 0 && c.y >= 0 && c.x < W && c.y < H) g[c.y * W + c.x] = c.v;
+  const b = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) b[i] = g[i] ? 1 : 0;
+  for (const f of FURNITURE) {
+    if (!f.solid) continue;
+    for (let yy = Math.floor(f.y); yy < Math.ceil(f.y + f.h); yy++)
+      for (let xx = Math.floor(f.x); xx < Math.ceil(f.x + f.w); xx++)
+        if (xx >= 0 && yy >= 0 && xx < W && yy < H) b[yy * W + xx] = 1;
+  }
+  grid = g; blocked = b;
+}
+
+// Rebuild the map with these channel rooms (from the server's wing entity:
+// the `wing` field of welcome, and the `wing` message). Same input, same map,
+// on every client and on the server.
+export function applyWing(rooms = []) {
+  WING = (rooms || []).map(({ id, channel, slot, tier }) => ({ id, channel, slot, tier }));
+  const wing = buildWing(WING);
+  const swap = (arr, base, extra) => { arr.length = 0; arr.push(...base, ...extra); };
+  swap(ZONES, CORE_ZONES, wing.zones);
+  // Objects people uploaded (gallery.js) are placed at runtime: keep them.
+  swap(FURNITURE, CORE_FURNITURE, [...wing.furniture, ...FURNITURE.filter((f) => f.uploaded)]);
+  swap(SEATS, CORE_SEATS, wing.seats);
+  rebuild(wing);
+  return WING;
+}
+applyWing([]);
 
 export const isWall = (x, y) => {
   if (x < 0 || y < 0 || x >= W || y >= H) return true;
   return grid[y * W + x] !== 0;
 };
 
-// Blocked tiles combine walls and solid furniture footprints.
-export const blocked = new Uint8Array(W * H);
-for (let i = 0; i < W * H; i++) blocked[i] = grid[i] ? 1 : 0;
-for (const f of FURNITURE) {
-  if (!f.solid) continue;
-  for (let yy = Math.floor(f.y); yy < Math.ceil(f.y + f.h); yy++)
-    for (let xx = Math.floor(f.x); xx < Math.ceil(f.x + f.w); xx++)
-      if (xx >= 0 && yy >= 0 && xx < W && yy < H) blocked[yy * W + xx] = 1;
-}
 export const isBlocked = (x, y) => {
   if (x < 0 || y < 0 || x >= W || y >= H) return true;
   return blocked[y * W + x] === 1;
@@ -283,4 +321,10 @@ export function nearestInteractable(x, y, maxDist = 1.6) {
 }
 
 // The plugin-run objects, for the server (one entity each) and the client.
-export const PLUGIN_OBJECTS = FURNITURE.filter((f) => f.plugin);
+export const PLUGIN_OBJECTS = CORE_FURNITURE.filter((f) => f.plugin);
+
+// The generated room for a channel ('#general'), if it has one.
+export const channelZone = (channel) => {
+  const c = String(channel || '').toLowerCase();
+  return ZONES.find((z) => z.channel && z.channel.toLowerCase() === c) || null;
+};

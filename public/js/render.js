@@ -3,6 +3,7 @@
 // density. Sprites are drawn at whole-number scale with smoothing off.
 
 import { W, H, ZONES, FURNITURE, grid, zoneAt } from './map.js';
+import { CORE_W, CORE_H } from './wing.js';
 import { ROOMS, roomStatus, fmtTime } from './rooms.js';
 import { WALL_H, daylight, statusColor, colorFor, roundRect, wrapText } from './style.js';
 import { WALK } from './sprites.js';
@@ -15,12 +16,15 @@ const FLOORS = {
   tile: { base: '#f3f4f6', alt: '#e5e7eb', kind: 'checker' },
   stone: { base: '#e9e6e1', line: 'rgba(87,83,78,0.12)', kind: 'grid' },
   rug: { base: '#e6d8c3', line: 'rgba(120,80,40,0.09)', kind: 'planks' },
+  carpetTeal: { base: '#c7e3df', line: 'rgba(17,94,89,0.08)', kind: 'dots' },
+  carpetAmber: { base: '#ecdcbc', line: 'rgba(146,64,14,0.08)', kind: 'dots' },
+  moss: { base: '#d3e2c4', line: 'rgba(54,83,20,0.10)', kind: 'grid' },
 };
 
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 export function createRenderer(canvas) {
@@ -77,8 +81,10 @@ export function createRenderer(canvas) {
 
   // ---- floors ------------------------------------------------------------
   function drawFloors(vis, freeq = {}) {
+    // The core office's footing; the wing's halls and rooms bring their own
+    // floors, and the rest is outside.
     ctx.fillStyle = '#d9d4cc';
-    ctx.fillRect(S(0), S(0), S(W), S(H));
+    ctx.fillRect(S(0), S(0), S(CORE_W), S(CORE_H));
     for (const z of ZONES) {
       if (z.kind === 'room' && z.id.startsWith('booth')) continue;
       floorRect(z, vis);
@@ -128,7 +134,9 @@ export function createRenderer(canvas) {
   }
 
   // ---- walls -------------------------------------------------------------
-  const isW = (x, y) => x >= 0 && y >= 0 && x < W && y < H && grid[y * W + x] !== 0;
+  // Walls and glass; void (3, outside the building) is neither floor nor wall.
+  const isW = (x, y) => x >= 0 && y >= 0 && x < W && y < H && (grid[y * W + x] === 1 || grid[y * W + x] === 2);
+  const isVoid = (x, y) => x < 0 || y < 0 || x >= W || y >= H || grid[y * W + x] === 3;
 
   // Walls are drawn thin (cutaway style): a dark cap along the wall line and
   // a lit face wherever the wall isn't continued toward the camera.
@@ -138,7 +146,7 @@ export function createRenderer(canvas) {
     const below = isW(x, y + 1);
     const l = isW(x - 1, y) ? 0 : T0, r = isW(x + 1, y) ? 1 : T1;
     const t = isW(x, y - 1) ? 0 : T0, b = below ? 1 : T1;
-    const outer = y === 0 || y === H - 1 || x === 0 || x === W - 1;
+    const outer = isVoid(x, y - 1) || isVoid(x, y + 1) || isVoid(x - 1, y) || isVoid(x + 1, y);
     if (!below) {
       const fy = y + T1 - WALL_H;
       if (v === 2) {
@@ -246,6 +254,7 @@ export function createRenderer(canvas) {
       case 'screen': return drawScreen(f, st);
       case 'panel': return drawPanel(f, st);
       case 'rug': return drawRug(f);
+      case 'sign': return drawSign(f, st);
     }
   }
 
@@ -412,7 +421,7 @@ export function createRenderer(canvas) {
 
   function drawSofa(f) {
     const { x, y, w, h } = f;
-    const c = f.id === 'lobby-sofa' ? ['#0f766e', '#115e59', '#14b8a6'] : ['#4f46e5', '#3730a3', '#6366f1'];
+    const c = f.color || (f.id === 'lobby-sofa' ? ['#0f766e', '#115e59', '#14b8a6'] : ['#4f46e5', '#3730a3', '#6366f1']);
     ellipse(x + w / 2, y + h + 0.05, w / 2, 0.2, 'rgba(0,0,0,0.12)');
     if (f.facing === 'up') {
       // seen from behind: tall back at the front
@@ -616,6 +625,47 @@ export function createRenderer(canvas) {
     ctx.fillText(f.emoji || '🧩', S(x + 0.5), S(y + 1 - hgt - 0.05 + bob));
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.1, c: 'rgba(167,139,250,0.3)' });
+  }
+
+  // A channel room's name plate on the hall wall beside its door, coloured
+  // by who may walk in (green: anyone; amber: the door has a policy).
+  function drawSign(f, st) {
+    const r = st.wing?.find((x) => x.id === f.zone);
+    const open = r?.access?.open !== false;
+    const cx = f.x + (f.side === 'w' ? 0.78 : 0.22), top = f.y + T1 - WALL_H + 0.18;
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    roundRect(ctx, S(cx - 0.3), S(top + 0.05), S(0.6), S(0.5), S(0.08)); ctx.fill();
+    ctx.fillStyle = open ? '#15803d' : '#b45309';
+    roundRect(ctx, S(cx - 0.32), S(top), S(0.64), S(0.5), S(0.08)); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `700 ${Math.max(7, S(0.3))}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('#', S(cx), S(top + 0.26));
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
+  // Readable plates for the signs: "#freeq · 📜 accept rules", on the hall side.
+  function drawSignLabels(st) {
+    if (view.T < 18) return;
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (const f of FURNITURE) {
+      if (f.type !== 'sign') continue;
+      const r = st.wing?.find((x) => x.id === f.zone);
+      if (!r) continue;
+      const a = r.access || { icon: '🚪', text: 'open', open: true };
+      // Over the room's side of the wall, so two facing signs never collide.
+      const s = toScreen(f.x + (f.side === 'w' ? 0.1 : 0.9), f.y - 0.55);
+      if (s.x < -200 || s.x > vw + 200 || s.y < -20 || s.y > vh + 20) continue;
+      const label = `${a.icon} ${clipText(r.channel, 140)} · ${a.text}`;
+      const lw = ctx.measureText(label).width + 14, lh = 18;
+      const x = f.side === 'w' ? s.x - lw : s.x;
+      ctx.fillStyle = a.open ? 'rgba(21,128,61,0.9)' : 'rgba(146,64,14,0.92)';
+      roundRect(ctx, x, s.y - lh / 2, lw, lh, 9); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, x + 7, s.y + 0.5);
+    }
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawWhiteboard(f, st) {
@@ -912,7 +962,7 @@ export function createRenderer(canvas) {
   // Each area's name in its top-left corner, with the booking state of a
   // bookable room and the freeq channel it's bridged to alongside.
   function drawZoneLabel(z, st) {
-    if (z.id === 'booths') return;
+    if (z.id === 'booths' || z.label === false) return;
     const a = toScreen(z.x0 + 0.15, z.y0 + 0.15), b = toScreen(z.x1 + 0.85, z.y1 + 0.6);
     // Stick to the visible part of the area, so its name stays in view while you're in it.
     const x = Math.max(a.x, 8), y = Math.max(a.y, 8);
@@ -987,7 +1037,7 @@ export function createRenderer(canvas) {
     ctx.globalCompositeOperation = 'screen';
     // sunlight from the north windows
     if (L.sun > 0) {
-      for (let x = 1; x < W - 1; x++) {
+      for (let x = 1; x < CORE_W - 1; x++) {
         if (x % 3 === 0 || isW(x, 1)) continue;
         const a = toScreen(x + 0.1, 0.7), b = toScreen(x + 0.9, 0.7);
         const c = toScreen(x + 1.6, 4.2), d = toScreen(x + 0.8, 4.2);
@@ -1034,7 +1084,7 @@ export function createRenderer(canvas) {
     const items = [];
     for (let y = Math.max(0, Math.floor(vis.y0)); y < Math.min(H, Math.ceil(vis.y1)); y++)
       for (let x = Math.max(0, Math.floor(vis.x0)); x < Math.min(W, Math.ceil(vis.x1)); x++)
-        if (grid[y * W + x]) items.push({ k: y + T1 + 0.01, x, y, wall: true });
+        if (grid[y * W + x] === 1 || grid[y * W + x] === 2) items.push({ k: y + T1 + 0.01, x, y, wall: true });
     for (const f of FURNITURE) {
       if (f.type === 'rug') continue;
       if (f.x > vis.x1 || f.x + f.w < vis.x0 || f.y > vis.y1 + 2 || f.y + f.h < vis.y0) continue;
@@ -1082,6 +1132,7 @@ export function createRenderer(canvas) {
     // labels sit above the lighting so they stay readable at night
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawLabelLayer(st);
+    drawSignLabels(st);
     const z = zoneAt(st.cam.x, st.cam.y);
     return z;
   }

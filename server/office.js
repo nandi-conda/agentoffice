@@ -8,7 +8,8 @@
 // and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
+import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
+import * as map from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js';
 import { stamp } from '../public/js/time.js';
@@ -16,6 +17,8 @@ import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runti
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
 import { str, int, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
 import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine } from '../public/js/items.js';
+import { mayEnter } from './entities/channels.js';
+import { summary as accessSummary } from '../public/js/policy.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -80,6 +83,8 @@ export class Office {
     this.runtime.setWorld?.(this.worldApi());
     this.mirror = new Map(mirror || []); // entity address -> what it shows
     this.onMirror = onMirror;
+    // The channel wing, as last mirrored (a hibernation wake has it at once).
+    this.layout(this.mirror.get('wing:main'), false);
     this.waves = saved.counters?.waves || saved.waves || 0;
     this.shouts = [];
     // When this copy of the office started; a recent time means a restart
@@ -129,6 +134,43 @@ export class Office {
       const v = await this.ref(`uobj:${f.id}`).view();
       if (!this.mirror.has(`uobj:${f.id}`)) { this.mirror.set(`uobj:${f.id}`, v); this.onMirror(`uobj:${f.id}`); }
     }));
+    this.layout(this.mirror.get('wing:main'), false);
+  }
+
+  // ---- the channel wing (entities/channels.js, public/js/wing.js) ----------
+  // Rebuild the map around the wing's rooms and tell everyone.
+  layout(rooms, announce = true) {
+    rooms = Array.isArray(rooms) ? rooms : [];
+    applyWing(rooms);
+    // The World only publishes to topics it knows have listeners; a new
+    // room's topic gets its listener (the room) as it's made.
+    // Same for each room's door, which the World checks at the threshold.
+    for (const r of rooms) {
+      for (const t of [`topic:zone:${r.id}`, `chan:${r.id}`]) {
+        if (!this.mirror.has(t)) this.bg(this.ref(t).view().then((v) => { if (!this.mirror.has(t)) { this.mirror.set(t, v); this.onMirror(t); } }));
+      }
+    }
+    if (announce) this.broadcast({ t: 'wing', rooms });
+  }
+
+  get wing() { return this.mirror.get('wing:main') || []; }
+
+  // A channel room's door rule for p. Until the door's own view arrives, the
+  // wing's copy of the policy stands in (closed rather than open).
+  door(zoneId, p) {
+    const door = this.mirror.get(`chan:${zoneId}`) || { policy: this.wing.find((r) => r.id === zoneId)?.policy || null };
+    return mayEnter(door, this.who(p));
+  }
+
+  // A channel source (the freeq bridge, or anything else that knows of
+  // channels) offers what it has: [{ name, members, topic }]. Each gets a
+  // room off the hallway. Returns channel ('#name', lowercase) -> zone id.
+  async offerChannels(source, channels) {
+    const zones = await this.ref('wing:main').offer(source, channels);
+    // The mirror push normally got here first; this covers a slow one.
+    const ids = new Set(map.ZONES.map((z) => z.id));
+    if (Object.values(zones).some((id) => !ids.has(id))) this.layout(await this.ref('wing:main').view());
+    return zones;
   }
 
   persisted() {
@@ -299,6 +341,7 @@ export class Office {
       case 'gallery': return this.broadcast({ t: 'gallery', items: this.gallery });
       case 'floor': return this.broadcast({ t: 'floor', items: this.floor });
       case 'pomodoro': return this.broadcastPomo();
+      case 'wing': return this.layout(value);
     }
   }
 
@@ -316,6 +359,7 @@ export class Office {
       bookings: this.bookings,
       upSince: this.upSince,
       freeq: this.freeq?.status() || null,
+      channels: this.wing,
       // How each plugin object was last reached: binding, builtin or offline.
       objects: Object.fromEntries(PLUGIN_OBJECTS.map((f) => [f.id, this.mirror.get(`plugin:${f.id}`)?.via || 'unused'])),
       // Uploaded objects and how each last ran (dynamic-worker, worker-thread, offline).
@@ -442,6 +486,7 @@ export class Office {
   remoteChat({ zoneId, channel, peer, name, text, ts = null, backfill = false }) {
     const msg = { t: 'chat', id: peer?.id || `freeq:${name}`, name: clip(name, 32), text: clip(text, 500), ts: ts || this.now(), scope: channel, freeq: true, ...(backfill ? { backfill: true } : {}) };
     const tags = mentionTags(msg.text);
+    this.remember(zoneId, { name: msg.name, text: msg.text, ts: msg.ts, freeq: true });
     for (const q of this.peers.values()) {
       if (!q.ready || q.kind === 'freeq') continue;
       const hit = zoneAt(q.x, q.y)?.id === zoneId;
@@ -451,6 +496,41 @@ export class Office {
   }
 
   ownerKey(p) { return p.did || `${p.kind}:${p.name}`; }
+
+  // A line said in a channel room, kept by the room for whoever walks in next.
+  remember(zoneId, line) {
+    if (map.ZONES.some((z) => z.id === zoneId && z.channel)) this.bg(this.ref(`chan:${zoneId}`).say(line));
+  }
+
+  // Channel rooms: { t: 'chan', op, ref?, ... }, answered with { t: 'chan', op, ref, ... } or an error.
+  //   open { name, access?, rules? }   close { name }   access { name, access, rules? }
+  //   check { room }   accept { room, hash }   admit { room, to }
+  async chan(p, m) {
+    const ref = m.ref ?? null, room = String(m.room || '');
+    const calls = {
+      open: () => this.call(p, 'wing:main', 'open', [String(m.name || ''), m.access, m.rules]),
+      close: () => this.call(p, 'wing:main', 'close', [String(m.name || '')]),
+      access: () => this.call(p, 'wing:main', 'setAccess', [String(m.name || ''), m.access, m.rules]),
+      check: () => this.call(p, `chan:${room}`, 'check'),
+      accept: () => this.call(p, `chan:${room}`, 'accept', [String(m.hash || '')]),
+      // Knock on an invite-only room: everyone inside hears it and can let you in.
+      knock: () => {
+        const inside = [...this.peers.values()].filter((q) => q.ready && q.kind !== 'freeq' && zoneAt(q.x, q.y)?.id === room);
+        for (const q of inside) this.sendTo(q, { t: 'wave', from: p.id, name: p.name, kind: 'knock', chanRoom: room });
+        return { ok: inside.length > 0, inside: inside.length, ...(inside.length ? {} : { error: 'nobody is inside to let you in' }) };
+      },
+      admit: () => {
+        // Let in by peer id: remember them by who they are, so it lasts.
+        const q = this.peers.get(m.to);
+        if (q?.ready) this.sendTo(q, { t: 'toast', text: `🔓 ${p.name} let you into ${this.wing.find((r) => r.id === room)?.channel || 'the room'}` });
+        return this.call(p, `chan:${room}`, 'admit', [q ? this.ownerKey(q) : String(m.to || '')]);
+      },
+    };
+    if (!calls[m.op] || (m.op !== 'open' && m.op !== 'close' && m.op !== 'access' && !this.wing.some((r) => r.id === room))) return this.sendTo(p, { t: 'error', message: 'no such channel room', ref });
+    const r = await calls[m.op]().catch((e) => ({ error: e.message }));
+    if (r?.error) return this.sendTo(p, { t: 'error', message: r.error, ref });
+    this.sendTo(p, { t: 'chan', op: m.op, ref, room: m.op === 'check' ? room : r.room || room, result: r });
+  }
 
   async handle(p, m) {
     await this.ready;
@@ -476,6 +556,7 @@ export class Office {
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
       case 'av': return this.av(p, m);
       case 'book': return this.book(p, m);
+      case 'chan': return this.chan(p, m);
       case 'rtc': return this.rtc(p, m);
       case 'ping': return this.sendTo(p, { t: 'pong', ts: m.ts });
     }
@@ -517,7 +598,7 @@ export class Office {
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
-      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(),
+      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(), wing: this.wing,
       gallery: this.gallery,
       floor: this.floor, items: key ? arrival?.items || [] : p.items, keeps: !!key,
     });
@@ -544,7 +625,7 @@ export class Office {
   }
 
   move(p, m) {
-    const x = num(m.x, 0, 48, p.x), y = num(m.y, 0, 32, p.y);
+    const x = num(m.x, 0, map.W, p.x), y = num(m.y, 0, map.H, p.y);
     if (isBlocked(Math.floor(x), Math.floor(y)) && !p.seat) return;
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
@@ -553,6 +634,15 @@ export class Office {
     if (to?.bookable && to !== from && lockedOut(this.bookings, to.id, p, this.now())) {
       const b = activeBooking(this.bookings, to.id, this.now());
       return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${stamp(b.end)}. Knock to be let in.` });
+    }
+    // A channel room's access policy: the door stays shut to whoever doesn't meet it.
+    if (to?.channel && to !== from) {
+      const d = this.door(to.id, p);
+      if (!d.ok) {
+        const a = accessSummary(this.mirror.get(`chan:${to.id}`)?.policy || this.wing.find((r) => r.id === to.id)?.policy);
+        const how = d.needs.map((n) => n.label).join(d.needs.some((n) => n.or) ? ' or ' : ', ');
+        return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, door: true, text: `${a.icon} ${to.name} (${a.text}): ${how ? `${how[0].toLowerCase()}${how.slice(1)} to get in.` : 'closed.'} Read the sign by the door.` });
+      }
     }
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (p.seat && m.moving) p.seat = null;
@@ -593,6 +683,7 @@ export class Office {
         if (note) { p.freeqNote = note; p.freeqNoteAt = this.now(); }
       });
     }
+    if (zone?.channel) this.remember(zone.id, { name: p.name, text: msg.text, ts: t });
     const hears = (q) => (bridged ? zoneAt(q.x, q.y) === zone : canHear(p, q));
     // Mentions reach the person anywhere, which is how you tap someone on
     // the shoulder across the office (and how agents get asked things).

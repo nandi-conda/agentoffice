@@ -658,7 +658,8 @@ const rpcError = (status, code, message) => Response.json({ jsonrpc: '2.0', erro
 
 // Named places agents can walk to.
 const PLACES = {
-  zones: Object.fromEntries(ZONES.map((z) => [z.id, z.name])),
+  // Channel rooms come and go with the wing, so this is read each time.
+  get zones() { return Object.fromEntries(ZONES.map((z) => [z.id, z.name])); },
   things: ['coffee', 'vending', 'whiteboard', 'noticeboard', 'pomodoro', 'arcade', 'arcade2', 'reception', 'fridge', 'sofa1', 'board-table', 'huddle-table'],
   desks: 'desk-1 … desk-26, den-*',
 };
@@ -670,7 +671,7 @@ function findPeer(c, q) {
 
 export function resolvePlace(place, c) {
   const q = String(place).trim().toLowerCase();
-  const zone = ZONES.find((z) => z.id === q || z.name.toLowerCase() === q);
+  const zone = ZONES.find((z) => z.id === q || z.name.toLowerCase() === q || (z.channel && z.channel.toLowerCase() === `#${q.replace(/^#/, '')}`));
   if (zone) {
     // Middle of the zone; the pathfinder steps around furniture.
     return { x: (zone.x0 + zone.x1 + 1) / 2, y: (zone.y0 + zone.y1 + 1) / 2, label: zone.name };

@@ -129,6 +129,8 @@ if (process.env.FREEQ !== 'off' && !process.env.OFFLINE) {
     url: process.env.FREEQ_URL || FREEQ_URL,
     rooms: process.env.FREEQ_ROOMS || '',
     minMembers: Number(process.env.FREEQ_MIN_MEMBERS) || 2,
+    // Channels that always get a room (they may be unlisted, like #freeq).
+    always: process.env.FREEQ_CHANNELS ?? '#freeq',
     openSocket: async (url) => new WebSocket(url),
     keyStore: {
       get: async () => { try { return JSON.parse(await readFile(keyFile, 'utf8')); } catch { return null; } },
