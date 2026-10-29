@@ -25,8 +25,24 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, rally: 1.5, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, rally: 1.5, sprite: 1, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
+
+// How tall an object stands: an uploaded one with its own pixels is as tall
+// as its sprite (16 rows to a tile).
+const heightOf = (f) => (f.type === 'sprite' && f.sprite ? f.sprite.rows.length / 16 : HEIGHTS[f.type]);
+
+// '#a78bfa' -> [167, 139, 250] (null when it isn't a colour).
+function rgb(hex) {
+  const m = /^#([0-9a-f]{6}|[0-9a-f]{3})(?:[0-9a-f]{1,2})?$/i.exec(hex || '');
+  if (!m) return null;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+}
+// A darker shade, for the side of a cabinet.
+const shade = (hex, k = 0.62) => { const c = rgb(hex); return c ? `rgb(${c.map((v) => Math.round(v * k)).join(',')})` : '#1f2937'; };
+// The colour as a light: see-through.
+const glowOf = (hex, a) => { const c = rgb(hex); return c ? `rgba(${c.join(',')},${a})` : `rgba(167,139,250,${a})`; };
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -188,7 +204,7 @@ export function createRenderer(canvas) {
 
   // ---- furniture ---------------------------------------------------------
   function drawFurniture(f, st) {
-    const hgt = HEIGHTS[f.type] ?? 0.5;
+    const hgt = heightOf(f) ?? 0.5;
     const { x, y, w, h } = f;
     switch (f.type) {
       case 'desk': return drawDesk(f, st);
@@ -242,7 +258,7 @@ export function createRenderer(canvas) {
       case 'eightball': return drawEightBall(f, st);
       case 'kiosk': return drawKiosk(f, st);
       case 'rally': return drawRally(f, st);
-      case 'upload': return drawUpload(f, st);
+      case 'sprite': return drawSprite(f, st);
       case 'whiteboard': return drawWhiteboard(f, st);
       case 'board': return drawNoticeboard(f, st);
       case 'reception': return drawReception(f, st);
@@ -512,7 +528,9 @@ export function createRenderer(canvas) {
   function drawArcade(f, st) {
     const { x, y, w, h } = f;
     const hgt = HEIGHTS.arcade;
-    const c = f.id === 'arcade' ? ['#7c3aed', '#5b21b6'] : ['#db2777', '#9d174d'];
+    // The Lounge's first cabinet is violet; any other is its glow colour.
+    const body = f.id === 'arcade' ? '#7c3aed' : f.glow || '#db2777';
+    const c = [body, shade(body, 0.7)];
     box(x + 0.06, y, w - 0.12, h, hgt, c[0], c[1], 0.08);
     const fy = y + h - hgt;
     ctx.fillStyle = '#fde047'; ctx.fillRect(S(x + 0.12), S(fy + 0.06), S(0.76), S(0.14));
@@ -525,7 +543,7 @@ export function createRenderer(canvas) {
     ctx.fillStyle = '#1f2937'; ctx.fillRect(S(x + 0.1), S(fy + 0.8), S(0.8), S(0.18));
     ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(S(x + 0.35), S(fy + 0.88), S(0.05), 0, 7); ctx.fill();
     ctx.fillStyle = '#3b82f6'; ctx.beginPath(); ctx.arc(S(x + 0.6), S(fy + 0.88), S(0.05), 0, 7); ctx.fill();
-    st.lights.push({ x: x + 0.5, y: y + 1.2, r: 1.4, c: f.id === 'arcade' ? 'rgba(167,139,250,0.5)' : 'rgba(244,114,182,0.5)' });
+    st.lights.push({ x: x + 0.5, y: y + 1.2, r: 1.4, c: glowOf(body, 0.5) });
   }
 
   // ---- plugin objects ------------------------------------------------------
@@ -595,17 +613,24 @@ export function createRenderer(canvas) {
   function drawKiosk(f, st) {
     const { x, y } = f;
     const hgt = HEIGHTS.kiosk;
-    const glow = objGlow(f, st, '#22d3ee');
+    const glow = objGlow(f, st, f.glow || '#22d3ee');
     ctx.fillStyle = '#64748b'; ctx.fillRect(S(x + 0.44), S(y + 0.3), S(0.12), S(0.65));
     ellipse(x + 0.5, y + 0.92, 0.3, 0.1, '#475569');
     const fy = y + 1 - hgt;
     ctx.fillStyle = '#1e293b'; roundRect(ctx, S(x + 0.08), S(fy), S(0.84), S(0.66), S(0.08)); ctx.fill();
     ctx.fillStyle = glow; roundRect(ctx, S(x + 0.14), S(fy + 0.06), S(0.72), S(0.5), S(0.05)); ctx.fill();
-    // a friendly face that blinks
-    const blink = (st.time % 4000) < 150;
-    ctx.fillStyle = '#0f172a';
-    for (const ex of [0.36, 0.64]) ctx.fillRect(S(x + ex - 0.04), S(fy + 0.2), S(0.08), S(blink ? 0.02 : 0.1));
-    ctx.beginPath(); ctx.arc(S(x + 0.5), S(fy + 0.36), S(0.1), 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineWidth = Math.max(1, S(0.03)); ctx.strokeStyle = '#0f172a'; ctx.stroke();
+    if (f.emoji) {
+      // An uploaded one shows its emoji on the screen.
+      ctx.font = `${S(0.36)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(f.emoji, S(x + 0.5), S(fy + 0.32));
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    } else {
+      // a friendly face that blinks
+      const blink = (st.time % 4000) < 150;
+      ctx.fillStyle = '#0f172a';
+      for (const ex of [0.36, 0.64]) ctx.fillRect(S(x + ex - 0.04), S(fy + 0.2), S(0.08), S(blink ? 0.02 : 0.1));
+      ctx.beginPath(); ctx.arc(S(x + 0.5), S(fy + 0.36), S(0.1), 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineWidth = Math.max(1, S(0.03)); ctx.strokeStyle = '#0f172a'; ctx.stroke();
+    }
     st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.2, c: 'rgba(34,211,238,0.35)' });
   }
 
@@ -630,18 +655,29 @@ export function createRenderer(canvas) {
     if (live) st.lights.push({ x: x + 0.5, y: y + 0.6, r: 1.4, c: 'rgba(245,158,11,0.35)' });
   }
 
-  // An uploaded object (gallery.js): a plinth with its emoji floating over it.
-  function drawUpload(f, st) {
+  // An object drawn in its plugin's own pixels (the manifest's sprite): 16
+  // to a tile, standing on its tile, centred.
+  function drawSprite(f, st) {
     const { x, y } = f;
-    const hgt = HEIGHTS.upload;
-    const glow = objGlow(f, st, f.glow || '#a78bfa');
-    box(x + 0.2, y + 0.35, 0.6, 0.55, 0.45, '#e7e5e4', '#a8a29e', 0.06);
-    ctx.fillStyle = glow; ctx.fillRect(S(x + 0.2), S(y + 0.35 - 0.45), S(0.6), S(0.05));
-    const bob = 0.05 * Math.sin(st.time / 500 + x);
-    ctx.font = `${S(0.5)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(f.emoji || '🧩', S(x + 0.5), S(y + 1 - hgt - 0.05 + bob));
-    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.1, c: 'rgba(167,139,250,0.3)' });
+    const sp = f.sprite;
+    if (!sp) return drawKiosk(f, st);
+    const px = 1 / 16, rows = sp.rows, w = Math.max(...rows.map((r) => r.length));
+    const left = x + (1 - w * px) / 2, top = y + 0.95 - rows.length * px;
+    ctx.fillStyle = 'rgba(30,27,24,0.13)';
+    roundRect(ctx, S(left + 0.04), S(y + 0.82), S(w * px), S(0.2), S(0.1)); ctx.fill();
+    // One rect per run of a colour, a pixel's overlap so no seams show.
+    for (let j = 0; j < rows.length; j++) {
+      const r = rows[j];
+      for (let i = 0; i < r.length;) {
+        const c = sp.palette[r[i]];
+        let n = 1;
+        while (i + n < r.length && r[i + n] === r[i]) n++;
+        if (c) { ctx.fillStyle = c; ctx.fillRect(S(left + i * px), S(top + j * px), S(n * px) + 0.5, S(px) + 0.5); }
+        i += n;
+      }
+    }
+    const glow = objGlow(f, st, f.glow);
+    if (glow) st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.1, c: glowOf(glow, 0.3) });
   }
 
   // A channel room's name plate on the hall wall beside its door, coloured
@@ -999,7 +1035,7 @@ export function createRenderer(canvas) {
     const o = f.plugin && st.objects?.[f.id];
     if (!o) return;
     const lift = f.type === 'jukebox' ? 0.75 : 0.15; // clear of the jukebox's floating notes
-    const s = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - lift);
+    const s = toScreen(f.x + f.w / 2, f.y + f.h - (heightOf(f) ?? 0.5) - lift);
     const label = o.display?.label && (!o.display.until || o.display.until > st.serverNow()) ? o.display.label : null;
     let top = s.y;
     if (label && !far) {
@@ -1058,7 +1094,7 @@ export function createRenderer(canvas) {
     const out = [];
     for (const f of FURNITURE) {
       if (f.type === 'rug') continue;
-      const hgt = HEIGHTS[f.type] ?? 0.4;
+      const hgt = heightOf(f) ?? 0.4;
       const p = toScreen(f.x - 0.05, f.y - hgt - 0.05), q = toScreen(f.x + f.w + 0.05, f.y + f.h + 0.05);
       if (q.x < 0 || p.x > vw || q.y < 0 || p.y > vh) continue;
       out.push({ x: p.x, y: p.y, w: q.x - p.x, h: q.y - p.y });
@@ -1080,7 +1116,7 @@ export function createRenderer(canvas) {
     // Sitting at a desk, the prompt (use the computer) belongs on the monitor, not the chair.
     if (f.desk) f = FURNITURE.find((d) => d.id === f.desk && d.type === 'desk') || f;
     const lift = f.type === 'jukebox' ? 0.6 : f.type === 'desk' ? 0.75 : 0.1;
-    const top = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - lift);
+    const top = toScreen(f.x + f.w / 2, f.y + f.h - (heightOf(f) ?? 0.5) - lift);
     const x = Math.max(6, Math.min(vw - size.w - 6, top.x - size.w / 2));
     const y = Math.max(6, Math.min(vh - size.h - 6, top.y - size.h - 10));
     placed.push({ x, y, w: size.w, h: size.h + 8 });
@@ -1217,14 +1253,14 @@ export function createRenderer(canvas) {
     // mouse hover: a faint outline on what a click would use
     if (st.hover && st.hover !== st.target) {
       const f = st.hover;
-      const hgt = HEIGHTS[f.type] ?? 0.4;
+      const hgt = heightOf(f) ?? 0.4;
       ctx.strokeStyle = 'rgba(37,99,235,0.45)'; ctx.lineWidth = 1.5;
       roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.stroke();
     }
     // interaction target highlight
     if (st.target) {
       const f = st.target;
-      const hgt = HEIGHTS[f.type] ?? 0.4;
+      const hgt = heightOf(f) ?? 0.4;
       ctx.fillStyle = `rgba(96,165,250,${0.12 + 0.06 * Math.sin(st.time / 250)})`;
       roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.fill();
       ctx.strokeStyle = 'rgba(37,99,235,0.9)'; ctx.lineWidth = 2;

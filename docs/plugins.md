@@ -15,14 +15,17 @@ people [upload](uploads.md). The office ships these:
 | ☕ Coffee machine | Kitchen | `plugins/wasm-coffee` | Pours you a coffee into your inventory and counts every cup. The office adds the mug in your hand and the coffee-chat nudge. |
 | 🛎️ Reception desk | Lobby | `plugins/wasm-reception` | Counts every wave and knock for its sign (an office `wave` event, so nobody can bump it by hand), next to the coffee machine's cups and the pomodoro's rounds. E rings the bell on the desk, once every 10 s. |
 | 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
-| 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | The Byte Snake leaderboard both cabinets share: the top 20, best first. The game runs in your browser; a finished game's score becomes its `score:<points>` action. |
+| 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | Byte Snake and its leaderboard (the top 20, best first), shared by both cabinets. Its panel asks the browser to play the game (`Ui::game`); a finished round comes back as `score:<points>`. Upload `arcade.wasm` for another cabinet with a board of its own. |
 | 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
 | 🖍️ Whiteboard | Boardroom | `plugins/wasm-whiteboard` | The shared board. Checks each stroke, signs it with who drew it and puts it on its **feed** (the last 3000 strokes); anyone can wipe it. |
 | 📅 Meeting room door panels | By each bookable room's door (5) | `plugins/wasm-rooms` | Each keeps its room's bookings and every rule about them: 15 min to 4 h, 14 days ahead, no overlaps, 12 upcoming per person; reminders, start/end notes (`notify`), letting knockers in, releasing no-shows on its `wakeAt`, and noticing holders walk in (`watch`). See [meeting rooms](#meeting-rooms) below. |
 
-The coffee machine, notice board, arcade, pomodoro and room panels draw themselves in the
-browser (the cup count on the reception desk, sticky notes, the high scores
-next to Byte Snake, the tomato clock and the den's countdown), from what they
+These and [uploaded objects](uploads.md) are one system: the same plugin
+contract, the same panels and games, the same looks (an upload's manifest
+picks one, or brings its own pixel sprite). The coffee machine, notice board,
+pomodoro and room panels draw themselves in the
+browser (the cup count on the reception desk, sticky notes, the tomato clock
+and the den's countdown), from what they
 put in `display.data`. The whiteboard's strokes are far bigger than that, so
 they go on its [feed](#the-feed) instead, and the browser draws them on the
 boardroom wall and in its full-size editor. These used to be core

@@ -1,23 +1,15 @@
-// The lounge arcade cabinet: a small snake game with an office-wide
-// leaderboard.
-
-export function openSnake(modal, { scores, onScore }) {
+// Byte Snake, the game the arcade cabinets play, and one of the browser games a plugin's panel can ask for
+// (Ui::game("snake", action)): mounted into el above the panel, and a
+// finished round's score goes to onScore. Returns { stop }.
+export function mountSnake(el, { onScore }) {
   const N = 20, CELL = 22;
-  modal.open(`
+  el.innerHTML = `
     <div class="arcade">
-      <h2>Byte Snake</h2>
       <p class="muted small">Arrow keys or WASD. Eat the bugs, ship the features.</p>
-      <div class="arcade-row">
-        <canvas class="snake" width="${N * CELL}" height="${N * CELL}"></canvas>
-        <div class="leader"><h3>Office high scores</h3><ol class="scores"></ol></div>
-      </div>
-    </div>`);
-  const el = modal.body;
+      <canvas class="snake" width="${N * CELL}" height="${N * CELL}"></canvas>
+    </div>`;
   const cv = el.querySelector('.snake');
   const ctx = cv.getContext('2d');
-  const list = el.querySelector('.scores');
-  const showScores = (s) => { list.innerHTML = s.map((x) => `<li><span>${esc(x.name)}</span><b>${x.score}</b></li>`).join('') || '<li class="muted">No scores yet</li>'; };
-  showScores(scores);
 
   let snake, dir, next, food, score, dead, timer;
   function reset() {
@@ -70,9 +62,6 @@ export function openSnake(modal, { scores, onScore }) {
     if (e.key === ' ' && dead) { reset(); e.preventDefault(); }
   };
   window.addEventListener('keydown', onKey, true);
-  modal.onclose = () => { clearInterval(timer); window.removeEventListener('keydown', onKey, true); };
   reset();
-  return { scores: showScores };
+  return { stop() { clearInterval(timer); window.removeEventListener('keydown', onKey, true); } };
 }
-
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

@@ -249,6 +249,22 @@ pub struct Ui {
     /// Up to 6.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub buttons: Vec<Button>,
+    /// A game the browser plays on top of the panel; see [`Game`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game: Option<Game>,
+}
+
+/// A game that runs in the browser of whoever opened the panel, above the
+/// rest of it. When a round ends the browser sends `<action>:<score>` back
+/// to your object (only scores over 0), so keeping a leaderboard is up to
+/// you. The office's games: `snake` (Byte Snake). Browsers that don't know
+/// the game just show the panel; agents never see it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Game {
+    pub kind: String,
+    /// The action a finished round's score comes back as: `score` sends `score:120`.
+    pub action: String,
 }
 
 impl Ui {
@@ -269,6 +285,12 @@ impl Ui {
     /// The highlighted button.
     pub fn primary(mut self, label: impl Into<String>, action: impl Into<String>) -> Self {
         self.buttons.push(Button { label: label.into(), action: action.into(), primary: true });
+        self
+    }
+    /// Play one of the office's browser games above the panel (`snake`);
+    /// a finished round comes back as `<action>:<score>`.
+    pub fn game(mut self, kind: impl Into<String>, action: impl Into<String>) -> Self {
+        self.game = Some(Game { kind: kind.into(), action: action.into() });
         self
     }
     /// Every action id this panel can send back.

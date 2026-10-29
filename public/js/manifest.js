@@ -11,6 +11,18 @@ export const MANIFEST_SECTION = 'agentoffice.manifest';
 const MAX_BYTES = 8 * 1024;
 const MAX_ACTIONS = 24;
 
+// How an object can be drawn: the same art the office's own objects use, or
+// the plugin's own pixel sprite. `item` isn't on the map when uploaded: it
+// starts in its uploader's inventory. (Old uploads said `plinth`: a kiosk now.)
+export const LOOKS = {
+  kiosk: 'Screen kiosk with its emoji', arcade: 'Arcade cabinet', jukebox: 'Jukebox', vending: 'Vending machine',
+  eightball: 'Crystal ball', coffee: 'Coffee machine', rally: 'Chequered flag', sprite: 'Its own drawing', item: 'An item in my inventory',
+};
+export const DEFAULT_LOOK = 'kiosk';
+export const CARRIED = 'item';
+export const lookOf = (look) => (LOOKS[look] ? look : DEFAULT_LOOK);
+export const SPRITE_W = 16, SPRITE_H = 24;
+
 const clip = (s, n) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n) : '');
 
 // Only the fields the office uses, clipped. null when it isn't a manifest.
@@ -21,10 +33,12 @@ export function cleanManifest(raw) {
     emoji: [...clip(raw.emoji, 8)].slice(0, 2).join(''),
     glow: /^#[0-9a-f]{3,8}$/i.test(raw.glow || '') ? raw.glow : '',
     look: /^[a-z]{1,16}$/.test(raw.look || '') ? raw.look : '',
+    sprite: cleanSprite(raw.sprite),
     // What it needs beyond the basics (public/js/permissions.js): decides who may upload it.
     permissions: cleanPermissions(raw.permissions),
     api: {},
   };
+  if (out.look === 'sprite' && !out.sprite) out.look = '';
   const api = raw.api && typeof raw.api === 'object' ? Object.entries(raw.api) : [];
   for (const [id, spec] of api.slice(0, MAX_ACTIONS)) {
     if (!/^[\w:.<>-]{1,64}$/.test(id) || !spec || typeof spec !== 'object') continue;
@@ -34,6 +48,18 @@ export function cleanManifest(raw) {
     out.api[id] = a;
   }
   return out;
+}
+
+// A plugin's own pixel art: { rows: ['..bb..', …], palette: { b: '#7c2d12' } },
+// at most 16 × 24, '.' or ' ' see-through. null when it isn't one.
+export function cleanSprite(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.rows) || !raw.palette || typeof raw.palette !== 'object') return null;
+  const palette = {};
+  for (const [c, v] of Object.entries(raw.palette).slice(0, 16)) {
+    if (/^[\x21-\x7e]$/.test(c) && c !== '.' && /^#[0-9a-f]{3,8}$/i.test(v || '')) palette[c] = v;
+  }
+  const rows = raw.rows.slice(0, SPRITE_H).map((r) => (typeof r === 'string' ? [...r.slice(0, SPRITE_W)].map((c) => (palette[c] ? c : '.')).join('') : ''));
+  return rows.some((r) => /[^.]/.test(r)) ? { rows, palette } : null;
 }
 
 // The manifest in a WASM file's bytes, or null (no section, or not JSON).

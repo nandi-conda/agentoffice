@@ -1,14 +1,24 @@
 # Uploading your own objects
 
 Anyone signed in with their AT Protocol handle can upload a plugin of their
-own and put it on the office floor, no deploy needed. It works like the
-built-in [plugin objects](plugins.md): people walk up, press **E**, and get
-a panel; what it says shows up as a speech bubble and in the chat nearby.
+own and stand it up in the office, no deploy needed. There's no line between
+an uploaded object and the office's own [plugin objects](plugins.md): it's
+drawn with the same art (an arcade cabinet, a jukebox…) or its own pixel
+sprite, people walk up, press **E**, and get the same panel; what it says
+shows up as a speech bubble and in the chat nearby. Upload `arcade.wasm` and
+you get a real Byte Snake cabinet with a leaderboard of its own.
+
+An object is always in one of two places: **standing in a room**, or
+**carried** as one item in someone's 🎒. Whoever set it up can pick it up
+(🎒 Pick it up in its panel, or `inventory_pickup` with its `u-…` id); then
+it's an item like any other, to give away or **Place** somewhere else, where
+it stands up again as itself, theirs now. Possession is ownership: whoever
+holds it owns it, and throwing it away deletes it.
 
 - Press **U** (or 🧩 in the toolbar) to see what's out there, walk to one,
   or remove your own.
 - Upload a `.wasm` file (or, on Cloudflare, a `.js` module), give it a name,
-  a prompt, an emoji and a look, and press **Place it next to me**. It lands
+  a prompt, an emoji and a look, and press **Place it next to me**. It stands
   on the free tile next to you.
 - **Try the example guestbook** in that panel uploads
   `public/plugins/guestbook.wasm`, built from
@@ -20,10 +30,10 @@ a panel; what it says shows up as a speech bubble and in the chat nearby.
   file in base64) and `gallery_remove`; use one with `uobj_interact`
   (name = the object's id, `u-…`).
 
-Limits: 3 objects per person and 40 in the office; WASM up to 512 KB, JS up
-to 128 KB; 64 KB answers; the usual 32 KB of `state`. Only the uploader can
-remove an object, plus anyone whose DID is in the office's `ADMIN_DIDS`
-(comma-separated, a Worker var or env var).
+Limits: 3 objects standing per person (carried ones don't count) and 40 in
+the office; WASM up to 512 KB, JS up to 128 KB; 64 KB answers; the usual
+32 KB of `state`. Only whoever set an object up can pick it up or remove it,
+plus moderators (and anyone whose DID is in the office's `ADMIN_DIDS`).
 
 Uploaded objects can hand out items with `give` (they land in the person's
 inventory, see [plugins.md](plugins.md)). Anything more needs a
@@ -150,7 +160,12 @@ impl Plugin for Guestbook {
         .prompt("Sign the guestbook")
         .emoji("📖")
         .glow("#f59e0b")
-        .look(Look::Plinth)
+        .sprite(Sprite::new(&[
+            ".bwwwwwbbwwwwwb.",
+            ".bwkkkwbbwkkkwb.",
+            // … an open book on a lectern, 16 rows
+            "...dddddddddd...",
+        ]).colors(&[('b', "#b45309"), ('w', "#fef3c7"), ('k', "#78716c"), ('d', "#57381f")]))
         .actions(&[Action::new("sign", "Sign the guestbook with a note").input("Your note, up to 120 characters")]);
 
     fn on_action(&mut self, req: &Request) -> Response {
@@ -207,7 +222,7 @@ builds natively for `cargo test`.
 | --- | --- |
 | `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`, `role`, `key()`: DID or `kind:name`, `is_moderator()`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `data` (`data_as::<T>()`: JSON sent with the action, ≤ 16 KB), `fresh` (first call ever), `nearby` (each with `did`, `kind`, `key()`), `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event; `office_event("book")`: the data of an event only the office sends, like the room panels' `book` and `unlock`; unlike `data`, nobody can send one from a panel), `now`, `seed` (`rng()`, `pick(&list)`, `chance(p)`: WASM has no randomness of its own, so the office sends a random seed every call), `permissions` (`may(Permission::Take)`: what the office granted), `rooms` (`room(id)`: each bookable room and the `booking` on now, with `yours`; only for plugins with `unlock`). |
 | `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…).data(…))` (`data`: any JSON ≤ 16 KB every browser gets), `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`, `.take(kind, qty)` (needs `Permission::Take`), `.append(entry)` and `.clear_feed()` (the [feed](plugins.md#the-feed); need `Permission::Feed`), `.unlock(room_id)` (needs `Permission::Unlock`), `.notify(Note::to([...], text).outside(zone).keep().kind(..).re(..))` or `Note::inside(zone, text)` (≤ 10 notes; needs `Permission::Notify`), `.reply(data)` (≤ 16 KB for whoever called: the office's own calls, agents in `plugin_interact`). `Response::error(msg)` is just a toast. |
-| `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
+| `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action).game("snake", "score")` (a [browser game](#the-manifest) above the panel). |
 | `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. |
 | `stamp(ms)` | A time for text people read (`<t:ms>`): browsers show it as a 12-hour clock in their own zone. Never format times yourself. |
 | `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
@@ -216,8 +231,8 @@ builds natively for `cargo test`.
 ### The manifest
 
 `Manifest::new(name)` with `.doc()`, `.prompt()`, `.emoji()`, `.glow()`,
-`.look(Look::Plinth | Kiosk | Jukebox | Vending | EightBall | Item)` (`Item`:
-not put on the map, one item in the uploader's inventory instead) and
+`.look(Look::Kiosk | Arcade | Jukebox | Vending | EightBall | Coffee | Flag | Item)`
+or `.sprite(Sprite::new(&rows).colors(&[('b', "#7c2d12"), …]))` and
 `.actions(&[Action::new("id", "what it does").input("what to type")])` and
 `.permissions(&[Permission::Take | Feed | Notify | Unlock])` ([levels](#permission-levels)). It's
 a `const`, checked when you compile: a name over 40 characters, a glow that
@@ -225,7 +240,27 @@ isn't a colour or an action listed twice is a build error, not a surprise
 on upload.
 
 `export_plugin!` writes it as JSON into the module's `agentoffice.manifest`
-custom section. The office reads it on upload without running anything:
+custom section.
+
+**Looks.** Every look is a real object, drawn with the same art as the
+office's own: `Kiosk` (a screen showing your emoji, the default), `Arcade`
+(a cabinet in your glow colour), `Jukebox`, `Vending`, `EightBall`,
+`Coffee`, `Flag` (the rally's chequered flag). Or draw your own:
+`.sprite(Sprite::new(&rows).colors(&palette))` is pixel art up to 16 columns
+by 24 rows, one character per pixel, `.` see-through, every other character
+a colour from the palette (16 rows stand about as tall as a jukebox); the
+guestbook's open book on a lectern is one. `Item` isn't stood up when
+uploaded: it starts as one item in the uploader's inventory (with the
+`unlock` permission, the Skeleton Key), and put down it lies on the floor
+like any other item.
+
+**Games.** A panel can play one of the office's browser games above itself:
+`Ui::new(..).game("snake", "score")` plays Byte Snake, and every finished
+round comes back to your object as the action `score:<points>` (declare
+`Action::new("score:<points>", …)`). The arcade cabinets are exactly this
+(`plugins/wasm-arcade`); agents see the rest of the panel.
+
+The office reads the manifest on upload without running anything:
 whatever the uploader leaves blank (name, prompt, doc, emoji, colour, look)
 comes from it, the upload panel fills its form from it, and the declared
 actions are stored with the object as `api`. Agents see that `api` in

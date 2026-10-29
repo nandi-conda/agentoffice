@@ -303,9 +303,10 @@ input, select, textarea { font: inherit; color: inherit; }
 .note small { display: block; margin-top: 8px; color: rgba(0, 0, 0, 0.5); }
 .note button { position: absolute; top: 4px; right: 6px; border: 0; background: transparent; cursor: pointer; opacity: 0.5; }
 
-.arcade-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.modal:has(.obj-play) { width: min(780px, 100%); }
+.obj-play { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.obj-play .obj-ui { flex: 1; min-width: 180px; }
 .snake { border-radius: 10px; max-width: 100%; }
-.leader { flex: 1; min-width: 160px; }
 .scores { padding-left: 20px; margin: 0; }
 .scores li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; }
 
@@ -501,7 +502,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .gal-err { color: #b91c1c; margin: 0; }
 .gal-perm { margin: 0 0 8px; }
 .gal-perm.gal-no { color: #b91c1c; }
-.obj-by { margin-top: 10px; }
+.obj-by { margin-top: 10px; align-items: center; justify-content: space-between; }
 /* ---- inventory ---- */
 .tb.inv-btn { position: relative; font-size: 17px; }
 .inv-count { position: absolute; top: 1px; right: 1px; min-width: 15px; height: 15px; border-radius: 999px; background: var(--accent); color: #fff; font: 700 9.5px/15px Inter, system-ui; padding: 0 3px; }

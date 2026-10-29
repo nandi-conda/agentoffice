@@ -53,9 +53,9 @@ mod response;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod testing;
 
-pub use manifest::{Action, Look, Manifest, Permission};
+pub use manifest::{Action, Look, Manifest, Permission, Sprite};
 pub use request::{Actor, Booking, Event, Item, Object, Person, Request, Rng, Room};
-pub use response::{Button, Display, Give, Input, List, Music, Note, Response, Row, Take, Ui, Unlock};
+pub use response::{Button, Display, Game, Give, Input, List, Music, Note, Response, Row, Take, Ui, Unlock};
 #[doc(hidden)]
 pub use serde;
 #[doc(hidden)]
@@ -63,7 +63,7 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{export_plugin, log, stamp, Action, Actor, Booking, Display, Event, Give, Input, Item, Look, Manifest, Note, Permission, Person, Plugin, Request, Response, Rng, Room, Row, Ui};
+    pub use crate::{export_plugin, log, stamp, Action, Actor, Booking, Display, Event, Game, Give, Input, Item, Look, Manifest, Note, Permission, Person, Plugin, Request, Response, Rng, Room, Row, Sprite, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }

@@ -20,7 +20,8 @@ import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, u
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
-import { ROLES, GRANTABLE, atLeast, rank, effectiveRole, roleLabel } from '../public/js/roles.js';
+import { ROLES, GRANTABLE, atLeast, rank, effectiveRole, roleLabel, can } from '../public/js/roles.js';
+import { placed, asItem, CARRIED } from './entities/gallery.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -55,10 +56,10 @@ export const INVENTORY = {
   api: {
     view: { doc: 'What you carry.', who: true, returns: arr(ITEM, 'Item stacks') },
     use: { doc: 'Use one of your things: eat it, drink it, or show it off. Everyone who can hear you sees it; things like snacks are used up.', who: true, mutates: true, params: { id: str('Stack id (from inventory_view)', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now'), did: str('What it looked like') }) },
-    place: { doc: 'Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying there, not a booked room you\'re kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Anyone can pick it up; it is cleared away after a day.', who: true, mutates: true, params: { id: str('Stack id', 16), x: opt(numS('Tile x (any point in the tile)', 0, 48)), y: opt(numS('Tile y', 0, 32)), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: str('Floor id'), x: numS('Where it landed: tile centre x', 0, 48), y: numS('Tile centre y', 0, 32) }) },
+    place: { doc: 'Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying or standing there, not a booked room you\'re kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Things lie on the floor: anyone can pick them up, and they are cleared away after a day. An object you carry (an uploaded plugin: an arcade cabinet, a guestbook…) stands up in the room as itself instead, works for everyone, and is yours: only you (or a moderator) can pick it up again.', who: true, mutates: true, params: { id: str('Stack id', 16), x: opt(numS('Tile x (any point in the tile)', 0, 48)), y: opt(numS('Tile y', 0, 32)), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), floor: opt(str('Floor id, when it lies on the floor')), object: opt(str('Object id (u-…), when it stands up as itself')), x: numS('Where it landed: tile centre x', 0, 48), y: numS('Tile centre y', 0, 32) }) },
     give: { doc: 'Hand something to a person within 3 tiles.', who: true, mutates: true, params: { id: str('Stack id', 16), to: str('Their peer id, name or handle', 253), qty: opt(int('How many (default 1)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now'), to: str('Who got it') }) },
     destroy: { doc: 'Throw something away for good: it is gone, not put down anywhere, and nobody gets it back. Works anywhere.', who: true, mutates: true, params: { id: str('Stack id', 16), qty: opt(int('How many (default all of the stack)', 1, 20)) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
-    pickup: { doc: 'Pick something up off the floor (floor_view lists it). You must be within 1.5 tiles of it: walk_to it first.', who: true, mutates: true, params: { id: str('Floor id', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
+    pickup: { doc: 'Pick something up off the floor (floor_view lists it), or an object standing in a room that is yours (gallery_view lists it: its u-… id), which goes into your inventory as one item. You must be within 1.5 tiles of it: walk_to it first.', who: true, mutates: true, params: { id: str('Floor id, or an object id (u-…)', 16) }, returns: obj({ items: arr(ITEM, 'What you carry now') }) },
   },
 };
 
@@ -275,6 +276,9 @@ export class Office {
   get notes() { return this.shown('noticeboard')?.notes || []; }
   get scores() { return this.shown('arcade')?.scores || []; }
   get floor() { return this.mirror.get('floor:main') || []; }
+  // Where nothing else can be put down: what lies on the floor, and the
+  // objects standing in rooms.
+  get occupied() { return [...this.floor, ...this.gallery.filter(placed).map((i) => ({ x: i.x + 0.5, y: i.y + 0.5 }))]; }
   get counters() {
     const pomodoros = POMOS.reduce((n, f) => n + (this.shown(f.id)?.count || 0), 0);
     // Waves are the reception desk's; until it first runs, the World's old count.
@@ -1080,8 +1084,8 @@ export class Office {
     let r;
     if (key) r = await this.ref(`actor:${key}`).invApply(change);
     else {
-      // (A key keeps the few bytes that say which upload it is.)
-      const give = (change.give || []).map((i) => cleanItem(i, { from: change.from, now: this.now() })).filter(Boolean).map(({ data, ...i }) => (i.kind === SKELETON_KEY ? { ...i, data } : i));
+      // (A carried upload, a key or an object, keeps the few bytes that say which upload it is.)
+      const give = (change.give || []).map((i) => cleanItem(i, { from: change.from, now: this.now() })).filter(Boolean).map(({ data, ...i }) => (data?.upload ? { ...i, data } : i));
       r = applyChange(p.items || [], { take: change.take || [], give }, { slots: GUEST_SLOTS });
       if (r.items) p.items = r.items;
     }
@@ -1140,7 +1144,7 @@ export class Office {
   async placeItem(p, id, x, y, qty) {
     const s = (await this.inventory(p)).find((i) => i.id === id);
     if (!s) return { error: 'you don\'t have that' };
-    const opts = { floor: this.floor, bookings: this.bookings, now: this.now() };
+    const opts = { floor: this.occupied, bookings: this.bookings, now: this.now() };
     let tile;
     if (x == null && y == null) {
       tile = nearestPlace(p, opts);
@@ -1150,6 +1154,10 @@ export class Office {
       if (why) return { error: why };
       tile = { x: Math.floor(x), y: Math.floor(y) };
     }
+    // An object (an upload that isn't just an item) stands up in the room as
+    // itself, and is whoever put it there's.
+    const obj = s.data?.upload && this.gallery.find((i) => i.id === s.data.upload && i.carried && i.look !== CARRIED);
+    if (obj) return this.standUp(p, s, obj, tile);
     const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || s.qty));
     const r = await this.invApply(p, { take: [{ id, qty: n }] });
     if (r.error) return r;
@@ -1158,6 +1166,35 @@ export class Office {
     const floor = await this.ref('floor:main').place({ item: unowned({ ...s, qty: n }), ...at });
     this.act(p, `puts down ${label({ ...s, qty: n })}`);
     return { items: r.items, floor, ...at };
+  }
+
+  async standUp(p, s, obj, tile) {
+    const r = await this.invApply(p, { take: [{ id: s.id, qty: 1 }] });
+    if (r.error) return r;
+    const owner = { did: p.did || null, handle: p.handle || null, name: p.name, ...(p.did ? {} : { guest: p.id }) };
+    const put = await this.ref('gallery:main').put(obj.id, tile.x, tile.y, owner).catch((e) => ({ error: e.message }));
+    if (put.error) { const back = await this.invApply(p, { give: r.taken }); return { error: put.error, items: back.items }; }
+    this.act(p, `sets up ${s.emoji} ${s.name}`);
+    return { items: r.items, object: obj.id, x: tile.x + 0.5, y: tile.y + 0.5 };
+  }
+
+  // Whose an object standing in a room is: whoever put it there (a moderator may too).
+  owns(p, obj) {
+    if (can(this.roleOf(p), 'uploads.remove')) return true;
+    return obj.owner?.did ? obj.owner.did === p.did : !!obj.owner?.guest && obj.owner.guest === p.id;
+  }
+
+  // Picking up an object standing in a room: it goes into their inventory as one item.
+  async pickUpObject(p, obj) {
+    if (!this.owns(p, obj)) return { error: `${obj.name} is ${obj.owner?.handle ? `@${obj.owner.handle}` : obj.owner?.name || 'someone else'}'s: only they can pick it up` };
+    if (Math.hypot(obj.x + 0.5 - p.x, obj.y + 0.5 - p.y) > PICKUP_RANGE + 0.5) return { error: `walk over to the ${obj.name} first (within ${PICKUP_RANGE} tiles)` };
+    const was = { x: obj.x, y: obj.y, owner: obj.owner };
+    const got = await this.ref('gallery:main').carry(obj.id);
+    if (!got) return { error: 'that isn\'t there any more' };
+    const r = await this.invApply(p, { give: [asItem(got)] });
+    if (r.error) { await this.ref('gallery:main').put(obj.id, was.x, was.y, was.owner).catch(() => {}); return r; }
+    this.act(p, `picks up ${got.emoji} ${got.name}`);
+    return { items: r.items };
   }
 
   // A guest has nowhere to keep their things once they're gone, so they're
@@ -1212,6 +1249,8 @@ export class Office {
   }
 
   async pickUp(p, id) {
+    const obj = this.gallery.find((i) => i.id === id && placed(i));
+    if (obj) return this.pickUpObject(p, obj);
     const e = this.floor.find((x) => x.id === id);
     if (!e) return { error: 'that isn\'t there any more' };
     if (Math.hypot(e.x - p.x, e.y - p.y) > PICKUP_RANGE) return { error: `walk over to the ${e.item.name} first (within ${PICKUP_RANGE} tiles)` };

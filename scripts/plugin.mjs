@@ -102,7 +102,7 @@ impl Plugin for ${type} {
         .prompt("Press the button")
         .emoji("🔘")
         .glow("#a78bfa")
-        .look(Look::Plinth)
+        .look(Look::Kiosk)
         .actions(&[Action::new("press", "Press the button")]);
 
     fn on_action(&mut self, req: &Request) -> Response {

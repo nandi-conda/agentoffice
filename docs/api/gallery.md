@@ -1,6 +1,6 @@
 # gallery (Gallery)
 
-Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. Keeps where each stands, its manifest and who owns it; the code lives in each uobj:<id>. Uploaded objects follow the plugin contract (docs/plugins.md) and run sandboxed (docs/uploads.md).
+Objects people uploaded: WASM (or JS) plugins, each a drawn object that stands in a room or is carried in someone's inventory. Keeps where each is, its manifest and who owns it; the code lives in each uobj:<id>. Uploaded objects follow the plugin contract (docs/plugins.md) and run sandboxed (docs/uploads.md).
 
 - address `gallery:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
@@ -10,9 +10,9 @@ Objects people uploaded: WASM (or JS) plugins that signed-in people placed on th
 
 `read-only` · MCP tool **`gallery_view`**
 
-Every uploaded object on the map.
+Every uploaded object: the ones standing in rooms, and the carried ones.
 
-Returns `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }[]`
+Returns `{ id, name, prompt, doc, emoji, glow, look, sprite?, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }[]`
 
 ## `upload(who, req)`
 
@@ -30,7 +30,34 @@ Upload a plugin and place it on the map next to you (or, when its look is `item`
 | &nbsp;&nbsp;&nbsp;`req.doc` *(optional)* | `string ≤ 280` | What it does, for the docs and the MCP tool list |
 | &nbsp;&nbsp;&nbsp;`req.emoji` *(optional)* | `string ≤ 8` | An emoji to show on it |
 | &nbsp;&nbsp;&nbsp;`req.glow` *(optional)* | `string ≤ 9 /^#[0-9a-fA-F]{3,8}$/` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"plinth" \| "kiosk" \| "jukebox" \| "vending" \| "eightball" \| "item"` | How it's drawn (default plinth); item: not on the map, in your inventory |
+| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"kiosk" \| "arcade" \| "jukebox" \| "vending" \| "eightball" \| "coffee" \| "rally" \| "sprite" \| "item"` | How it's drawn (default: the manifest's look, else kiosk): kiosk (screen kiosk with its emoji), arcade (arcade cabinet), jukebox (jukebox), vending (vending machine), eightball (crystal ball), coffee (coffee machine), rally (chequered flag), sprite (its own drawing), item (an item in my inventory). sprite needs a manifest with one; item starts in your inventory |
+
+Returns `object`
+
+## `carry(id)`
+
+`mutates` · `internal (entity to entity)`
+
+An object standing in a room was picked up: it's carried now, and nobody's here.
+
+| Param | Type | |
+| --- | --- | --- |
+| `id` | `string ≤ 20` | Object id (u-…) |
+
+Returns `object | null`
+
+## `put(id, x, y, owner)`
+
+`mutates` · `internal (entity to entity)`
+
+A carried object was put down on a tile: it stands there, and is whoever put it there's.
+
+| Param | Type | |
+| --- | --- | --- |
+| `id` | `string ≤ 20` | Object id (u-…) |
+| `x` | `number ≥ 0` | Tile x |
+| `y` | `number ≥ 0` | Tile y |
+| `owner` | `object \| null` | { did, handle, name } |
 
 Returns `object`
 

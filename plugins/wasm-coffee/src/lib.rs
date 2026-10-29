@@ -32,6 +32,7 @@ impl Plugin for Coffee {
         .prompt("Grab a coffee")
         .emoji("☕")
         .glow("#f59e0b")
+        .look(Look::Coffee)
         .actions(&[
             Action::new("pour", "Pour a coffee into your inventory (what pressing E does)"),
             Action::new("brew", "Count a cup without taking one (the office's coffee message, away from the machine)"),

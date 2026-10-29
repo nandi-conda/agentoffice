@@ -12,7 +12,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [room (Room)](room.md) | Retired: a meeting room's bookings, as they were before its door panel (a WASM plugin, plugin:panel-<room>) took them over. |
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
-| [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
+| [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins, each a drawn object that stands in a room or is carried in someone's inventory. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [floor (Floor)](floor.md) | Things put down, where they lie, belonging to nobody (no record of who dropped them, anyone can pick them up): at most 40, each cleared away after a day. |
 | [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you use. |

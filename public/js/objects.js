@@ -4,6 +4,7 @@
 // Every action goes back to the server as { t: 'use', id, action, input }.
 
 import { localize } from './time.js';
+import { mountSnake } from './snake.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // **bold** and line breaks are the only formatting plugins get.
@@ -34,22 +35,48 @@ export function renderUi(el, ui, title, use) {
   }
 }
 
-export function openObject(modal, f, send) {
+// The browser games a panel can ask for (Ui::game): kind -> mount(el, { onScore }).
+const GAMES = { snake: mountSnake };
+
+// One object's panel, for any object: the office's own and uploaded ones
+// alike. f.entity: another object whose plugin this one shares (the second
+// arcade cabinet). opts.pickUp: shown when it's yours to pick up.
+export function openObject(modal, f, send, { mine = false, pickUp = null } = {}) {
+  const id = f.entity || f.id;
+  let game = null; // { kind, stop }
+  const ui = () => modal.body.querySelector('.obj-ui');
   const use = (action, input = null) => {
-    modal.body.querySelectorAll('button, input').forEach((el) => { el.disabled = true; });
-    send({ t: 'use', id: f.id, action, input });
+    ui().querySelectorAll('button, input').forEach((el) => { el.disabled = true; });
+    send({ t: 'use', id, action, input });
   };
+  const stopGame = () => { game?.stop(); game = null; };
   const panel = {
-    id: f.id,
-    show(ui) {
-      if (!ui) return;
-      renderUi(modal.body, ui, f.name, use);
-      if (f.owner) modal.body.insertAdjacentHTML('beforeend', `<p class="muted small obj-by">Uploaded by ${esc(f.owner.handle ? `@${f.owner.handle}` : f.owner.name)}</p>`);
+    id,
+    show(u) {
+      if (!u) return;
+      // A game keeps playing while the panel next to it changes (a new high score).
+      const want = u.game && GAMES[u.game.kind] ? u.game : null;
+      const wrap = modal.body.querySelector('.obj-wrap');
+      if (game && game.kind !== want?.kind) { stopGame(); wrap.classList.remove('obj-play'); wrap.querySelector('.obj-game').innerHTML = ''; }
+      if (want && !game) {
+        wrap.classList.add('obj-play');
+        const g = GAMES[want.kind](wrap.querySelector('.obj-game'), { onScore: (n) => send({ t: 'use', id, action: `${want.action}:${n}` }) });
+        game = { kind: want.kind, stop: g.stop };
+      }
+      renderUi(ui(), u, f.name, use);
+      const foot = [];
+      if (f.owner) foot.push(`<span class="muted small">Set up by ${esc(f.owner.handle ? `@${f.owner.handle}` : f.owner.name)}</span>`);
+      if (mine && pickUp) foot.push('<button class="btn ghost obj-pick" title="It goes into your inventory; put it down anywhere">🎒 Pick it up</button>');
+      if (foot.length) {
+        ui().insertAdjacentHTML('beforeend', `<div class="row obj-by">${foot.join(' ')}</div>`);
+        ui().querySelector('.obj-pick')?.addEventListener('click', () => { modal.close(); pickUp(); });
+      }
     },
     // The plugin answered without a panel (or failed): let people try again.
-    idle() { modal.body.querySelectorAll('button:not([data-off]), input').forEach((el) => { el.disabled = false; }); },
+    idle() { ui()?.querySelectorAll('button:not([data-off]), input').forEach((el) => { el.disabled = false; }); },
+    close: stopGame,
   };
-  modal.open(`<h2>${esc(f.name)}</h2><p class="muted small">Connecting…</p>`, 'obj-modal');
-  send({ t: 'use', id: f.id, action: 'use' });
+  modal.open(`<div class="obj-wrap"><div class="obj-game"></div><div class="obj-ui"><h2>${esc(f.name)}</h2><p class="muted small">Connecting…</p></div></div>`, 'obj-modal');
+  send({ t: 'use', id, action: 'use' });
   return panel;
 }

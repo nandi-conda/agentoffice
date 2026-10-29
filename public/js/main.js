@@ -7,7 +7,6 @@ import { connect } from './net.js';
 import { createVoice, DESK_VIEW } from './rtc.js';
 import { createFreeqCall } from './freeq-av.js';
 import { createBoard, openEditor } from './whiteboard.js';
-import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
 import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
@@ -30,7 +29,7 @@ const store = {
 const peers = new Map();
 let me = null;
 let net = null;
-let desks = {}, notes = [], pomo = {}, counters = {}, scores = [], bookings = [];
+let desks = {}, notes = [], pomo = {}, counters = {}, bookings = [];
 let freeqRooms = {}; // area id -> { channel, members, topic } attached from freeq
 let wing = []; // channel rooms off the hallway: { id, channel, slot, tier, topic, members, sources, policy, access }
 let objects = {}; // plugin object id -> { display, bubble } (see objects.js)
@@ -308,7 +307,7 @@ function onMessage(m) {
       // Sprites can be slow (they come from your PDS); don't hold the door for more than a few seconds.
       setTimeout(() => { spritesReady = true; }, 4000);
       for (const p of m.peers) addPeer(p);
-      desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
+      desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; bookings = m.bookings || [];
       freeqRooms = m.freeq || {};
       objects = {};
       for (const [id, display] of Object.entries(m.objects || {})) objects[id] = { display };
@@ -442,7 +441,6 @@ function onMessage(m) {
     }
     case 'counters': counters = m.counters; break;
     case 'wb': if (m.op === 'clear') board.clear(); else if (m.op === 'set') board.set(m.strokes || []); else board.add(m.stroke); modal.wb?.repaint(); break;
-    case 'scores': scores = m.scores; modal.snake?.scores(scores); break;
     case 'wave': {
       const p = peers.get(m.from);
       chime();
@@ -1022,8 +1020,9 @@ function startPlacing(s) {
 function stopPlacing() { placing = null; canvas.style.cursor = ''; }
 // The tiles in reach, worked out again only when you move or the floor changes.
 function placingTiles() {
-  const key = `${Math.floor(me.x)},${Math.floor(me.y)},${floor.map((e) => e.id).join()},${bookings.length}`;
-  if (placing.key !== key) { placing.key = key; placing.tiles = placeTiles(me, { floor, bookings, now: serverNow() }); }
+  const standing = gallery.filter((i) => !i.carried && Number.isFinite(i.x));
+  const key = `${Math.floor(me.x)},${Math.floor(me.y)},${floor.map((e) => e.id).join()},${standing.map((i) => `${i.x}:${i.y}`).join()},${bookings.length}`;
+  if (placing.key !== key) { placing.key = key; placing.tiles = placeTiles(me, { floor: [...floor, ...standing.map((i) => ({ x: i.x + 0.5, y: i.y + 0.5 }))], bookings, now: serverNow() }); }
   return placing.tiles;
 }
 function placeAt(w) {
@@ -1373,6 +1372,12 @@ function openProfile(p) {
 const ownerKey = () => me.did || `${me.kind}:${me.name}`;
 const ownerOnline = (owner) => [...peers.values()].some((p) => (p.did || `${p.kind}:${p.name}`) === owner);
 
+// Is an object standing in a room yours to pick up? (The server checks again.)
+function ownsObject(f) {
+  if (can(me.role, 'uploads.remove')) return true;
+  return f.owner?.did ? f.owner.did === me.did : !!f.owner?.guest && f.owner.guest === me.id;
+}
+
 function promptFor(f) {
   if (!f) return null;
   if (f.floorItem) { const e = floor.find((x) => x.id === f.floorItem); return e ? `Pick up ${itemLabel(e.item)}` : null; }
@@ -1381,7 +1386,6 @@ function promptFor(f) {
     case 'whiteboard': return 'Open the whiteboard';
     case 'coffee': return 'Grab a coffee';
     case 'noticeboard': return 'Read the notice board';
-    case 'arcade': return 'Play Byte Snake';
     case 'plugin':
       if (f.plugin === 'pomodoro') return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Check the focus timer' : 'Start a focus session';
       return f.prompt || `Use the ${f.name}`;
@@ -1430,8 +1434,14 @@ function interact(f) {
     case 'noticeboard': openNotes(); break;
     case 'room': openRoom(f.zone); break;
     case 'sign': openSign(f.zone); break;
-    case 'plugin': modal.obj = openObject(modal, f, (m) => net.send(m)); modal.onclose = () => (modal.obj = null); break;
-    case 'arcade': modal.snake = openSnake(modal, { scores, onScore: (score) => net.send({ t: 'score', score }) }); { const prev = modal.onclose; modal.onclose = () => { prev?.(); modal.snake = null; }; } break;
+    case 'plugin': {
+      // The office's own objects and uploaded ones open the same way; one you
+      // set up in a room you can pick up again.
+      const obj = openObject(modal, f, (m) => net.send(m), { mine: f.uploaded && ownsObject(f), pickUp: () => net.send({ t: 'inv', op: 'pickup', id: f.id }) });
+      modal.obj = obj;
+      modal.onclose = () => { obj.close(); modal.obj = null; };
+      break;
+    }
   }
 }
 

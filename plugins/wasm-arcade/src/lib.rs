@@ -1,12 +1,12 @@
-//! The two Byte Snake cabinets in the Lounge share one leaderboard, kept by
-//! this WASM plugin built with the agentoffice-plugin crate: the top 20, best
-//! first. The game itself runs in your browser (public/js/snake.js); when it
-//! ends, the office turns its `score` message into this plugin's
-//! `score:<points>` action.
+//! An arcade cabinet that plays Byte Snake, with its own leaderboard: the top
+//! 20, best first. The two cabinets in the Lounge share one; upload this
+//! module and you put another real cabinet in the room, with a board of its
+//! own. It looks like an arcade cabinet (`Look::Arcade`), and its panel asks
+//! the browser for the `snake` game (`Ui::game`): the game runs there
+//! (public/js/snake.js) and a finished round comes back as `score:<points>`.
+//! The office's `score` message (the MCP `score` tool) lands on the Lounge's.
 //!
-//! The top 10 go out with the display (`display.data`), so every browser
-//! shows them next to the game; the panel this plugin answers with is for
-//! agents (`plugin_interact`), who can't play.
+//! The top 10 also go out with the display (`display.data`).
 //!
 //! Build with `just plugin-build arcade`, test with `just plugin-test arcade`.
 
@@ -65,6 +65,7 @@ impl Plugin for Arcade {
         .prompt("Play Byte Snake")
         .emoji("🕹️")
         .glow("#a78bfa")
+        .look(Look::Arcade)
         .actions(&[
             Action::new("score:<points>", "Put a finished game's score on the leaderboard (1–10000; what the office's score message does)"),
         ]);
@@ -77,9 +78,9 @@ impl Plugin for Arcade {
     }
 
     fn panel(&self, _req: &Request) -> Option<Ui> {
-        let text = if self.scores.is_empty() { "No scores yet. Byte Snake is played in a browser: arrow keys or WASD, eat the bugs, don't bite your tail.".to_string() }
-            else { "Office high scores. Byte Snake is played in a browser; scores land here when a game ends.".to_string() };
-        let ui = Ui::new("🕹️ Byte Snake").text(text);
+        let text = if self.scores.is_empty() { "No scores yet. Arrow keys or WASD, eat the bugs, don't bite your tail.".to_string() }
+            else { "Arrow keys or WASD, eat the bugs, don't bite your tail. Space plays again.".to_string() };
+        let ui = Ui::new("🕹️ Byte Snake").text(text).game("snake", "score");
         if self.scores.is_empty() { return Some(ui); }
         Some(ui.list("Office high scores", self.scores.iter().take(SHOWN).enumerate().map(|(i, s)| format!("{}. {} · {}", i + 1, s.name, s.score))))
     }
@@ -146,6 +147,17 @@ mod tests {
         o.act("Ada", "score:42");
         let ui = o.use_as("Bot").ui.unwrap();
         assert_eq!(ui.list.unwrap().rows, ["1. Ada · 42"]);
+        o.assert_clean();
+    }
+
+    #[test]
+    fn it_is_a_cabinet_that_plays_snake() {
+        let m: serde_json::Value = serde_json::from_str(&Arcade::MANIFEST.to_json()).unwrap();
+        assert_eq!(m["look"], "arcade");
+        let mut o = TestOffice::<Arcade>::new();
+        assert_eq!(o.use_as("Ada").ui.unwrap().game, Some(Game { kind: "snake".into(), action: "score".into() }));
+        // A finished round answers with the panel again, so the board refreshes under the game.
+        assert_eq!(o.act("Ada", "score:50").ui.unwrap().list.unwrap().rows, ["1. Ada · 50"]);
         o.assert_clean();
     }
 

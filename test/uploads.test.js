@@ -9,7 +9,7 @@ import { PluginHost } from '../server/plugins.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
 import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm, bundledWasm } from '../server/sandbox.js';
 import { wasmFile, until } from './support/plugins.js';
-import { placeNear, MAX_PER_OWNER } from '../server/entities/gallery.js';
+import { placeNear, MAX_PER_OWNER, Gallery } from '../server/entities/gallery.js';
 import { zoneAt } from '../public/js/map.js';
 import { levelOf, uploadError } from '../public/js/permissions.js';
 import { readManifest, cleanManifest, MANIFEST_SECTION } from '../public/js/manifest.js';
@@ -342,4 +342,71 @@ test('without a sandbox the office refuses uploads and says why', async () => {
   ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: upload });
   await settle();
   assert.match(ada.last('galleryres').result.error, /Worker Loader/);
+});
+
+test('uploading the arcade plugin stands a real Byte Snake cabinet in the room, which moves through inventories like anything else', async () => {
+  const { o, rt } = office();
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada'), bob = await join(o, 'bob', 'did:plc:bob');
+  ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: { lang: 'wasm', code: plugin('arcade.wasm') } });
+  await settle(50);
+  const cab = ada.last('galleryres').result.object;
+  assert.equal(cab.look, 'arcade', 'drawn as a cabinet, no plinth');
+  assert.equal(cab.name, 'Arcade cabinet');
+  // Its panel asks the browser to play the game; a round's score comes back to it.
+  ada.msg({ t: 'use', id: cab.id, action: 'use' });
+  await until(() => ada.last('objui')?.id === cab.id);
+  assert.deepEqual(ada.last('objui').ui.game, { kind: 'snake', action: 'score' });
+  await settle(450);
+  ada.msg({ t: 'use', id: cab.id, action: 'score:70' });
+  await until(() => ada.last('objui')?.ui?.list);
+  assert.deepEqual(ada.last('objui').ui.list.rows, ['1. ada · 70']);
+
+  // Only whoever set it up picks it up; then it's an item in their inventory.
+  bob.msg({ t: 'inv', op: 'pickup', id: cab.id });
+  await until(() => bob.last('error'));
+  assert.match(bob.last('error').message, /only they can pick it up/);
+  const near = { x: cab.x + 0.5, y: cab.y + 1.5 };
+  ada.msg({ t: 'move', ...near, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'inv', op: 'pickup', id: cab.id });
+  await until(() => ada.last('gallery')?.items.find((i) => i.id === cab.id)?.carried);
+  const carried = () => (ada.last('inv')?.items || []).find((i) => i.data?.upload === cab.id);
+  await until(carried);
+  assert.equal(carried().name, 'Arcade cabinet');
+  assert.equal(ada.last('gallery').items[0].owner, null);
+  // Handed to bob, it's his to put down: it stands up as itself again, his now.
+  bob.msg({ t: 'move', x: near.x + 1, y: near.y, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'inv', op: 'give', id: carried().id, to: 'bob' });
+  const bobs = () => (bob.last('inv')?.items || []).find((i) => i.data?.upload === cab.id);
+  await until(bobs);
+  bob.msg({ t: 'inv', op: 'place', id: bobs().id });
+  await until(() => !bob.last('gallery').items[0].carried);
+  const stood = bob.last('gallery').items[0];
+  assert.equal(stood.owner.did, 'did:plc:bob');
+  assert.ok(Number.isFinite(stood.x));
+  assert.ok(!(bob.last('inv').items || []).some((i) => i.data?.upload === cab.id));
+  assert.equal(o.floor.length, 0, 'it stands in the room, not on the floor');
+  // Same memory: the board kept ada's score.
+  bob.msg({ t: 'use', id: cab.id, action: 'use' });
+  await until(() => bob.last('objui')?.ui?.list);
+  assert.deepEqual(bob.last('objui').ui.list.rows, ['1. ada · 70']);
+  rt.stop();
+});
+
+test('looks: plinths are gone, and sprites come from the manifest', async () => {
+  const gb = checkUpload('wasm', GUESTBOOK).manifest;
+  assert.equal(gb.look, 'sprite');
+  assert.equal(gb.sprite.rows.length, 16);
+  const { o, rt } = office();
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada');
+  ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: { ...upload, look: 'plinth' } });
+  await settle(50);
+  assert.equal(ada.last('galleryres').result.object.look, 'sprite', 'an unknown look falls back to the manifest');
+  rt.stop();
+  // An old upload saved as a plinth stands as a kiosk.
+  const items = Object.getOwnPropertyDescriptor(Gallery.prototype, 'items').get;
+  assert.deepEqual(items.call({ state: { items: [{ look: 'plinth' }, { look: 'sprite' }, { look: 'item', carried: true }] } }).map((i) => i.look), ['kiosk', 'kiosk', 'item']);
 });

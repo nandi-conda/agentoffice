@@ -54,22 +54,23 @@ Store the code and manifest of a new upload (from gallery:main).
 
 | Param | Type | |
 | --- | --- | --- |
-| `item` | `{ id, name, prompt, doc, emoji, glow, look, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }` | An uploaded object |
+| `item` | `{ id, name, prompt, doc, emoji, glow, look, sprite?, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }` | An uploaded object |
 | &nbsp;&nbsp;&nbsp;`item.id` | `string ≤ 200` | Object id on the map (u-…); its entity is uobj:<id> |
 | &nbsp;&nbsp;&nbsp;`item.name` | `string ≤ 40` | Name |
 | &nbsp;&nbsp;&nbsp;`item.prompt` | `string ≤ 60` | What the E prompt says |
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
-| &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Shown on its plinth |
+| &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: plinth, kiosk, jukebox, vending, eightball, item |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |
 | &nbsp;&nbsp;&nbsp;`item.version` | `string ≤ 200` | First bytes of the code's SHA-256 |
 | &nbsp;&nbsp;&nbsp;`item.x` | `number \| null` | Tile x (null: carried) |
 | &nbsp;&nbsp;&nbsp;`item.y` | `number \| null` | Tile y (null: carried) |
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
-| &nbsp;&nbsp;&nbsp;`item.carried` *(optional)* | `boolean` | Look `item`: not on the map, one item in its uploader's inventory instead (with unlock, a skeleton key) |
-| &nbsp;&nbsp;&nbsp;`item.owner` | `object \| null` | Who uploaded it: { did, handle, name }. Null for a carried one: it belongs to whoever holds it |
+| &nbsp;&nbsp;&nbsp;`item.carried` *(optional)* | `boolean` | Not in a room: one item in someone's inventory (with unlock, a skeleton key). Put it down to stand it in a room again |
+| &nbsp;&nbsp;&nbsp;`item.owner` | `object \| null` | Who put it in the room (at first its uploader): { did, handle, name }. Null while carried: it belongs to whoever holds it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
 | &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "feed" \| "notify" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), feed (trusted), notify (trusted), unlock (privileged) |
 | &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |
@@ -81,6 +82,36 @@ Store the code and manifest of a new upload (from gallery:main).
 `mutates` · `internal (entity to entity)`
 
 Forget the code and memory (from gallery:main).
+
+## `moved(item)`
+
+`mutates` · `internal (entity to entity)`
+
+Where it is now (from gallery:main, when it's picked up or put down).
+
+| Param | Type | |
+| --- | --- | --- |
+| `item` | `{ id, name, prompt, doc, emoji, glow, look, sprite?, lang, size, version, x, y, zone, carried?, owner, createdAt, permissions, level, api }` | An uploaded object |
+| &nbsp;&nbsp;&nbsp;`item.id` | `string ≤ 200` | Object id on the map (u-…); its entity is uobj:<id> |
+| &nbsp;&nbsp;&nbsp;`item.name` | `string ≤ 40` | Name |
+| &nbsp;&nbsp;&nbsp;`item.prompt` | `string ≤ 60` | What the E prompt says |
+| &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
+| &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
+| &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
+| &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
+| &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |
+| &nbsp;&nbsp;&nbsp;`item.version` | `string ≤ 200` | First bytes of the code's SHA-256 |
+| &nbsp;&nbsp;&nbsp;`item.x` | `number \| null` | Tile x (null: carried) |
+| &nbsp;&nbsp;&nbsp;`item.y` | `number \| null` | Tile y (null: carried) |
+| &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
+| &nbsp;&nbsp;&nbsp;`item.carried` *(optional)* | `boolean` | Not in a room: one item in someone's inventory (with unlock, a skeleton key). Put it down to stand it in a room again |
+| &nbsp;&nbsp;&nbsp;`item.owner` | `object \| null` | Who put it in the room (at first its uploader): { did, handle, name }. Null while carried: it belongs to whoever holds it |
+| &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
+| &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "feed" \| "notify" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), feed (trusted), notify (trusted), unlock (privileged) |
+| &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |
+| &nbsp;&nbsp;&nbsp;`item.api` | `object` | The actions its manifest declares, { action: { doc, params? } }: pass one as `action` to uobj_interact (with `input` when it has params.input). Empty when the module has no manifest. |
 
 ## Events
 

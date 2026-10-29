@@ -1,29 +1,30 @@
 // Objects people upload (docs/uploads.md): a WASM plugin (or, on Cloudflare,
-// a JS one) placed on the map next to its uploader. The server keeps the list
-// (gallery:main) and sends it as { t: 'gallery', items }; each item becomes a
-// map object here, used like any other plugin object (objects.js).
+// a JS one) that is a real object: it stands in a room, drawn the way its
+// manifest says, or someone carries it in their inventory. The server keeps
+// the list (gallery:main) and sends it as { t: 'gallery', items }; each one
+// standing in a room becomes a map object here, drawn, prompted and used
+// exactly like the office's own (render.js, objects.js).
 
 import { FURNITURE } from './map.js';
-import { readManifest } from './manifest.js';
+import { readManifest, LOOKS, CARRIED, lookOf } from './manifest.js';
 import { PERMISSIONS, LEVELS, levelOf, levelRole, uploadError } from './permissions.js';
 import { can } from './roles.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const LOOKS = { plinth: 'Plinth with its emoji', kiosk: 'Screen kiosk', jukebox: 'Jukebox', vending: 'Vending machine', eightball: 'Crystal ball', item: 'An item in my inventory' };
 // Uploaded as an item: not on the map, one thing its uploader carries (the Skeleton Key).
-const carriedLook = (look) => look === 'item';
+const carriedLook = (look) => look === CARRIED;
 const upLabel = (look) => (carriedLook(look) ? 'Put it in my inventory' : 'Place it next to me');
 const MAX_KB = 512;
 
-// Put the uploaded objects into FURNITURE, so they draw, prompt and
-// interact like the built-in ones. They aren't solid: the server's walls
-// don't know about them.
+// Put the objects standing in rooms into FURNITURE, so they draw, prompt
+// and interact like the office's own: the look is the furniture type. They
+// aren't solid: the server's walls don't know about them.
 export function syncGallery(items = []) {
   for (let i = FURNITURE.length - 1; i >= 0; i--) if (FURNITURE[i].uploaded) FURNITURE.splice(i, 1);
   for (const it of items) {
-    if (it.carried) continue;
+    if (it.carried || !Number.isFinite(it.x)) continue;
     FURNITURE.push({
-      ...it, type: it.look === 'plinth' || !LOOKS[it.look] ? 'upload' : it.look,
+      ...it, type: lookOf(it.look === 'sprite' && !it.sprite ? null : it.look),
       w: 1, h: 1, solid: false, interact: 'plugin', plugin: 'upload', uploaded: true,
     });
   }
@@ -53,12 +54,12 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
         <div class="obj-item gal-item" data-id="${esc(it.id)}">
           <span><b>${esc(it.emoji)} ${esc(it.name)}</b><br><small class="muted">${esc(it.doc || it.prompt)}</small></span>
           <span class="gal-acts"><small class="muted">${it.owner ? `by ${esc(by(it))} · ` : ''}${it.lang} ${Math.ceil(it.size / 1024)} KB${levelTag(it)}</small>
-            ${it.carried ? '<small class="muted">carried</small>' : '<button class="btn ghost gal-go">Walk there</button>'}${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
+            ${it.carried ? '<small class="muted">carried by someone</small>' : '<button class="btn ghost gal-go">Walk there</button>'}${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
         </div>`).join('')}</div>`
     : '<p class="muted small">Nothing uploaded yet.</p>';
   const form = me.did ? `
       <h3>Upload one</h3>
-      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It goes on the floor next to you; anyone can use it, and only you can remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: one key for your inventory that opens booked rooms)' : ''}</p>
+      <p class="small muted">A WebAssembly module (≤ ${MAX_KB} KB) that speaks the office's JSON ABI, or a JS module exporting <code>interact()</code> where the office runs on Cloudflare. It stands up in the room next to you, drawn the way you pick; anyone can use it, and only you can pick it up (it goes into your 🎒, to put down somewhere else) or remove it. <a href="/docs/uploads/" target="_blank" rel="noopener">How to write one</a> · <button type="button" class="linkish gal-example">try the example guestbook</button>${can(me.role, LEVELS.privileged.cap) ? ' · <button type="button" class="linkish gal-key">the Skeleton Key</button> (admins only: one key for your inventory that opens booked rooms)' : ''}</p>
       <p class="small gal-perm" hidden></p>
       <div class="gal-form">
         <label class="small"><b>File</b><input type="file" class="gal-file" accept=".wasm,.js,.mjs,application/wasm,text/javascript"></label>
@@ -68,7 +69,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
         <div class="row">
           <label class="small"><b>Emoji</b><input class="gal-emoji" maxlength="8" value="🧩"></label>
           <label class="small"><b>Colour</b><input type="color" class="gal-glow" value="#a78bfa"></label>
-          <label class="small"><b>Looks like</b><select class="gal-look">${Object.entries(LOOKS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
+          <label class="small"><b>Looks like</b><select class="gal-look">${Object.entries(LOOKS).map(([k, v]) => `<option value="${k}"${k === 'sprite' ? ' hidden disabled' : ''}>${esc(v)}</option>`).join('')}</select></label>
         </div>
         <p class="small gal-err" hidden></p>
         <button class="btn primary gal-up">Place it next to me</button>
@@ -112,6 +113,10 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     if (m) {
       set('.gal-name', m.name); set('.gal-prompt', m.prompt); set('.gal-doc', m.doc);
       set('.gal-emoji', m.emoji); set('.gal-glow', /^#[0-9a-f]{6}$/i.test(m.glow) ? m.glow : '');
+      // Its own drawing is only on offer when the module has one.
+      const own = b.querySelector('.gal-look option[value=sprite]');
+      own.hidden = own.disabled = !m.sprite;
+      if (own.disabled && b.querySelector('.gal-look').value === 'sprite') b.querySelector('.gal-look').value = 'kiosk';
       if (LOOKS[m.look]) set('.gal-look', m.look);
     }
     b.querySelector('.gal-up').textContent = upLabel(b.querySelector('.gal-look').value);

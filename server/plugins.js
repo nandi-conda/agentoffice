@@ -41,6 +41,9 @@ export const MAX_NOTE_TO = 40;
 const KIND = /^[\w-]{1,16}$/;
 
 // What a client may send: an action id, some typed text, and some JSON.
+// The games a panel can ask the browser to play (Ui::game).
+export const GAMES = ['snake'];
+
 export function cleanRequest(m) {
   const action = typeof m?.action === 'string' && ACTION.test(m.action) ? m.action : 'use';
   const input = m?.input == null ? null : clip(m.input, 500);
@@ -175,10 +178,13 @@ export class PluginHost {
       log('warning', `plugin:${object.id}`, 'answered with notify without the notify permission: dropped');
       result.notify = [];
     }
-    // A skeleton key opens booked rooms: one comes only from an admin's upload, never a give.
-    if (result.give.some((i) => i.kind === SKELETON_KEY)) {
-      log('warning', `plugin:${object.id}`, 'gave a skeleton key: dropped');
-      result.give = result.give.filter((i) => i.kind !== SKELETON_KEY);
+    // A skeleton key opens booked rooms: one comes only from an admin's upload,
+    // never a give. Nor does anything that says it's an upload: carrying one is
+    // what owns it (picking it up, putting it down, throwing it away).
+    const forged = (i) => i.kind === SKELETON_KEY || i.kind === 'upload' || i.data?.upload !== undefined;
+    if (result.give.some(forged)) {
+      log('warning', `plugin:${object.id}`, 'gave a skeleton key or an upload: dropped');
+      result.give = result.give.filter((i) => !forged(i));
     }
     if (result.unlock && !permissions.includes('unlock')) {
       log('warning', `plugin:${object.id}`, 'answered with unlock without the unlock permission: refused');
@@ -272,6 +278,9 @@ export function sanitize(r) {
       input: u.input && act(u.input.action)
         ? { placeholder: clip(u.input.placeholder, 80), action: u.input.action, button: clip(u.input.button, 20) || 'Send', maxLength: Math.min(500, Math.max(1, Number(u.input.maxLength) || 200)) }
         : null,
+      // A browser game above the panel (public/js/objects.js GAMES); a round's
+      // score comes back as `<action>:<score>`.
+      game: u.game && GAMES.includes(u.game.kind) && act(`${u.game.action}:1`) ? { kind: u.game.kind, action: u.game.action } : null,
     };
   }
   return out;

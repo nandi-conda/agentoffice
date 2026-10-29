@@ -5,18 +5,26 @@
 //! upload (public/js/manifest.js): it fills in the upload form, and the
 //! actions show up in `gallery_view` for agents.
 
-/// How the object is drawn on the map.
+/// How the object is drawn. Every look is a real object, the same art the
+/// office's own objects use (an uploaded arcade cabinet is drawn like the
+/// Lounge's), or your own pixel [`Sprite`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
-    /// A plinth with your emoji on it (the default).
-    Plinth,
-    /// A screen on a stand.
+    /// A screen on a stand showing your emoji (the default).
     Kiosk,
+    /// An arcade cabinet, in your glow colour.
+    Arcade,
     Jukebox,
     Vending,
     /// A crystal ball.
     EightBall,
-    /// Not put on the map at all: uploading it puts one item, named and
+    /// A coffee machine.
+    Coffee,
+    /// A chequered flag on a pole.
+    Flag,
+    /// Your own pixel art: set by [`Manifest::sprite`].
+    Sprite,
+    /// Not put on the map when uploaded: it starts as one item, named and
     /// drawn after the manifest, in the uploader's inventory. With the
     /// `unlock` permission that item is a skeleton key.
     Item,
@@ -25,14 +33,44 @@ pub enum Look {
 impl Look {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Look::Plinth => "plinth",
             Look::Kiosk => "kiosk",
+            Look::Arcade => "arcade",
             Look::Jukebox => "jukebox",
             Look::Vending => "vending",
             Look::EightBall => "eightball",
+            Look::Coffee => "coffee",
+            Look::Flag => "rally",
+            Look::Sprite => "sprite",
             Look::Item => "item",
         }
     }
+}
+
+/// Pixel art for your object: up to 16 columns by 24 rows, one character
+/// per pixel. `.` (or a space) is see-through; every other character is a
+/// colour from the palette. It's drawn one tile wide, standing on its tile,
+/// so 16 rows make an object about as tall as a jukebox.
+///
+/// ```
+/// use agentoffice_plugin::Sprite;
+/// const BOOK: Sprite = Sprite::new(&[
+///     "..bbbb..",
+///     "..bwwb..",
+///     "..bbbb..",
+/// ]).colors(&[('b', "#7c2d12"), ('w', "#fef3c7")]);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Sprite {
+    pub rows: &'static [&'static str],
+    /// (character, `#rrggbb`), up to 16 colours.
+    pub palette: &'static [(char, &'static str)],
+}
+
+impl Sprite {
+    pub const MAX_W: usize = 16;
+    pub const MAX_H: usize = 24;
+    pub const fn new(rows: &'static [&'static str]) -> Self { Sprite { rows, palette: &[] } }
+    pub const fn colors(mut self, palette: &'static [(char, &'static str)]) -> Self { self.palette = palette; self }
 }
 
 /// Something a plugin may ask the office to do beyond the basics (panels,
@@ -106,7 +144,7 @@ impl Action {
 ///     .prompt("Sign the guestbook")
 ///     .emoji("📖")
 ///     .glow("#f59e0b")
-///     .look(Look::Plinth)
+///     .look(Look::Kiosk)
 ///     .actions(&[Action::new("sign", "Sign it with a note").input("Your note")]);
 /// assert!(M.to_json().contains("\"sign\""));
 /// ```
@@ -122,6 +160,8 @@ pub struct Manifest {
     /// `#rrggbb`
     pub glow: &'static str,
     pub look: Look,
+    /// Your own art, when the look is [`Look::Sprite`].
+    pub sprite: Option<Sprite>,
     pub actions: &'static [Action],
     /// What it needs beyond the basics; see [`Permission`].
     pub permissions: &'static [Permission],
@@ -129,13 +169,15 @@ pub struct Manifest {
 
 impl Manifest {
     pub const fn new(name: &'static str) -> Self {
-        Manifest { name, prompt: "", doc: "", emoji: "", glow: "", look: Look::Plinth, actions: &[], permissions: &[] }
+        Manifest { name, prompt: "", doc: "", emoji: "", glow: "", look: Look::Kiosk, sprite: None, actions: &[], permissions: &[] }
     }
     pub const fn prompt(mut self, s: &'static str) -> Self { self.prompt = s; self }
     pub const fn doc(mut self, s: &'static str) -> Self { self.doc = s; self }
     pub const fn emoji(mut self, s: &'static str) -> Self { self.emoji = s; self }
     pub const fn glow(mut self, s: &'static str) -> Self { self.glow = s; self }
     pub const fn look(mut self, l: Look) -> Self { self.look = l; self }
+    /// Draw it with your own pixel art (the look becomes [`Look::Sprite`]).
+    pub const fn sprite(mut self, s: Sprite) -> Self { self.sprite = Some(s); self.look = Look::Sprite; self }
     pub const fn actions(mut self, a: &'static [Action]) -> Self { self.actions = a; self }
     /// What it needs beyond the basics (who may upload it follows from these).
     pub const fn permissions(mut self, p: &'static [Permission]) -> Self { self.permissions = p; self }
@@ -237,6 +279,47 @@ const fn action_id(s: &str) -> bool {
     true
 }
 
+const fn in_palette(p: &[(char, &str)], c: u8) -> bool {
+    let mut i = 0;
+    while i < p.len() { if p[i].0 as u32 == c as u32 { return true; } i += 1; }
+    false
+}
+
+// "sprite":{"rows":[…],"palette":{"b":"#7c2d12",…}},
+const fn sprite<const N: usize>(mut w: Writer<N>, sp: &Sprite) -> Writer<N> {
+    assert!(!sp.rows.is_empty() && sp.rows.len() <= Sprite::MAX_H, "manifest: a sprite has 1 to 24 rows");
+    assert!(!sp.palette.is_empty() && sp.palette.len() <= 16, "manifest: a sprite's palette has 1 to 16 colours");
+    let mut i = 0;
+    while i < sp.palette.len() {
+        let (c, colour) = sp.palette[i];
+        assert!(c.is_ascii_graphic() && c != '.' && c != '"' && c != '\\', "manifest: palette characters are ASCII letters, digits or symbols (not . \" or \\)");
+        assert!(hex_colour(colour), "manifest: palette colours are like \"#7c2d12\"");
+        let mut j = 0;
+        while j < i { assert!(sp.palette[j].0 as u32 != c as u32, "manifest: a palette character is listed twice"); j += 1; }
+        i += 1;
+    }
+    w = w.raw("\"sprite\":{\"rows\":[");
+    i = 0;
+    while i < sp.rows.len() {
+        let b = sp.rows[i].as_bytes();
+        assert!(b.len() <= Sprite::MAX_W, "manifest: a sprite row is over 16 pixels");
+        let mut j = 0;
+        while j < b.len() { assert!(b[j] == b'.' || b[j] == b' ' || in_palette(sp.palette, b[j]), "manifest: a sprite pixel isn't . or a palette character"); j += 1; }
+        if i > 0 { w = w.byte(b','); }
+        w = w.string(sp.rows[i]);
+        i += 1;
+    }
+    w = w.raw("],\"palette\":{");
+    i = 0;
+    while i < sp.palette.len() {
+        if i > 0 { w = w.byte(b','); }
+        let c = [sp.palette[i].0 as u8];
+        w = w.byte(b'"').byte(c[0]).byte(b'"').byte(b':').string(sp.palette[i].1);
+        i += 1;
+    }
+    w.raw("}},")
+}
+
 /// Checks the manifest (a compile error when it's in a const) and writes it
 /// as JSON. Used by [`export_plugin!`](crate::export_plugin).
 #[doc(hidden)]
@@ -251,6 +334,8 @@ pub const fn encode<const N: usize>(m: &Manifest) -> Writer<N> {
     w = w.byte(b'{').raw("\"manifest\":1,");
     w = w.field("name", m.name).field("prompt", m.prompt).field("doc", m.doc).field("emoji", m.emoji).field("glow", m.glow);
     w = w.field("look", m.look.as_str());
+    assert!(!matches!(m.look, Look::Sprite) || m.sprite.is_some(), "manifest: Look::Sprite needs a sprite: use .sprite(Sprite::new(..))");
+    if let Some(sp) = m.sprite { w = sprite(w, &sp); }
     if !m.permissions.is_empty() {
         w = w.raw("\"permissions\":[");
         let mut i = 0;

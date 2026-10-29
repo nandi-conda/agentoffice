@@ -474,6 +474,10 @@ impl<P: Plugin> TestOffice<P> {
                     let listed = api.contains_key(a) || api.keys().any(|k| k.split_once(":<").is_some_and(|(p, _)| a.strip_prefix(p).is_some_and(|rest| rest.starts_with(':'))));
                     if !listed && a != "use" { w.push(format!("panel action {a:?} isn't in the manifest: add Action::new(\"{a}\", \"…\") to MANIFEST so agents know it")); }
                 }
+                if let Some(g) = &ui.game {
+                    let family = format!("{}:<", g.action);
+                    if !api.keys().any(|k| k.starts_with(&family)) { w.push(format!("the {} game sends {}:<score>: add Action::new(\"{}:<points>\", \"…\") to MANIFEST", g.kind, g.action, g.action)); }
+                }
             }
         }
         for x in w { self.warn(x); }

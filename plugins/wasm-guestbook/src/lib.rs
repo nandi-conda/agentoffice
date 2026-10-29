@@ -26,7 +26,25 @@ impl Plugin for Guestbook {
         .prompt("Sign the guestbook")
         .emoji("📖")
         .glow("#f59e0b")
-        .look(Look::Plinth)
+        // An open book on a wooden lectern, in its own pixels.
+        .sprite(Sprite::new(&[
+            "................",
+            "................",
+            ".bwwwwwbbwwwwwb.",
+            ".bwkkkwbbwkkkwb.",
+            ".bwwwwwbbwwwwwb.",
+            ".bwkkwwbbwkkkwb.",
+            ".bbbbbbbbbbbbbb.",
+            "..dddddddddddd..",
+            "...llllllllll...",
+            "......llll......",
+            "......lddl......",
+            "......llll......",
+            "......lddl......",
+            "......llll......",
+            "....dddddddd....",
+            "...dddddddddd...",
+        ]).colors(&[('b', "#b45309"), ('w', "#fef3c7"), ('k', "#78716c"), ('d', "#57381f"), ('l', "#92603a")]))
         .actions(&[Action::new("sign", "Sign the guestbook with a note").input("Your note, up to 120 characters")]);
 
     fn on_action(&mut self, req: &Request) -> Response {
@@ -107,7 +125,9 @@ mod tests {
     fn manifest_describes_it() {
         let m: Value = serde_json::from_str(&Guestbook::MANIFEST.to_json()).unwrap();
         assert_eq!(m["name"], "Guestbook");
-        assert_eq!(m["look"], "plinth");
+        assert_eq!(m["look"], "sprite");
+        assert_eq!(m["sprite"]["rows"].as_array().unwrap().len(), 16);
+        assert_eq!(m["sprite"]["palette"]["w"], "#fef3c7");
         assert!(m["api"]["sign"]["params"]["input"].is_object());
     }
 }

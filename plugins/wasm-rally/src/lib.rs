@@ -108,6 +108,7 @@ impl Plugin for Rally {
         .prompt("Join the rally")
         .emoji("🏁")
         .glow("#f59e0b")
+        .look(Look::Flag)
         .actions(&[
             Action::new("join", "Join the next race (the first to join starts a 20-second countdown)"),
             Action::new("leave", "Leave the next race, or give up mid-race"),

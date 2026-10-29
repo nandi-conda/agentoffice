@@ -158,11 +158,14 @@ add({ type: 'rug', id: 'rug', x: 31, y: 23, w: 8, h: 5 });
 add({ type: 'sofa', id: 'sofa1', x: 32, y: 22, w: 4, h: 1, solid: true, facing: 'down' });
 add({ type: 'sofa', id: 'sofa2', x: 32, y: 28, w: 4, h: 1, solid: true, facing: 'up' });
 add({ type: 'coffeetable', id: 'ctable', x: 33, y: 24, w: 2, h: 2, solid: true });
-// Byte Snake runs in the browser (interact 'arcade', public/js/snake.js); the
-// leaderboard both cabinets share is a WASM plugin (plugins/wasm-arcade) on
-// the first one, which took over the old arcade:main entity's scores.
-add({ type: 'arcade', id: 'arcade', x: 44, y: 21, w: 1, h: 1, solid: true, interact: 'arcade', plugin: 'arcade', wasm: 'arcade.wasm', name: 'Arcade cabinet', prompt: 'Play Byte Snake', legacy: 'arcade:main' });
-add({ type: 'arcade', id: 'arcade2', x: 45, y: 21, w: 1, h: 1, solid: true, interact: 'arcade' });
+// The arcade cabinets are a WASM plugin (plugins/wasm-arcade) like any other
+// object: its panel asks the browser to play Byte Snake (public/js/snake.js)
+// and keeps the leaderboard (it took over the old arcade:main entity's
+// scores). The second cabinet is the same machine: `entity` sends its uses
+// to the first one's, so they share the board. Upload arcade.wasm and you get
+// another real cabinet, with a board of its own.
+add({ type: 'arcade', id: 'arcade', x: 44, y: 21, w: 1, h: 1, solid: true, interact: 'plugin', plugin: 'arcade', wasm: 'arcade.wasm', name: 'Arcade cabinet', prompt: 'Play Byte Snake', legacy: 'arcade:main' });
+add({ type: 'arcade', id: 'arcade2', x: 45, y: 21, w: 1, h: 1, solid: true, interact: 'plugin', entity: 'arcade', name: 'Arcade cabinet', prompt: 'Play Byte Snake', glow: '#db2777' });
 add({ type: 'bookshelf', id: 'shelf', x: 38, y: 21, w: 3, h: 1, solid: true });
 add({ type: 'beanbag', id: 'bean1', x: 41, y: 26, w: 1, h: 1, seat: true, facing: 'left' });
 add({ type: 'beanbag', id: 'bean2', x: 43, y: 27, w: 1, h: 1, seat: true, facing: 'up' });

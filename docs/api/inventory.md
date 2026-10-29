@@ -30,7 +30,7 @@ Returns `{ items, did }`
 
 `mutates` · `caller filled in by the World` · MCP tool **`inventory_place`**
 
-Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying there, not a booked room you're kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Anyone can pick it up; it is cleared away after a day.
+Put something down on a tile within 3 tiles of you that you can reach on foot: not a wall or furniture, not something already lying or standing there, not a booked room you're kept out of. Leave out x and y to put it down at your feet (or the nearest free tile). Things lie on the floor: anyone can pick them up, and they are cleared away after a day. An object you carry (an uploaded plugin: an arcade cabinet, a guestbook…) stands up in the room as itself instead, works for everyone, and is yours: only you (or a moderator) can pick it up again.
 
 | Param | Type | |
 | --- | --- | --- |
@@ -39,7 +39,7 @@ Put something down on a tile within 3 tiles of you that you can reach on foot: n
 | `y` *(optional)* | `number 0–32` | Tile y |
 | `qty` *(optional)* | `integer 1–20` | How many (default all of the stack) |
 
-Returns `{ items, floor, x, y }`
+Returns `{ items, floor?, object?, x, y }`
 
 ## `give(who, id, to, qty?)`
 
@@ -72,10 +72,10 @@ Returns `{ items }`
 
 `mutates` · `caller filled in by the World` · MCP tool **`inventory_pickup`**
 
-Pick something up off the floor (floor_view lists it). You must be within 1.5 tiles of it: walk_to it first.
+Pick something up off the floor (floor_view lists it), or an object standing in a room that is yours (gallery_view lists it: its u-… id), which goes into your inventory as one item. You must be within 1.5 tiles of it: walk_to it first.
 
 | Param | Type | |
 | --- | --- | --- |
-| `id` | `string ≤ 16` | Floor id |
+| `id` | `string ≤ 16` | Floor id, or an object id (u-…) |
 
 Returns `{ items }`

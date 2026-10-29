@@ -39,8 +39,9 @@ test('the office\'s own programs: method and args in, reply or error out, more s
   await assert.rejects(new PluginHost().program({ object: desk, actor, method: 'desktop' }), /workstation is out of order/);
 });
 
-test('no plugin hands out a skeleton key, not even one that may unlock', async () => {
-  const answer = () => ({ give: [{ kind: 'skeleton-key' }, { kind: 'cookie' }] });
+test('no plugin hands out a skeleton key or an upload, not even one that may unlock', async () => {
+  // Carrying an upload is owning it: an item that claims to be one could pick up or throw away someone's object.
+  const answer = () => ({ give: [{ kind: 'skeleton-key' }, { kind: 'cookie' }, { kind: 'upload', data: { upload: 'u-1' } }, { kind: 'badge', data: { upload: 'u-2' } }] });
   for (const permissions of [[], ['unlock']]) {
     const r = await fakePlugins(answer, { permissions }).interact({ object: juke, actor, action: 'use' });
     assert.deepEqual(r.result.give.map((i) => i.kind), ['cookie']);
