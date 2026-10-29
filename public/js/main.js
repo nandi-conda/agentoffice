@@ -57,12 +57,13 @@ addEventListener('resize', () => { R.resize(); clampZoom(); });
 // The map's region changes size when panels dock, collapse or the keyboard opens.
 new ResizeObserver(() => { R.resize(); clampZoom(); }).observe(canvas);
 
+// Zoom is continuous and unbounded on the way out; the renderer recomputes the
+// view, culling and labels for whatever you pick. Only zooming in is capped.
+const ZOOM_MAX = 3.2, ZOOM_MIN_PX = 1; // at least a pixel per tile
 function clampZoom() {
-  const levels = R.zoomLevels();
-  if (k !== null && levels.includes(k)) return;
-  // Phones start at 1:1 so a room fits on screen; bigger screens start mid-way.
-  k = phone() ? levels.reduce((a, b) => (Math.abs(Math.log(b / R.dpr)) < Math.abs(Math.log(a / R.dpr)) ? b : a))
-    : levels[Math.min(levels.length - 1, Math.max(0, Math.floor(levels.length / 2)))];
+  // Phones start at 1:1 so a room fits on screen; bigger screens a little closer.
+  if (k === null) k = R.dpr * (phone() ? 1 : 1.5);
+  k = Math.max((ZOOM_MIN_PX / 32) * R.dpr, Math.min(ZOOM_MAX * R.dpr, k));
 }
 clampZoom();
 
@@ -700,17 +701,33 @@ function paintMeter(t, mutedTalking) {
 
 $('.zoom-in').addEventListener('click', () => zoom(1));
 $('.zoom-out').addEventListener('click', () => zoom(-1));
-function zoom(d) {
-  const levels = R.zoomLevels();
-  const i = Math.max(0, Math.min(levels.length - 1, levels.indexOf(k) + d));
-  k = levels[i];
+function zoom(d) { zoomAt(1.25 ** d); }
+// Scales the zoom by `factor`, keeping the world point under (sx, sy) (canvas
+// pixels; default the centre) where it is. The camera stays offset from you by
+// the difference until you walk, then drifts back.
+let camOff = { x: 0, y: 0 };
+function zoomAt(factor, sx, sy) {
+  const { w: vw, h: vh } = R.size;
+  if (sx === undefined) { sx = vw / 2; sy = vh / 2; }
+  const at = R.toWorld(sx, sy);
+  k *= factor; clampZoom();
+  const T = 32 * (k / R.dpr);
+  cam.x = at.x - (sx - vw / 2) / T; cam.y = at.y - (sy - vh / 2) / T;
+  if (me) camOff = { x: cam.x - me.x, y: cam.y - (me.y - 0.5) };
 }
-// Pinch: snap to the zoom step nearest the pinched scale (steps keep sprites crisp).
-function pinchTo(k0, ratio) {
-  const want = Math.log(k0 * ratio);
-  k = R.zoomLevels().reduce((a, b) => (Math.abs(Math.log(b) - want) < Math.abs(Math.log(a) - want) ? b : a));
+// Frames the whole office (however big it has grown) in the map region.
+function zoomToFit() {
+  k = R.fitZoom(); clampZoom();
+  cam.x = W / 2; cam.y = H / 2;
+  if (me) camOff = { x: cam.x - me.x, y: cam.y - (me.y - 0.5) };
 }
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoom(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+const canvasPoint = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  // Mouse wheels send lines or big pixel steps, trackpads small pixel deltas; both map smoothly.
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  zoomAt(Math.exp(-Math.max(-300, Math.min(300, dy)) * (e.ctrlKey ? 0.01 : 0.0015)), ...canvasPoint(e));
+}, { passive: false });
 
 const FALLBACK_EMOTES = ['wave', 'happy', 'love', 'clap', 'idea', 'party', 'thumbs', 'coffee', 'focus'];
 let emoteList = FALLBACK_EMOTES;
@@ -778,7 +795,7 @@ function openHelp() {
       <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
       <kbd>I</kbd><span>Your things: eat, drink, give them to someone nearby, or drop them. E picks up what's at your feet</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
-      <kbd>+ −</kbd><span>Zoom</span>
+      <kbd>+ −</kbd><span>Zoom (or scroll over the map, toward the cursor). <kbd>0</kbd> shows the whole office</span>
     </div>${coarse ? '</details>' : ''}
     <h3 style="margin-top:16px">Who hears you</h3>
     <p class="small">In open areas, anyone within a few steps. In the <b>Boardroom</b>, <b>Huddle Room</b> and <b>Phone Booths</b>, only people in the same room. The <b>Deep Work Den</b> is text-only and runs a shared pomodoro. Start a message with <code>/shout</code> to reach the whole office, or <code>@name</code> to tap someone anywhere.</p>
@@ -1534,6 +1551,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);
+  else if (key === '0') zoomToFit();
   else if (key === '?') openHelp();
   else if (/^[1-9]$/.test(key) && emoteList[+key - 1]) emote(emoteList[+key - 1]);
 });
@@ -1570,7 +1588,7 @@ canvas.addEventListener('pointerdown', (e) => {
   else if (touches.size === 2) {
     endStick();
     const [a, b] = [...touches.values()];
-    gesture = { kind: 'pinch', d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), k0: k };
+    gesture = { kind: 'pinch', d: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)) };
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -1579,7 +1597,11 @@ canvas.addEventListener('pointermove', (e) => {
   if (gesture.kind === 'pinch') {
     if (touches.size < 2) return;
     const [a, b] = [...touches.values()];
-    return pinchTo(gesture.k0, Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0);
+    const d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+    const r = canvas.getBoundingClientRect();
+    zoomAt(d / gesture.d, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+    gesture.d = d;
+    return;
   }
   if (gesture.id !== e.pointerId) return;
   const dx = e.clientX - gesture.x0, dy = e.clientY - gesture.y0, d = Math.hypot(dx, dy);
@@ -1828,8 +1850,9 @@ function loop(t) {
     if (voice.on || meterShown > 0 || hintOn) paintMeter(t, !!v.mutedTalking);
     for (const p of others) if (p !== me) p.speaking = v.speaking.has(p.id);
 
-    cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
-    cam.y += (me.y - 0.5 - cam.y) * Math.min(1, dt * 6);
+    if (me.moving) { const f = Math.exp(-dt * 2.5); camOff.x *= f; camOff.y *= f; }
+    cam.x += (me.x + camOff.x - cam.x) * Math.min(1, dt * 6);
+    cam.y += (me.y - 0.5 + camOff.y - cam.y) * Math.min(1, dt * 6);
 
     const target = modal.isOpen ? null : currentTarget();
     const label = target && promptFor(target);

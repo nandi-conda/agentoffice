@@ -39,22 +39,16 @@ export function createRenderer(canvas) {
     canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
   }
 
-  // Zoom steps keep zoom*dpr whole so sprites scale by an integer factor.
-  function zoomLevels() {
-    const out = [];
-    for (let k = 1; k <= 8; k++) { const z = k / dpr; if (z >= 0.5 && z <= 3.2) out.push(k); }
-    return out.length ? out : [1];
-  }
+  // The zoom (k, device pixels per sprite pixel) that fits the whole office
+  // in the map region; read fresh each time since the office can grow.
+  const fitZoom = () => (dpr * Math.min(vw / (W + 2), vh / (H + 2))) / 32;
 
   const S = (v) => v * view.T;
 
   function setCamera(cam, k) {
     view.k = k;
     view.T = 32 * (k / dpr);
-    // Stop the camera a little past the outer walls, and centre the office on
-    // any axis where it fits on screen whole, so small screens aren't half void.
-    const clamp = (c, half, size) => (size + 3 <= half * 2 ? size / 2 : Math.max(half - 1.5, Math.min(size + 1.5 - half, c)));
-    cam = { x: clamp(cam.x, vw / 2 / view.T, W), y: clamp(cam.y, vh / 2 / view.T, H) };
+    // No clamping: the view is recomputed for whatever zoom and camera you pick.
     // Snap the camera offset to device pixels to avoid shimmering.
     view.ox = Math.round((vw / 2 - cam.x * view.T) * dpr) / dpr;
     view.oy = Math.round((vh / 2 - cam.y * view.T) * dpr) / dpr;
@@ -841,7 +835,7 @@ export function createRenderer(canvas) {
   // nudged up or left out. They grow a little with zoom and thin out with distance.
   const PILL = { dark: 'rgba(28,25,23,0.8)', me: 'rgba(37,99,235,0.94)', agent: 'rgba(8,145,178,0.92)', freeq: 'rgba(109,40,217,0.9)' };
   const ZONE_DOT = { open: '#22c55e', room: '#a78bfa', quiet: '#f87171' };
-  let placed = [], lsc = 1;
+  let placed = [], lsc = 1, far = false;
   const font = (w = 600) => `${w} ${Math.round(11 * lsc)}px Inter, system-ui, sans-serif`;
   const hits = (r) => placed.some((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
 
@@ -913,9 +907,11 @@ export function createRenderer(canvas) {
     const s = toScreen(p.rx, p.ry);
     const top = p.headY ?? s.y - S(1.4);
     const talking = p.bubble && st.time - p.bubble.at < 7000;
-    const alpha = isMe || talking ? 1 : fade(me, p.rx, p.ry, 8, 15);
+    // Far out, only you and whoever's talking keep a name; everyone else is a dot.
+    const alpha = isMe || talking ? 1 : far ? 0.9 : fade(me, p.rx, p.ry, 8, 15);
+    const named = isMe || talking || !far;
     let r = null;
-    if (alpha > 0.05) {
+    if (alpha > 0.05 && named) {
       const name = (p.kind === 'agent' ? '◆ ' : p.kind === 'freeq' ? '# ' : '') + p.name;
       const extra = `${p.video ? ' 📹' : ''}${p.screen ? ' 🖥️' : ''}${p.audio ? (p.speaking ? ' 🔊' : ' 🎙️') : ''}`;
       r = placeRow([{ text: name + extra, bg: isMe ? PILL.me : PILL[p.kind] || PILL.dark, dot: statusColor(p.status) }], s.x, top - 2, { force: isMe || talking, alpha });
@@ -952,7 +948,7 @@ export function createRenderer(canvas) {
     const s = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - lift);
     const label = o.display?.label && (!o.display.until || o.display.until > st.serverNow()) ? o.display.label : null;
     let top = s.y;
-    if (label) {
+    if (label && !far) {
       const r = placeRow([{ text: label, bg: PILL.dark }], s.x, s.y, { alpha: fade(me, f.x, f.y, 10, 18) });
       if (r) top = r.y;
     }
@@ -989,7 +985,9 @@ export function createRenderer(canvas) {
 
   function drawLabelLayer(st) {
     placed = [];
-    lsc = Math.max(0.85, Math.min(1.3, Math.sqrt(view.k / dpr)));
+    // Labels shrink more slowly than the map, down to a legible floor.
+    lsc = Math.max(0.7, Math.min(1.3, Math.sqrt(view.k / dpr)));
+    far = view.k / dpr < 0.5;
     const me = st.peers.find((p) => p.id === st.meId);
     const later = [];
     const byDist = (x, y) => (me ? Math.hypot(me.rx - x, me.ry - y) : 0);
@@ -1147,7 +1145,7 @@ export function createRenderer(canvas) {
     return best;
   }
 
-  return { resize, draw, zoomLevels, toWorld, toScreen, hitPeer, get dpr() { return dpr; } };
+  return { resize, draw, fitZoom, get size() { return { w: vw, h: vh }; }, toWorld, toScreen, hitPeer, get dpr() { return dpr; } };
 }
 
 export const EMOJI = {
