@@ -374,4 +374,4 @@ export const SHELL = {
 };
 
 // The apps the browser has built in (public/js/workstation.js), for `open`.
-export const BUILTIN_APPS = ['notes', 'todo', 'terminal', 'browser', 'calendar', 'timer', 'share'];
+export const BUILTIN_APPS = ['notes', 'todo', 'terminal', 'browser', 'calendar', 'timer', 'share', 'inventory', 'settings'];

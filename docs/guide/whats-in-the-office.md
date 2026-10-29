@@ -66,6 +66,7 @@ not the desk's, so the same one comes up at whichever desk you sit at.
   pages, any site that allows being framed, ↗ for the rest) and
   **Terminal**, an office shell: `who`, `desks`, `rooms`, `todo add …`,
   `jot …`, `cat 1`, `timer 25 writing`, `open notes`, `help`.
+- **Things**: your inventory, the same panel as **I**.
 - **Desk monitor**: share your screen to your desk's monitor, and people
   standing within a few steps (with audio on) can watch it.
 - Apps that run on plugin Workers (**Ask the office**, **Magic 8-Ball**) use

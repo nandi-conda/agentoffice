@@ -7,7 +7,7 @@ import { createVoice, DESK_VIEW } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
-import { createWorkstation } from './workstation.js';
+import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
@@ -649,12 +649,13 @@ function invChanged() {
   invCount.hidden = !n;
   modal.inv?.refresh();
 }
+const invCtx = {
+  send: (m) => net.send(m), me: () => me, items: () => items, floor: () => floor,
+  peers: () => [...peers.values()], keeps: () => keeps, walkTo,
+};
 function openInv() {
   if (!me) return;
-  modal.inv = openInventory(modal, {
-    send: (m) => net.send(m), me: () => me, items: () => items, floor: () => floor,
-    peers: () => [...peers.values()], keeps: () => keeps, walkTo,
-  });
+  modal.inv = openInventory(modal, invCtx);
   modal.onclose = () => (modal.inv = null);
 }
 invBtn.addEventListener('click', openInv);
@@ -1272,6 +1273,16 @@ const station = createWorkstation({
     },
   },
 });
+// Your things, on the desk computer too: the same panel, in a window.
+registerApp({
+  id: 'inventory', name: 'Things', icon: '🎒', size: [460, 420],
+  mount(body) {
+    const inv = openInventory({ body, open() {}, close() {} }, invCtx);
+    let seen = [items, floor];
+    return { tick() { if (seen[0] !== items || seen[1] !== floor) { seen = [items, floor]; inv.refresh(); } } };
+  },
+});
+
 function openStation() {
   if (!atDesk()) return toast('Sit at a desk to use its computer.');
   modal.close();
