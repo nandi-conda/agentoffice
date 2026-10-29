@@ -80,7 +80,10 @@ export function createWorkstation({ send, office }) {
   function build() {
     root = h(`<div id="workstation" class="ws" role="dialog" aria-label="Workstation" hidden>
       <div class="ws-screen">
-        <div class="ws-desk"><div class="ws-icons"></div><div class="ws-toasts"></div></div>
+        <div class="ws-desk"><div class="ws-icons"></div>
+          <button class="ws-focus" hidden title="Open the focus timer"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ws-ring-bg" cx="60" cy="60" r="52"/><circle class="ws-ring" cx="60" cy="60" r="52" pathLength="100"/></svg>
+            <span class="ws-focus-time"></span><span class="ws-focus-label"></span></button>
+          <div class="ws-toasts"></div></div>
         <div class="ws-menu" hidden></div>
         <div class="ws-bar">
           <button class="ws-start" title="Apps" aria-haspopup="true">▦ <span>Apps</span></button>
@@ -96,6 +99,7 @@ export function createWorkstation({ send, office }) {
     desk = root.querySelector('.ws-desk');
     bar = root.querySelector('.ws-bar');
     bar.querySelector('.ws-off').onclick = () => close();
+    root.querySelector('.ws-focus').onclick = () => openApp('timer');
     bar.querySelector('.ws-stand').onclick = () => { close(); office.standUp(); };
     bar.querySelector('.ws-share').onclick = () => office.share.toggle();
     const menu = root.querySelector('.ws-menu');
@@ -117,6 +121,18 @@ export function createWorkstation({ send, office }) {
     share.classList.toggle('on', office.share.on());
     share.querySelector('span').textContent = office.share.on() ? 'Sharing' : 'Share';
     for (const w of wins.values()) w.inst?.tick?.();
+    drawFocus();
+  }
+
+  // The focus timer, big on the wallpaper behind the windows while it runs.
+  function drawFocus() {
+    const el = root.querySelector('.ws-focus'), t = desktop?.timer;
+    el.hidden = !t;
+    if (!t) return;
+    const left = Math.max(0, t.endsAt - office.serverNow()), total = t.minutes * 60000;
+    el.querySelector('.ws-ring').style.strokeDashoffset = String(100 - (100 * left) / total);
+    el.querySelector('.ws-focus-time').textContent = mmss(left);
+    el.querySelector('.ws-focus-label').textContent = t.label;
   }
 
   function drawIcons() {

@@ -65,7 +65,7 @@ Sit at any desk and press **E** (on a phone, tap the prompt) to pull up your
 **workstation**: a small desktop with windows and a taskbar. It is yours,
 not the desk's, so the same one comes up at whichever desk you sit at.
 
-- **Notes** (saved as you type), **Todo**, **Focus timer** (it rings even if
+- **Notes** (saved as you type), **Todo**, **Focus timer** (a countdown ring on the wallpaper while it runs; it rings even if
   you've walked off or left: the note waits in your actor), **Calendar**
   (meeting room bookings, yours highlighted), **Browser** (bookmarks, office
   pages, any site that allows being framed, ↗ for the rest) and
