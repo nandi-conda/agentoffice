@@ -27,6 +27,7 @@ import { AgentClient } from '../scripts/agent-sdk.mjs';
 import { ZONES, FURNITURE, SEATS, DESKS, zoneAt, canHear, SPAWN } from '../public/js/map.js';
 import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
+import { isoize } from '../public/js/time.js';
 import { describeApi, generatedTools } from './apidoc.js';
 
 const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
@@ -53,8 +54,8 @@ export function socketPair() {
   return { server: a, client: b };
 }
 
-const json = (v) => ({ content: [{ type: 'text', text: JSON.stringify(v, null, 1) }] });
-const fail = (msg) => ({ content: [{ type: 'text', text: msg }], isError: true });
+const json = (v) => ({ content: [{ type: 'text', text: isoize(JSON.stringify(v, null, 1)) }] });
+const fail = (msg) => ({ content: [{ type: 'text', text: isoize(msg) }], isError: true });
 const round = (n) => Math.round(n * 10) / 10;
 
 // Compact what the model sees; whiteboard strokes are summarised.
@@ -70,7 +71,7 @@ function shapeEvent(m, client, office) {
     case 'wave': return { type: 'wave', from: m.name, fromId: m.from, kind: m.kind };
     case 'peer': { const { t, ...rest } = m; return { type: 'peer', name: name(m.id), ...rest }; }
     case 'bookings': return { type: 'bookings', upcoming: m.bookings.filter((b) => b.end > Date.now()).length, tip: 'call rooms for the schedule' };
-    default: { const { t, ...rest } = m; return { type: t, ...rest }; }
+    default: { const { t, ...rest } = m; for (const k of ['text', 'message']) if (typeof rest[k] === 'string') rest[k] = isoize(rest[k]); return { type: t, ...rest }; }
   }
 }
 

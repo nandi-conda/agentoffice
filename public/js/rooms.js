@@ -7,6 +7,7 @@
 // DIDs or agent names; `admitted` holds keys let in at the door on the day.
 
 import { ZONES } from './map.js';
+import { stampRange } from './time.js';
 
 export const MIN = 60000;
 export const ROOMS = ZONES.filter((z) => z.bookable);
@@ -76,7 +77,7 @@ export function checkSlot(list, { room, start, end, owner, id = null }, now) {
   if (start < now - RULES.step && !id) start = snap(now); // "book it now" for a slot that just began
   if (start - now > RULES.ahead) return { error: 'you can book up to 14 days ahead' };
   const clash = overlapping(list, room, start, end, id);
-  if (clash) return { error: `${roomById(room).name} is booked ${fmtRange(clash)} (${clash.title})` };
+  if (clash) return { error: `${roomById(room).name} is booked ${stampRange(clash)} (${clash.title})` };
   if (!id && list.filter((b) => b.owner === owner && b.end > now).length >= RULES.perOwner) {
     return { error: `you already have ${RULES.perOwner} upcoming bookings` };
   }
@@ -92,6 +93,4 @@ export function toTime(v, now = Date.now()) {
   return Date.parse(s);
 }
 
-const hhmm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-export const fmtTime = (t) => (typeof Intl !== 'undefined' ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : hhmm(t));
-export const fmtRange = (b) => `${fmtTime(b.start)}–${fmtTime(b.end)}`;
+export { fmtTime, fmtRange } from './time.js';

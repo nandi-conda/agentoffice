@@ -13,6 +13,7 @@ import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
 import { label as itemLabel } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
+import { fmtHour, fmtClock, localize } from './time.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -378,7 +379,7 @@ function onMessage(m) {
       const room = roomById(m.room);
       const go = ['soon', 'start', 'invite', 'admit'].includes(m.kind) && zoneAt(me.x, me.y)?.id !== m.room;
       chime(m.kind === 'start' ? 'focus' : 'soft');
-      toast(esc(m.text), go ? [['Walk there', () => walkInto(room)]] : [], 9000);
+      toast(esc(localize(m.text)), go ? [['Walk there', () => walkInto(room)]] : [], 9000);
       break;
     }
     case 'bounce': {
@@ -386,11 +387,11 @@ function onMessage(m) {
       path = null; walkTarget = null; pendingUse = null; follow = null;
       if (performance.now() - (onMessage.bounced || 0) > 4000) {
         onMessage.bounced = performance.now();
-        toast(esc(m.text), [['Knock', () => knock(m.room)]], 8000);
+        toast(esc(localize(m.text)), [['Knock', () => knock(m.room)]], 8000);
       }
       break;
     }
-    case 'toast': toast(esc(m.text)); if (m.ws) { chime('break'); station.poke(); } break;
+    case 'toast': toast(esc(localize(m.text))); if (m.ws) { chime('break'); station.poke(); } break;
     case 'wsr': station.onReply(m); break;
     // How the freeq bridge is doing for you: a line in the chat log, and a toast when something failed.
     case 'freeq-note': {
@@ -400,7 +401,7 @@ function onMessage(m) {
       break;
     }
     case 'rtc': voice.onSignal(m.from, m.data); break;
-    case 'error': toast(`⚠️ ${esc(m.message)}`); break;
+    case 'error': toast(`⚠️ ${esc(localize(m.message))}`); break;
     case 'replaced': toast(esc(m.text)); break;
   }
 }
@@ -413,7 +414,7 @@ function logChat(m) {
   d.className = `m ${m.scope === 'office' ? 'office' : ''} ${m.mention ? 'mention' : ''}`;
   const scope = m.scope === 'nearby' ? '' : `<span class="sc">${esc(m.scope === 'office' ? '📣 office' : m.scope)}</span>`;
   // Said on freeq while the office wasn't listening, caught up after a restart.
-  const when = m.backfill ? `<span class="missed" title="Said on freeq while the office was away">${esc(new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> ` : '';
+  const when = m.backfill ? `<span class="missed" title="Said on freeq while the office was away">${esc(fmtTime(m.ts))}</span> ` : '';
   if (m.action) d.classList.add('act');
   d.innerHTML = `${scope}${when}<b style="color:${colorFor(m.id)}">${esc(m.name)}</b> ${linkify(esc(m.text))}`;
   pushLog(d);
@@ -968,6 +969,12 @@ function dayWord(t) {
   if (d === isoDay(serverNow() + DAY)) return 'tomorrow';
   return new Date(t).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
+// Every quarter hour of the day as "HH:MM", plus `keep` if it's off the grid.
+const startTimes = (keep) => {
+  const all = Array.from({ length: 96 }, (_, i) => `${pad(Math.floor(i / 4))}:${pad((i % 4) * 15)}`);
+  if (keep && !all.includes(keep)) all.push(keep), all.sort();
+  return all;
+};
 const statusDot = (state) => `<span class="dot st-${state}"></span>`;
 const canBook = () => !!me?.did;
 const signInHint = '<p class="small muted">Sign in with your AT Protocol handle (on the way in) to book rooms. Guests can see the schedule.</p>';
@@ -1007,7 +1014,7 @@ function openSchedule(opts = {}) {
   const render = () => {
     const now = serverNow();
     if (!draft.time) draft.time = draft.date === isoDay(now) ? hm(Math.ceil((now + 5 * MIN) / (30 * MIN)) * 30 * MIN) : '10:00';
-    // 07:00–21:00, stretched to fit early or late bookings (and now).
+    // 7 AM–9 PM, stretched to fit early or late bookings (and now).
     const dayStart = fromLocal(draft.date, '00:00'), dayEnd = dayStart + DAY;
     const times = bookings.filter((b) => b.end > dayStart && b.start < dayEnd).flatMap((b) => [b.start, b.end]);
     if (now > dayStart && now < dayEnd) times.push(now);
@@ -1017,7 +1024,7 @@ function openSchedule(opts = {}) {
     if ((h1 - h0) % 2) h1 < 24 ? h1++ : h0--;
     const from = dayStart + h0 * 60 * MIN, to = dayStart + h1 * 60 * MIN;
     const pct = (t) => ((Math.min(to, Math.max(from, t)) - from) / (to - from)) * 100;
-    const hours = Array.from({ length: (h1 - h0) / 2 }, (_, i) => h0 + i * 2).map((h) => `<span style="left:${pct(dayStart + h * 60 * MIN)}%">${pad(h)}:00</span>`).join('');
+    const hours = Array.from({ length: (h1 - h0) / 2 }, (_, i) => h0 + i * 2).map((h) => `<span style="left:${pct(dayStart + h * 60 * MIN)}%">${fmtHour(dayStart + h * 60 * MIN)}</span>`).join('');
     const rows = ROOMS.map((r) => {
       const st = roomStatus(bookings, r.id, now);
       const blocks = bookings.filter((b) => b.room === r.id && b.end > from && b.start < to).map((b) => `
@@ -1039,7 +1046,7 @@ function openSchedule(opts = {}) {
         ${canBook() ? `<form class="book-form">
           <label>Room<select name="room">${ROOMS.map((r) => `<option value="${r.id}"${r.id === draft.room ? ' selected' : ''}>${esc(r.name)}${r.av ? ' (A/V)' : ''}</option>`).join('')}</select></label>
           <label>Day<input type="date" name="date" value="${draft.date}" min="${isoDay(now)}" max="${isoDay(now + RULES.ahead)}"></label>
-          <label>Start<input type="time" name="time" step="300" value="${draft.time}"></label>
+          <label>Start<select name="time">${startTimes(draft.time).map((v) => `<option value="${v}"${v === draft.time ? ' selected' : ''}>${fmtClock(v)}</option>`).join('')}</select></label>
           <label>Length<select name="minutes">${durations.map((d) => `<option value="${d}"${d === +draft.minutes ? ' selected' : ''}>${d < 60 ? `${d} min` : `${d / 60} h`}</option>`).join('')}</select></label>
           <label class="wide">What's it for<input name="title" maxlength="80" value="${esc(draft.title)}" placeholder="e.g. Design review"></label>
           <label class="wide">Invite (handles, comma separated; agents by name)<input name="invitees" value="${esc(draft.invitees)}" placeholder="ada.bsky.social, StandupBot"></label>

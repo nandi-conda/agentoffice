@@ -13,7 +13,7 @@ import { Entity } from './runtime.js';
 import { str, int, bool, arr, obj, opt } from './schema.js';
 import { WS_APPS } from '../../public/js/apps.js';
 import { zoneAt, ZONES } from '../../public/js/map.js';
-import { fmtTime, fmtRange } from '../../public/js/rooms.js';
+import { stamp, stampRange } from '../../public/js/time.js';
 import { PluginHost } from '../plugins.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').slice(0, n);
@@ -310,7 +310,7 @@ export const SHELL = {
     const list = bookings.filter((b) => b.end > now && b.start < until);
     if (!list.length) return out('No bookings coming up. Book a room from its door or the Calendar app.');
     const name = (id) => ZONES.find((z) => z.id === id)?.name || id;
-    return out(list.map((b) => `${b.start <= now ? '▶' : ' '} ${pad(fmtRange(b), 15)} ${pad(name(b.room), 14)} ${b.title}  (${b.name})`).join('\n') + '\n(times in UTC)');
+    return out(list.map((b) => `${b.start <= now ? '▶' : ' '} ${stampRange(b)}\t${pad(name(b.room), 14)} ${b.title}  (${b.name})`).join('\n'));
   },
 
   todo: async function ({ who, args, arg, out }) {
@@ -338,8 +338,8 @@ export const SHELL = {
   jot: async function ({ who, arg, out }) {
     if (!arg) throw new Error('jot <text>');
     const n = this.notes.find((x) => x.title === 'Scratch');
-    const stamp = fmtTime(this.now());
-    await this.noteSave(who, { id: n?.id, title: 'Scratch', text: `${n ? `${n.text}\n` : ''}${stamp} ${arg}` });
+    const at = stamp(this.now());
+    await this.noteSave(who, { id: n?.id, title: 'Scratch', text: `${n ? `${n.text}\n` : ''}${at} ${arg}` });
     return out('Jotted down in Scratch.');
   },
 
@@ -350,7 +350,7 @@ export const SHELL = {
       return out(t ? `${t.label}: ${Math.max(0, Math.ceil((t.endsAt - this.now()) / 60000))} min left` : 'No timer. timer <minutes> [label]');
     }
     const t = await this.timerStart(who, { minutes: args[0], label: args.slice(1).join(' ') });
-    return out(`${t.label}: ${t.minutes} min, rings at ${fmtTime(t.endsAt)} UTC.`);
+    return out(`${t.label}: ${t.minutes} min, rings at ${stamp(t.endsAt)}.`);
   },
 
   links: function ({ out }) {

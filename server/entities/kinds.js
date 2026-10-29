@@ -9,7 +9,8 @@ import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
 import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
 import { Workstation } from './workstation.js';
-import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, fmtTime, fmtRange } from '../../public/js/rooms.js';
+import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf } from '../../public/js/rooms.js';
+import { stamp, stampRange } from '../../public/js/time.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
@@ -509,11 +510,11 @@ export class Room extends Entity {
         seen: false, admitted: [], sent: {}, created: now,
       };
       this.bookings = [...this.bookings, b];
-      for (const q of presence) if (q.id !== who.id && isHolder(b, q)) effects.push(this.note(q, b, 'invite', `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${fmtRange(b)}`));
+      for (const q of presence) if (q.id !== who.id && isHolder(b, q)) effects.push(this.note(q, b, 'invite', `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${stampRange(b)}`));
       // Invited by DID and not here: their actor keeps the invite for them.
       const here = new Set(presence.map((q) => q.did).filter(Boolean));
       const away = b.invitees.filter((i) => i.startsWith('did:') && !here.has(i));
-      await Promise.all(away.map((did) => this.tell(`actor:${did}`, 'deliver', { t: 'roomnote', kind: 'invite', room: b.room, id: b.id, text: `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${fmtRange(b)}` })));
+      await Promise.all(away.map((did) => this.tell(`actor:${did}`, 'deliver', { t: 'roomnote', kind: 'invite', room: b.room, id: b.id, text: `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${stampRange(b)}` })));
       const out = await done(b);
       await this.tick({ presence });
       return out;
@@ -586,7 +587,7 @@ export class Room extends Entity {
       }
       if (!sent.soon && b.start > now && b.start - now <= RULES.remind) {
         sent.soon = true; changed = true;
-        for (const q of presence) if (isHolder(b, q) && !inside.includes(q)) effects.push(this.note(q, b, 'soon', `📅 “${b.title}” in ${room.name} starts at ${fmtTime(b.start)}`));
+        for (const q of presence) if (isHolder(b, q) && !inside.includes(q)) effects.push(this.note(q, b, 'soon', `📅 “${b.title}” in ${room.name} starts at ${stamp(b.start)}`));
       }
       if (b.start > now) continue;
       if (!b.seen && inside.some((q) => isHolder(b, q))) { b.seen = true; changed = true; }
@@ -597,7 +598,7 @@ export class Room extends Entity {
             if (!inside.includes(q)) effects.push(this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`));
           } else if (inside.includes(q)) {
             if (b.lock) effects.push({ op: 'showOut', to: q.id, room: room.id, text: `🔒 ${room.name} is booked now for “${b.title}” (${b.name}), so you've been shown out.` });
-            else effects.push(this.note(q, b, 'taken', `📅 ${room.name} is booked now for “${b.title}” (${b.name}) until ${fmtTime(b.end)}`));
+            else effects.push(this.note(q, b, 'taken', `📅 ${room.name} is booked now for “${b.title}” (${b.name}) until ${stamp(b.end)}`));
           }
         }
       }

@@ -11,6 +11,7 @@
 import { WS_APPS } from './apps.js';
 import { renderUi } from './objects.js';
 import { ROOMS, roomById, fmtTime, fmtRange, isHolder } from './rooms.js';
+import { localize } from './time.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
@@ -111,7 +112,7 @@ export function createWorkstation({ send, office }) {
 
   function tick() {
     if (!root || root.hidden) return;
-    bar.querySelector('.ws-clock').textContent = new Date(office.serverNow()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    bar.querySelector('.ws-clock').textContent = fmtTime(office.serverNow());
     const share = bar.querySelector('.ws-share');
     share.classList.toggle('on', office.share.on());
     share.querySelector('span').textContent = office.share.on() ? 'Sharing' : 'Share';
@@ -290,13 +291,13 @@ registerApp({
       save.flush();
       shown++;
       cur = n;
-      title.value = n?.title || ''; text.value = n?.text || '';
+      title.value = n?.title || ''; text.value = localize(n?.text || '');
       saved.textContent = n ? `Saved ${fmtTime(n.updated)}` : '';
       draw();
     };
     function draw() {
       const notes = ctx.desktop()?.notes || [];
-      list.innerHTML = notes.map((n) => `<li><button class="${n.id === cur?.id ? 'on' : ''}" data-id="${esc(n.id)}"><b>${esc(n.title)}</b><small>${esc(n.text.slice(0, 60))}</small></button></li>`).join('') || '<li class="muted small">No notes yet.</li>';
+      list.innerHTML = notes.map((n) => `<li><button class="${n.id === cur?.id ? 'on' : ''}" data-id="${esc(n.id)}"><b>${esc(n.title)}</b><small>${esc(localize(n.text).slice(0, 60))}</small></button></li>`).join('') || '<li class="muted small">No notes yet.</li>';
       list.querySelectorAll('button').forEach((b) => (b.onclick = () => show(notes.find((n) => n.id === b.dataset.id))));
     }
     title.oninput = text.oninput = () => { dirty = true; save(); };
@@ -312,7 +313,7 @@ registerApp({
     };
     show(ctx.desktop()?.notes?.[0] || null);
     return {
-      refresh(d) { if (cur) cur = d.notes.find((n) => n.id === cur.id) || cur; if (!dirty && document.activeElement !== text && document.activeElement !== title && cur) { title.value = cur.title; text.value = cur.text; } draw(); },
+      refresh(d) { if (cur) cur = d.notes.find((n) => n.id === cur.id) || cur; if (!dirty && document.activeElement !== text && document.activeElement !== title && cur) { title.value = cur.title; text.value = localize(cur.text); } draw(); },
       close() { save.flush(); },
     };
   },
@@ -349,7 +350,7 @@ registerApp({
     body.innerHTML = `<div class="ws-term"><pre class="ws-out"></pre><form class="ws-line"><span>${esc(prompt)}</span><input autocomplete="off" spellcheck="false" maxlength="500" aria-label="Command"></form></div>`;
     const out = body.querySelector('.ws-out'), form = body.querySelector('form'), inp = form.querySelector('input');
     const history = []; let hi = 0;
-    const print = (s, cls = '') => { const span = document.createElement('span'); if (cls) span.className = cls; span.textContent = `${s}\n`; out.append(span); out.scrollTop = out.scrollHeight; };
+    const print = (s, cls = '') => { const span = document.createElement('span'); if (cls) span.className = cls; span.textContent = `${localize(s)}\n`; out.append(span); out.scrollTop = out.scrollHeight; };
     print('Office shell. Type help for commands.', 'muted');
     form.onsubmit = async (e) => {
       e.preventDefault();

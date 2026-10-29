@@ -10,7 +10,8 @@
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
-import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
+import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js';
+import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
 import { str, int, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
@@ -551,7 +552,7 @@ export class Office {
     const from = zoneAt(p.x, p.y), to = zoneAt(x, y);
     if (to?.bookable && to !== from && lockedOut(this.bookings, to.id, p, this.now())) {
       const b = activeBooking(this.bookings, to.id, this.now());
-      return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${fmtTime(b.end)}. Knock to be let in.` });
+      return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${stamp(b.end)}. Knock to be let in.` });
     }
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (p.seat && m.moving) p.seat = null;
