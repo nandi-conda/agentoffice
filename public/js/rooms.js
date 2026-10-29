@@ -1,5 +1,7 @@
-// Meeting room bookings. Shared by the server (which owns the schedule), the
-// browser (which draws it) and agents, so it stays free of DOM and Node APIs.
+// Meeting room bookings. Shared by the server (which keeps the door), the
+// browser (which draws the schedule) and agents, so it stays free of DOM and
+// Node APIs. The schedule itself is kept by each room's door panel, a WASM
+// plugin (plugins/wasm-rooms) with the same rules as checkSlot below.
 //
 // A booking is { id, room, title, start, end, owner, name, handle, invitees,
 // lock, autoRelease, seen, admitted, created }. Times are epoch ms. `owner`
@@ -12,6 +14,8 @@ import { stampRange } from './time.js';
 export const MIN = 60000;
 export const ROOMS = ZONES.filter((z) => z.bookable);
 export const roomById = (id) => ROOMS.find((r) => r.id === id) || null;
+// The door panel that keeps a room's bookings (plugins/wasm-rooms, entity plugin:<panel>).
+export const panelOf = (room) => `panel-${room}`;
 
 export const RULES = {
   step: 5 * MIN, // starts and ends snap to 5 minutes

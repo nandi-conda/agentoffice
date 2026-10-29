@@ -1,0 +1,16 @@
+[package]
+name = "rooms"
+version = "0.1.0"
+description = "The meeting room door panels: bookings, knocks, reminders and auto-release, as a WASM plugin."
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+agentoffice-plugin = { path = "../../crates/agentoffice-plugin" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

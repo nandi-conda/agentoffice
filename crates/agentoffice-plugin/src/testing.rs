@@ -30,7 +30,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::{handle_json, Actor, Booking, Display, Item, Object, Permission, Person, Plugin, Response, Room};
+use crate::{handle_json, Actor, Booking, Display, Item, Note, Object, Permission, Person, Plugin, Response, Room};
 
 /// The office's limits (server/plugins.js, server/sandbox.js, public/js/items.js).
 pub mod limits {
@@ -55,6 +55,9 @@ pub mod limits {
     pub const APPEND: usize = 20;
     pub const FEED_ENTRY_BYTES: usize = 8 * 1024;
     pub const FEED: usize = 3000;
+    pub const NOTES: usize = 10;
+    pub const NOTE: usize = 280;
+    pub const NOTE_TO: usize = 40;
 }
 
 thread_local! {
@@ -104,6 +107,8 @@ pub struct TestOffice<P> {
     unlocked: Vec<(String, String)>,
     feed: Vec<Value>,
     data_now: Option<Value>,
+    notes: Vec<Note>,
+    here: Option<Vec<String>>,
     plugin: std::marker::PhantomData<P>,
 }
 
@@ -137,6 +142,8 @@ impl<P: Plugin> TestOffice<P> {
             unlocked: Vec::new(),
             feed: Vec::new(),
             data_now: None,
+            notes: Vec::new(),
+            here: None,
             plugin: std::marker::PhantomData,
         }
     }
@@ -246,6 +253,26 @@ impl<P: Plugin> TestOffice<P> {
 
     pub fn advance(&mut self, ms: f64) -> &mut Self { self.now += ms; self }
 
+    /// Who stands in the object's zone (`nearby`), by name. Until you say,
+    /// everyone you've named is.
+    pub fn here(&mut self, names: &[&str]) -> &mut Self {
+        for n in names { self.actor(n); }
+        self.here = Some(names.iter().map(|n| n.to_string()).collect());
+        self
+    }
+
+    /// A call the office makes itself: `name` does `action` with an event
+    /// only the office sends (`kind`, with `data`), the way the meeting room
+    /// panels get `book` and `unlock`. No panel opens.
+    pub fn office_call(&mut self, name: &str, action: &str, kind: &str, data: Value) -> Response {
+        let who = self.actor(name);
+        let zone = self.object.zone.clone().unwrap_or_default();
+        self.event_now = Some(json!({ "type": kind, "zone": zone, "data": data }));
+        let mut r = self.run(who, action, None);
+        r.ui = None;
+        r
+    }
+
     /// `name` walks into `zone`. Like the office, the plugin only hears about
     /// it if it watches that zone; returns `None` when it doesn't.
     pub fn walk_in(&mut self, name: &str, zone: &str) -> Option<Response> { self.event(name, "enter", zone) }
@@ -274,7 +301,9 @@ impl<P: Plugin> TestOffice<P> {
         self.seed = self.seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         let event = self.event_now.take();
         let data = self.data_now.take();
-        let nearby: Vec<Person> = self.people.values().map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone() }).collect();
+        let nearby: Vec<Person> = self.people.values()
+            .filter(|a| self.here.as_ref().is_none_or(|h| h.contains(&a.name)))
+            .map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone(), did: a.did.clone(), kind: a.kind.clone() }).collect();
         let inventory = if who.is_system() { Vec::new() } else { self.inventory(&who.name).to_vec() };
         // Like the office: rooms only for plugins that may unlock, each
         // marked `yours` when this actor booked it or was let in.
@@ -339,6 +368,12 @@ impl<P: Plugin> TestOffice<P> {
             let over = self.feed.len().saturating_sub(limits::FEED);
             self.feed.drain(..over);
         }
+        // notify: only with the permission, like the office.
+        if !r.notify.is_empty() && !self.granted.iter().any(|g| g == "notify") {
+            self.warn("the answer sends notes without the notify permission and the office drops them: add Permission::Notify to MANIFEST (moderators upload those)".into());
+            r.notify.clear();
+        }
+        self.notes.extend(r.notify.iter().cloned());
         if let Some(state) = raw.get("state") { self.save_state(state); }
         if let Some(s) = &r.say { self.said.push(s.clone()); }
         if let Some(d) = &r.display { self.display = Some(d.clone()); }
@@ -400,6 +435,13 @@ impl<P: Plugin> TestOffice<P> {
         let mut w = Vec::new();
         if r.say.as_deref().is_some_and(|s| long(s, limits::SAY)) { w.push(format!("say is over {} characters and gets cut", limits::SAY)); }
         if r.toast.as_deref().is_some_and(|s| long(s, limits::TOAST)) { w.push(format!("toast is over {} characters and gets cut", limits::TOAST)); }
+        if r.notify.len() > limits::NOTES { w.push(format!("notify sends {} notes; the office sends {} at most", r.notify.len(), limits::NOTES)); }
+        for n in &r.notify {
+            if long(&n.text, limits::NOTE) { w.push(format!("a note is over {} characters and gets cut", limits::NOTE)); }
+            if n.to.len() > limits::NOTE_TO { w.push(format!("a note goes to {} people; the office takes {} at most", n.to.len(), limits::NOTE_TO)); }
+            if n.to.is_empty() && n.inside.is_none() { w.push("a note with nobody in `to` needs `inside` (a zone): the office drops it".into()); }
+        }
+        if r.reply.as_ref().is_some_and(|v| v.to_string().len() > limits::DATA_BYTES) { w.push(format!("reply is over {} bytes and is dropped", limits::DATA_BYTES)); }
         if let Some(d) = &r.display {
             if d.label.as_deref().is_some_and(|s| long(s, limits::LABEL)) { w.push(format!("display.label is over {} characters and gets cut", limits::LABEL)); }
             if let Some(g) = &d.glow {
@@ -457,6 +499,10 @@ impl<P: Plugin> TestOffice<P> {
     pub fn wake_at(&self) -> Option<f64> { self.wake_at }
     /// The zones the plugin watches now.
     pub fn watching(&self) -> &[String] { &self.watching }
+    /// Every note the plugin sent ([`Response::notify`]), oldest first.
+    pub fn notes(&self) -> &[Note] { &self.notes }
+    /// Forget the notes so far.
+    pub fn clear_notes(&mut self) -> &mut Self { self.notes.clear(); self }
     /// Lines the plugin logged with [`crate::log`].
     pub fn logs(&self) -> &[String] { &self.logs }
     /// Things the office would clip or drop. Empty in a well-behaved plugin.

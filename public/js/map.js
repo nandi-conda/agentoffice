@@ -106,8 +106,10 @@ add({ type: 'screen', id: 'huddle-screen', x: 44, y: 12, w: 2, h: 1, solid: true
 
 // Booking panels: wall tablets beside each bookable room's door, showing
 // whether the room is free. They hang on the wall, so they don't block.
-for (const [zone, x, y] of [['board', 34, 5], ['huddle', 34, 15], ['booth1', 3, 17], ['booth2', 7, 17], ['booth3', 11, 17]]) {
-  add({ type: 'panel', id: `panel-${zone}`, x, y, w: 1, h: 1, zone, interact: 'room' });
+// Each keeps its room's bookings: a WASM plugin (plugins/wasm-rooms), which
+// took over what the room entity kept (`legacy`). The office keeps the door.
+for (const [zone, x, y, name] of [['board', 34, 5, 'Boardroom'], ['huddle', 34, 15, 'Huddle Room'], ['booth1', 3, 17, 'Booth 1'], ['booth2', 7, 17, 'Booth 2'], ['booth3', 11, 17, 'Booth 3']]) {
+  add({ type: 'panel', id: `panel-${zone}`, x, y, w: 1, h: 1, zone, room: zone, interact: 'room', plugin: 'rooms', wasm: 'rooms.wasm', name, legacy: `room:${zone}` });
 }
 add({ type: 'plant', id: 'p-hud', x: 35, y: 19, w: 1, h: 1, solid: true });
 

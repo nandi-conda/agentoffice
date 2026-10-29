@@ -3,14 +3,13 @@
 // show and turns it into protocol messages (Office.apply).
 
 import { Entity } from './runtime.js';
-import { str, int, num as numS, bool, arr, obj, opt, WHO } from './schema.js';
+import { str, int, num as numS, bool, arr, obj, opt } from './schema.js';
 import { DESKS, ZONES, PLUGIN_OBJECTS } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
 import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
 import { Workstation } from './workstation.js';
-import { MIN, RULES, roomById, activeBooking, checkSlot, toTime, parseInvitees, isHolder, keyOf, inRoomOrDoor } from '../../public/js/rooms.js';
-import { stamp, stampRange } from '../../public/js/time.js';
+import { MIN } from '../../public/js/rooms.js';
 import { Wing, ChannelRoom } from './channels.js';
 import { ROLES, GRANTABLE, effectiveRole, grantError, can } from '../../public/js/roles.js';
 
@@ -351,241 +350,30 @@ export class Pomodoro extends Entity {
   seed(count) { if (count && !this.state.count) { this.state.count = count; return this.save(); } }
 }
 
-// ---- meeting rooms -----------------------------------------------------------------------
-// Each bookable room keeps its own bookings, wakes itself for reminders and
-// start/end announcements, and listens on its zone topic for people coming in.
-// Notes for a booking's owner go to their actor, so they get them even if
-// they're out of the office.
-
-// When tick() next has something to do for these bookings.
-export function nextRoomEvent(bookings, now) {
-  let t = Infinity;
-  for (const b of bookings) {
-    const s = b.sent || {};
-    for (const [due, when] of [[!s.soon, b.start - RULES.remind], [!s.start, b.start], [b.autoRelease && !b.seen, b.start + RULES.grace], [!s.ending, b.end - RULES.remind], [!s.ended, b.end], [true, b.end + 24 * 60 * MIN]]) {
-      if (due && when > now && when < t) t = when;
-    }
-    if (b.start <= now && now < b.end && !b.seen) t = Math.min(t, now + 30000);
-  }
-  return Number.isFinite(t) ? t : null;
-}
-
+// ---- meeting rooms (retired) -------------------------------------------------------------
+// The bookings and their rules live in each room's door panel now, a WASM
+// plugin (plugins/wasm-rooms, entity plugin:panel-<room>); the World keeps
+// the door. A room entity only keeps the bookings it had, which its panel
+// takes over the first time it runs (`legacy` on the map object).
 export class Room extends Entity {
-  static doc = 'A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, keeps everyone but the meeting out while it runs, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking\'s owner go to their actor, so they get them even when away.';
+  static doc = 'Retired: a meeting room\'s bookings, as they were before its door panel (a WASM plugin, plugin:panel-<room>) took them over. Kept only for that takeover.';
   static api = {
-    view: { doc: 'Its bookings (a day of history included).', returns: arr(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') }), 'Bookings') },
-    book: {
-      doc: 'Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking (moderators can cancel or end anyone\'s).', who: true, ctx: true, mutates: true, cap: 'bookings.override',
-      params: { m: obj({
-        op: str('create, cancel, extend, end, update or admit', 8, { enum: ['create', 'cancel', 'extend', 'end', 'update', 'admit'] }),
-        id: opt(str('Booking id (all ops but create)', 16)),
-        title: opt(str('Title', 80)),
-        start: opt({ type: ['integer', 'string'], description: 'ms since epoch, or "now"' }),
-        end: opt(int('ms since epoch', 0)),
-        minutes: opt(int('Length for create (15..240), or how much to extend by (5..120)', 5, 240)),
-        invitees: opt(arr(str('Handle, DID or agent name', 253), 'Invitees', 20)),
-        lock: opt(bool('Ignored: every booking keeps everyone but its holders out')),
-        autoRelease: opt(bool('Free the room if nobody turns up within 10 minutes (default true)')),
-        to: opt(str('Peer id to let in (admit)', 64)),
-      }, 'What to do', ['op']) },
-      returns: obj({ booking: opt(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') })), error: opt(str('Why not')) }),
-    },
-    unlock: { doc: 'Let someone into the meeting running now, past the booking, as if a holder had let them in: what a plugin with the unlock permission (e.g. the Skeleton Key) does for whoever uses it. The people in the meeting are told.', params: { who: WHO, by: str('What let them in', 40) }, returns: { type: 'object', description: '{ booking } or { error }' }, mutates: true, internal: true },
-    tick: { doc: 'Send due reminders and announcements, release no-shows. Safe to call as often as you like; the alarm calls it.', params: { opts: opt(obj({ presence: arr(WHO, 'Who is in') })) }, mutates: true, internal: true },
+    view: { doc: 'The bookings it kept.', returns: arr(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0) }), 'Bookings'), internal: true },
+    retire: { doc: 'Stop listening on its zone: the panel that took over its bookings does now.', mutates: true, internal: true },
   };
-  static events = { subscribes: { 'zone:<room>': 'enter: a holder turning up keeps the booking from being released' } };
 
-  get room() { return roomById(this.name); }
-  get bookings() { return this.state.bookings || []; }
-  set bookings(v) { this.state.bookings = v; }
-
-  async setup() { await this.subscribe(`zone:${this.name}`); }
-  view() { return this.bookings; }
+  view() { return this.state.bookings || []; }
   seed(all) {
     if (!Array.isArray(all) || this.state.bookings) return;
-    this.bookings = all.filter((b) => b.room === this.name);
+    this.state.bookings = all.filter((b) => b.room === this.name);
     return this.save();
   }
 
-  async changed() {
-    this.bookings.sort((a, c) => a.start - c.start);
+  async retire() {
+    if (!(this.state.subs || []).length) return;
+    for (const t of this.state.subs) await this.unsubscribe(t);
+    await this.setAlarm(null);
     await this.save();
-    await this.mirror(this.bookings);
-    await this.setAlarm(nextRoomEvent(this.bookings, this.now()));
-  }
-
-  note(q, b, kind, text) {
-    return { op: 'send', to: q.id, msg: { t: 'roomnote', kind, room: b.room, id: b.id, text } };
-  }
-
-  // Owner notes go through their actor, so they're kept if they're away.
-  noteOwner(b, kind, text) {
-    if (b.owner.startsWith('human:')) return null; // a guest, nobody to keep it for
-    return this.tell(`actor:${b.owner}`, 'deliver', { t: 'roomnote', kind, room: b.room, id: b.id, text });
-  }
-
-  // `who` is the person asking, `all` every booking in the office (the
-  // per-owner limit spans rooms), `presence` who's in the office now.
-  async book(who, m, { all = [], presence = [] } = {}) {
-    const now = this.now(), room = this.room, key = who.key;
-    const effects = [];
-    const others = all.filter((b) => b.room !== this.name);
-    const list = () => [...others, ...this.bookings];
-    const done = async (b) => { await this.changed(); if (effects.length) await this.emit(...effects); return { booking: b }; };
-
-    if (m.op === 'create') {
-      if (!who.did && who.kind !== 'agent') return { error: 'sign in to book a room' };
-      const start = m.start === undefined || m.start === 'now' ? now : toTime(m.start, now);
-      const end = m.end !== undefined ? toTime(m.end, now) : start + num(m.minutes, 15, 240, 30) * MIN;
-      const slot = checkSlot(list(), { room: room.id, start, end, owner: key }, now);
-      if (slot.error) return { error: slot.error };
-      const b = {
-        id: shortId(), room: room.id, title: clip(m.title, 80) || `${who.name}'s meeting`,
-        start: slot.start, end: slot.end, owner: key, name: who.name, handle: who.handle,
-        invitees: parseInvitees(m.invitees), lock: !!m.lock, autoRelease: m.autoRelease !== false,
-        seen: false, admitted: [], sent: {}, created: now,
-      };
-      this.bookings = [...this.bookings, b];
-      for (const q of presence) if (q.id !== who.id && isHolder(b, q)) effects.push(this.note(q, b, 'invite', `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${stampRange(b)}`));
-      // Invited by DID and not here: their actor keeps the invite for them.
-      const here = new Set(presence.map((q) => q.did).filter(Boolean));
-      const away = b.invitees.filter((i) => i.startsWith('did:') && !here.has(i));
-      await Promise.all(away.map((did) => this.tell(`actor:${did}`, 'deliver', { t: 'roomnote', kind: 'invite', room: b.room, id: b.id, text: `📅 ${who.name} invited you to “${b.title}” in ${room.name}, ${stampRange(b)}` })));
-      const out = await done(b);
-      await this.tick({ presence });
-      return out;
-    }
-
-    const b = this.bookings.find((x) => x.id === m.id);
-    if (!b) return { error: 'no such booking' };
-    if (m.op === 'admit') {
-      // Anyone already holding the room can let a knocker in.
-      if (!isHolder(b, who) || !(b.start <= now && now < b.end)) return { error: 'only people in the meeting can let others in' };
-      const q = presence.find((x) => x.id === m.to);
-      if (!q) return { error: 'they left' };
-      if (!b.admitted.includes(keyOf(q))) b.admitted.push(keyOf(q));
-      effects.push(this.note(q, b, 'admit', `🔓 ${who.name} let you into ${room.name}`));
-      return done(b);
-    }
-    // Moderators can cancel or end anyone's booking, not take it over.
-    const override = b.owner !== key && can(who.role, 'bookings.override') && (m.op === 'cancel' || m.op === 'end');
-    if (b.owner !== key && !override) return { error: 'only the person who booked it can change it' };
-    if (override) await this.noteOwner(b, 'override', `📅 ${who.name} ${m.op === 'cancel' || b.start > now ? 'cancelled' : 'ended'} “${b.title}” in ${room.name}`);
-    if (m.op === 'cancel' || (m.op === 'end' && b.start > now)) {
-      this.bookings = this.bookings.filter((x) => x !== b);
-      for (const q of presence) {
-        if (q.id !== who.id && isHolder(b, q) && b.end > now) effects.push(this.note(q, b, 'cancel', `📅 “${b.title}” in ${room.name} was cancelled`));
-      }
-      await done(b);
-      return { booking: { ...b, cancelled: true } };
-    }
-    if (m.op === 'end') {
-      b.end = Math.max(b.start, now);
-      b.sent.ended = true;
-      return done(b);
-    }
-    if (m.op === 'extend') {
-      const slot = checkSlot(list(), { room: b.room, start: b.start, end: b.end + num(m.minutes, 5, 120, 15) * MIN, owner: key, id: b.id }, now);
-      if (slot.error) return { error: slot.error };
-      b.end = slot.end;
-      b.sent.ending = false;
-      return done(b);
-    }
-    if (m.op === 'update') {
-      if (m.title !== undefined) b.title = clip(m.title, 80) || b.title;
-      if (m.invitees !== undefined) b.invitees = parseInvitees(m.invitees);
-      if (m.lock !== undefined) b.lock = !!m.lock;
-      if (m.start !== undefined || m.end !== undefined) {
-        const start = m.start !== undefined ? toTime(m.start, now) : b.start;
-        const end = m.end !== undefined ? toTime(m.end, now) : start + (b.end - b.start);
-        const slot = checkSlot(list(), { room: b.room, start, end, owner: key, id: b.id }, now);
-        if (slot.error) return { error: slot.error };
-        Object.assign(b, { start: slot.start, end: slot.end, sent: {} });
-      }
-      return done(b);
-    }
-    return { error: 'unknown booking op' };
-  }
-
-  // A plugin with the unlock permission let `who` in: they count as admitted
-  // to the meeting running now, and the meeting hears about it.
-  async unlock(who, by = 'a key') {
-    const now = this.now(), room = this.room;
-    const b = activeBooking(this.bookings, room.id, now);
-    if (!b) return { error: `${room.name} isn't booked right now: just walk in` };
-    if (isHolder(b, who)) return { booking: b };
-    b.admitted = [...new Set([...(b.admitted || []), keyOf(who)])];
-    const presence = await this.world.presence().catch(() => []);
-    const effects = presence.filter((q) => q.id !== who.id && isHolder(b, q)).map((q) => this.note(q, b, 'unlock', `🗝️ ${who.name} let themselves into ${room.name} with ${clip(by, 40)}`));
-    effects.push(this.note(who, b, 'unlock', `🔓 ${room.name} is open to you until “${b.title}” ends at ${stamp(b.end)}`));
-    await this.changed();
-    await this.emit(...effects);
-    return { booking: b };
-  }
-
-  // Reminders, start/end announcements, locking people out, and releasing
-  // rooms nobody turned up to. Safe to call as often as you like.
-  async tick({ presence } = {}) {
-    const now = this.now(), room = this.room;
-    presence ||= await this.world.presence();
-    const effects = [], owners = [];
-    let changed = false;
-    const inside = presence.filter((q) => q.zone === room.id || inRoomOrDoor(room, q.x, q.y));
-    for (const b of [...this.bookings]) {
-      const sent = (b.sent ||= {});
-      if (b.end <= now) {
-        if (!sent.ended) {
-          sent.ended = true; changed = true;
-          for (const q of inside) effects.push(this.note(q, b, 'ended', `📅 “${b.title}” has ended. ${room.name} is free unless it's booked next.`));
-        }
-        continue;
-      }
-      if (!sent.soon && b.start > now && b.start - now <= RULES.remind) {
-        sent.soon = true; changed = true;
-        for (const q of presence) if (isHolder(b, q) && !inside.includes(q)) effects.push(this.note(q, b, 'soon', `📅 “${b.title}” in ${room.name} starts at ${stamp(b.start)}`));
-      }
-      if (b.start > now) continue;
-      if (!b.seen && inside.some((q) => isHolder(b, q))) { b.seen = true; changed = true; }
-      if (!sent.start) {
-        sent.start = true; changed = true;
-        for (const q of presence) {
-          if (isHolder(b, q) && !inside.includes(q)) effects.push(this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`));
-        }
-      }
-      // A booked room is for the meeting only: anyone else inside (there when
-      // it started, or in by any other route) is shown out, every tick.
-      for (const q of inside) {
-        if (!isHolder(b, q)) effects.push({ op: 'showOut', to: q.id, room: room.id, text: `🔒 ${room.name} is booked for “${b.title}” (${b.name}) until ${stamp(b.end)}, so you've been shown out. Knock to be let in.` });
-      }
-      if (b.autoRelease && !b.seen && now - b.start >= RULES.grace) {
-        this.bookings = this.bookings.filter((x) => x !== b);
-        changed = true;
-        owners.push([b, 'released', `📅 Nobody turned up to “${b.title}”, so ${room.name} was released`]);
-        continue;
-      }
-      if (!sent.ending && b.end - now <= RULES.remind) {
-        sent.ending = true; changed = true;
-        const next = this.bookings.find((x) => x.start >= b.end && x.start - b.end < RULES.soon);
-        for (const q of inside) effects.push(this.note(q, b, 'ending', `⏳ ${Math.ceil((b.end - now) / MIN)} minutes left in ${room.name}${next ? `. Next up: “${next.title}” (${next.name})` : ''}`));
-      }
-    }
-    // Keep a day of history so "earlier today" still shows on the schedule.
-    const keep = this.bookings.filter((b) => now - b.end < 24 * 60 * MIN);
-    if (keep.length !== this.bookings.length) { this.bookings = keep; changed = true; }
-    if (changed) await this.changed();
-    else await this.setAlarm(nextRoomEvent(this.bookings, now));
-    if (effects.length) await this.emit(...effects);
-    for (const [b, kind, text] of owners) await this.noteOwner(b, kind, text);
-  }
-
-  alarm() { return this.tick(); }
-
-  // Someone walked in: a holder turning up keeps the booking from being released.
-  async onEvent(topic, ev) {
-    if (ev.type !== 'enter') return;
-    const now = this.now();
-    const b = this.bookings.find((x) => x.start <= now && now < x.end);
-    if (b && !b.seen && isHolder(b, ev.who)) { b.seen = true; await this.changed(); }
   }
 }
 
@@ -694,7 +482,6 @@ export const KINDS = {
 // Everything the World mirrors, pulled when it starts.
 export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
-  ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
   'floor:main', 'wing:main', 'roles:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',

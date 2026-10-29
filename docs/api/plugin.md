@@ -4,7 +4,7 @@ An interactive object on the map (jukebox, vending machine, 8-ball, the Office R
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 9: `pomodoro`, `whiteboard`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
+- 14: `pomodoro`, `whiteboard`, `panel-board`, `panel-huddle`, `panel-booth1`, `panel-booth2`, `panel-booth3`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
 
 ## `view()`
 
@@ -38,6 +38,24 @@ A protocol message the World turns into an action (the whiteboard's `wb` strokes
 | Param | Type | |
 | --- | --- | --- |
 | `req` | `object` | { action, input, data } |
+
+## `act(who, action, input?, event?)`
+
+`mutates` · `internal (entity to entity)`
+
+The office's own call into the object, without the use cooldown or the walk up: the meeting room panels get `book` (booking changes) and `unlock` (the Skeleton Key) this way, as an event only the office can send, and `tick` when the World nudges them. who=null calls as the office.
+
+| Param | Type | |
+| --- | --- | --- |
+| `who` | `object \| null` | Who it is for (null: the office itself) |
+| `action` | `string ≤ 64` | Action id |
+| `input` *(optional)* | `string \| null` | Typed text |
+| `event` *(optional)* | `{ type, zone?, data? }` | An office event |
+| &nbsp;&nbsp;&nbsp;`event.type` | `string ≤ 200` | Event type |
+| &nbsp;&nbsp;&nbsp;`event.zone` *(optional)* | `string ≤ 200` | Zone |
+| &nbsp;&nbsp;&nbsp;`event.data` *(optional)* | `any` | What goes with it |
+
+Returns `object | null`
 
 ## `wake()`
 

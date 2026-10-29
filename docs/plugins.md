@@ -4,7 +4,7 @@ Every interactive object on the map is a **WASM plugin**: a Rust crate in
 `plugins/wasm-<name>/`, built with the
 [agentoffice-plugin crate](uploads.md#writing-a-wasm-plugin-in-rust) into
 `public/plugins/<name>.wasm`, and run in the same sandbox as the objects
-people [upload](uploads.md). The office ships ten:
+people [upload](uploads.md). The office ships these:
 
 | Object | Where | Crate | What it does |
 | --- | --- | --- | --- |
@@ -17,20 +17,47 @@ people [upload](uploads.md). The office ships ten:
 | 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | The Byte Snake leaderboard both cabinets share: the top 20, best first. The game runs in your browser; a finished game's score becomes its `score:<points>` action. |
 | 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
 | 🖍️ Whiteboard | Boardroom | `plugins/wasm-whiteboard` | The shared board. Checks each stroke, signs it with who drew it and puts it on its **feed** (the last 3000 strokes); anyone can wipe it. |
+| 📅 Meeting room door panels | By each bookable room's door (5) | `plugins/wasm-rooms` | Each keeps its room's bookings and every rule about them: 15 min to 4 h, 14 days ahead, no overlaps, 12 upcoming per person; reminders, start/end notes (`notify`), letting knockers in, releasing no-shows on its `wakeAt`, and noticing holders walk in (`watch`). See [meeting rooms](#meeting-rooms) below. |
 
-The coffee machine, notice board, arcade and pomodoro draw themselves in the
+The coffee machine, notice board, arcade, pomodoro and room panels draw themselves in the
 browser (the cup count on the reception desk, sticky notes, the high scores
 next to Byte Snake, the tomato clock and the den's countdown), from what they
 put in `display.data`. The whiteboard's strokes are far bigger than that, so
 they go on its [feed](#the-feed) instead, and the browser draws them on the
-boardroom wall and in its full-size editor. These five used to be core
+boardroom wall and in its full-size editor. These used to be core
 entities (`coffee:main`, `noticeboard:main`, `arcade:main`, `pomodoro:focus`,
-`whiteboard:main`); the map object names the old one as `legacy`, and the
+`whiteboard:main`, `room:<id>`); the map object names the old one as `legacy`, and the
 first time the plugin object runs (the World wakes it when it starts) it
-takes over that entity's state, so nothing pinned, counted or drawn is lost.
-The old protocol messages (`coffee`, `note`, `score`, `pomo`, `wb`) and their
+takes over that entity's state, so nothing pinned, counted, drawn or booked is lost.
+The old protocol messages (`coffee`, `note`, `score`, `pomo`, `wb`, `book`) and their
 MCP tools still work: the World turns them into the plugin's actions (a `wb`
-stroke is action `stroke` with the stroke as `data`).
+stroke is action `stroke` with the stroke as `data`; a `book` is an
+[office event](#meeting-rooms)).
+
+### Meeting rooms
+
+Each bookable room's door panel (`panel-<room>` in `public/js/map.js`, zone =
+the room, `legacy: 'room:<room>'`) runs `rooms.wasm`. The split:
+
+- **The plugin owns the bookings.** Create, cancel, extend, end, update and
+  admit, the slot rules, reminders 5 minutes before the start and the end,
+  start and end notes, auto-release after 10 minutes with nobody there, and
+  the Skeleton Key's way in. Notes go out with `notify` (the trusted
+  `notify` permission): to the meeting's holders wherever they are, to
+  everyone in the room, and kept in the owner's or an invitee's actor when
+  they're away. The schedule goes out in `display.data.bookings`, which is
+  what the World reads (`office.bookings`) and what browsers draw.
+- **The office keeps the door.** Moves into a booked room or its doorway are
+  bounced and anyone else inside is shown out (`Office.enforce`, run after
+  every panel turn, so a booking starting clears the room). A/V stays with
+  the room's zone as before.
+- **Only the office can change bookings.** The `book` protocol message
+  (the booking form, `book_room`, `manage_booking`) reaches the panel as
+  action `book` with an office event (`event.type: 'book'`, `data`: the op,
+  times already parsed, how many bookings the owner has in the other rooms,
+  and who is being let in). A Skeleton Key's `unlock` arrives the same way
+  (`event.type: 'unlock'`, `data.by`). Plugins can't make up office events,
+  so pressing E on a panel (or `plugin_interact`) only shows the schedule.
 
 Walk up to one and press **E** (or tap the prompt). A panel opens; what you
 pick goes to the plugin, and what it says appears as a speech bubble over the

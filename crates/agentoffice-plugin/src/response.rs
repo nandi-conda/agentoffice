@@ -63,20 +63,27 @@ pub struct Response {
     /// [`Permission::Feed`](crate::Permission::Feed).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clear_feed: bool,
-    /// What a program call returns (see [`Request::data`]): any JSON.
+    /// What a program call returns (see [`Request::data`]): any JSON. On an
+    /// object, data for whoever called (≤ 16 KB): the office's own calls read
+    /// it (the room panels answer a booking with it), and agents see it in
+    /// `plugin_interact`. Nobody else is shown it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply: Option<Value>,
     /// A program call that didn't work: the office raises this as the
     /// error, and keeps the state it had.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Notes for particular people anywhere in the office (≤ 10): reminders,
+    /// invitations. Needs [`Permission::Notify`](crate::Permission::Notify).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notify: Vec<Note>,
 }
 
 impl Response {
     pub fn new() -> Self { Self::default() }
     /// Just a toast, for when something went wrong.
     pub fn error(msg: impl Into<String>) -> Self { Self::new().toast(msg) }
-    /// A program call's answer (see [`Request::data`]).
+    /// A program call's answer, or data for whoever called (see the field).
     pub fn reply(mut self, value: impl Serialize) -> Self { self.reply = serde_json::to_value(value).ok(); self }
     /// A program call that didn't work: the caller gets `msg` as the error.
     pub fn fail(msg: impl Into<String>) -> Self { Response { error: Some(msg.into()), ..Self::default() } }
@@ -106,6 +113,61 @@ impl Response {
     }
     /// Empty the feed.
     pub fn clear_feed(mut self) -> Self { self.clear_feed = true; self }
+    /// Send a note (see the field); skipped when it reaches nobody.
+    pub fn notify(mut self, note: Note) -> Self { self.notify.push(note); self }
+}
+
+/// A note for particular people (≤ 280 chars), wherever they are.
+///
+/// ```
+/// use agentoffice_plugin::prelude::*;
+/// // To two people, kept for them if they're away:
+/// let invite = Note::to(["did:plc:ada", "bob.bsky.social"], "📅 You're invited").keep();
+/// // To everyone in the boardroom:
+/// let ending = Note::inside("board", "⏳ 5 minutes left");
+/// ```
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Note {
+    pub text: String,
+    /// Who: keys (`did:…`, `agent:<name>`, `human:<name>`), handles, or
+    /// agent names (≤ 40). Empty means everyone, which needs `inside`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<String>,
+    /// Only those standing in this zone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inside: Option<String>,
+    /// Only those not standing in this zone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside: Option<String>,
+    /// Keys in `to` (`did:…`, `agent:<name>`) of people who aren't in get it
+    /// when they next come in.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
+    /// A tag for the browser (`soon`, `start`…), up to 16 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What it's about (a booking id), up to 32 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub re: Option<String>,
+}
+
+impl Note {
+    pub fn to<S: Into<String>>(who: impl IntoIterator<Item = S>, text: impl Into<String>) -> Self {
+        Note { text: text.into(), to: who.into_iter().map(Into::into).collect(), ..Default::default() }
+    }
+    /// Everyone standing in `zone`.
+    pub fn inside(zone: impl Into<String>, text: impl Into<String>) -> Self {
+        Note { text: text.into(), inside: Some(zone.into()), ..Default::default() }
+    }
+    /// Only those of them in `zone`.
+    pub fn within(mut self, zone: impl Into<String>) -> Self { self.inside = Some(zone.into()); self }
+    /// Only those of them not in `zone`.
+    pub fn outside(mut self, zone: impl Into<String>) -> Self { self.outside = Some(zone.into()); self }
+    /// Keep it for whoever isn't in.
+    pub fn keep(mut self) -> Self { self.keep = true; self }
+    pub fn kind(mut self, kind: impl Into<String>) -> Self { self.kind = Some(kind.into()); self }
+    pub fn re(mut self, re: impl Into<String>) -> Self { self.re = Some(re.into()); self }
 }
 
 /// Things to use up: `qty` (1–20) of `kind`.

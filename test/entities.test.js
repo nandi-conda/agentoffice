@@ -67,7 +67,10 @@ test('the old single-object state moves into the entities on first start', async
   assert.equal(o.strokes.length, 1);
   assert.equal(o.scores[0].score, 50);
   assert.deepEqual(o.counters, { coffees: 4, pomodoros: 2, waves: 9 });
+  // So does the boardroom's door panel, with the room entity's bookings.
+  await until(() => o.bookings.length);
   assert.equal(o.bookings[0].room, 'board');
+  assert.equal(o.bookings[0].id, 'b1');
   assert.deepEqual(o.persisted(), { migrated: true, counters: { waves: 9 } });
   // A World starting again over the same entities doesn't seed twice.
   const again = new Office({ ...legacy, migrated: true }, { runtime: o.runtime });
@@ -107,10 +110,11 @@ test('the plugin objects take over what the core entities kept, a running timer 
 
 test('actors remember status and keep notes for when their person is away', async () => {
   const clock = { t: Date.UTC(2026, 9, 28, 14, 0) };
-  const o = new Office({}, { now: () => clock.t });
+  const o = new Office({}, { now: () => clock.t, plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   ada.ws.msg({ t: 'status', status: 'focus', note: 'writing' }); await tick();
-  ada.ws.msg({ t: 'book', op: 'create', room: 'booth1', start: clock.t, minutes: 60 }); await tick();
+  ada.ws.msg({ t: 'book', op: 'create', room: 'booth1', start: clock.t, minutes: 60 });
+  await until(() => ada.ws.last('booked'));
   ada.ws.readyState = 3; o.leave(ada.p); await tick();
   clock.t += 11 * MIN;
   await o.tickRooms();
@@ -122,14 +126,16 @@ test('actors remember status and keep notes for when their person is away', asyn
   assert.match(back.ws.last('roomnote').text, /Nobody turned up/, 'the note waited in the actor');
 });
 
-test('rooms hear people walk in over their zone topic', async () => {
+test('room panels hear people walk in over the zone topic', async () => {
   const clock = { t: Date.UTC(2026, 9, 28, 14, 0) };
-  const o = new Office({}, { now: () => clock.t });
+  const o = new Office({}, { now: () => clock.t, plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
-  ada.ws.msg({ t: 'book', op: 'create', room: 'booth1', start: clock.t, minutes: 60 }); await tick();
+  ada.ws.msg({ t: 'book', op: 'create', room: 'booth1', start: clock.t, minutes: 60 });
+  await until(() => ada.ws.last('booked'));
   assert.equal(o.bookings[0].seen, false);
-  ada.ws.msg({ t: 'move', x: 2.5, y: 15.5, teleport: true }); await tick();
-  assert.equal(o.bookings[0].seen, true);
+  assert.equal(await o.ref('topic:zone:booth1').view(), 1, 'the panel watches its room');
+  ada.ws.msg({ t: 'move', x: 2.5, y: 15.5, teleport: true });
+  await until(() => o.bookings[0].seen);
 });
 
 test('pomodoro timers turn over on their own alarm', async () => {

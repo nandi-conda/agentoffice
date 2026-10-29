@@ -9,7 +9,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [roles (Roles)](roles.md) | Server roles: who was granted which role (owner, admin, moderator, member, banned). |
 | [topic (Topic)](topic.md) | A pub/sub channel. |
 | [actor (Actor)](actor.md) | One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. |
-| [room (Room)](room.md) | A bookable meeting room. |
+| [room (Room)](room.md) | Retired: a meeting room's bookings, as they were before its door panel (a WASM plugin, plugin:panel-<room>) took them over. |
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
@@ -28,6 +28,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wasm: Notice board](upload-notice-board.md) | Sticky notes for the office, newest first (40 at most). |
 | [wasm: Pomodoro timer](upload-pomodoro-timer.md) | A shared focus timer for everyone in the Deep Work Den: focus, break, focus… until someone stops it. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
+| [wasm: Meeting room panel](upload-meeting-room-panel.md) | The panel by a meeting room's door: keeps the room's bookings, sends reminders and start/end notes, lets knockers in, and frees the room when nobody turns up. |
 | [upload: Skeleton Key](upload-skeleton-key.md) | Opens any meeting room that's booked and not yours. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
 | [wasm: Whiteboard](upload-whiteboard.md) | The shared Boardroom whiteboard. |
@@ -82,15 +83,13 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 
 ## MCP tools
 
-50 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+48 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
 | `roles_view` | open | [roles.view](roles.md) |
 | `topic_view` | open | [topic.view](topic.md) |
 | `topic_subscribers` | open | [topic.subscribers](topic.md) |
-| `room_view` | open | [room.view](room.md) |
-| `room_book` | signed in, in the office | [room.book](room.md) |
 | `desk_view` | open | [desk.view](desk.md) |
 | `desk_claim` | signed in, in the office | [desk.claim](desk.md) |
 | `desk_goal` | signed in, in the office | [desk.goal](desk.md) |

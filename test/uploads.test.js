@@ -7,7 +7,8 @@ import { LocalRuntime } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { PluginHost } from '../server/plugins.js';
 import { NodeSandbox } from '../server/sandbox-node.js';
-import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm } from '../server/sandbox.js';
+import { checkUpload, inspectWasm, toBase64, DynamicSandbox, WRAPPERS, runWasm, bundledWasm } from '../server/sandbox.js';
+import { wasmFile, until } from './support/plugins.js';
 import { placeNear, MAX_PER_OWNER } from '../server/entities/gallery.js';
 import { zoneAt } from '../public/js/map.js';
 import { levelOf, uploadError } from '../public/js/permissions.js';
@@ -223,7 +224,8 @@ test('uploads are checked, capped per person, and admins (moderators and up) can
 
 test('permissions decide who may upload: the Skeleton Key is admins only, and opens booked rooms', async () => {
   const clock = { t: Date.UTC(2026, 9, 29, 14, 0) };
-  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox() }), roles: { owners: ['did:plc:boss'], admins: ['did:plc:adm'] } } });
+  // The office's own modules too: the room's door panel keeps the booking.
+  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox(), wasm: bundledWasm(wasmFile) }), roles: { owners: ['did:plc:boss'], admins: ['did:plc:adm'] } } });
   const o = new Office({}, { runtime: rt, now: () => clock.t });
   await o.ready;
   const key = { lang: 'wasm', code: plugin('skeleton_key.wasm') };
@@ -241,7 +243,7 @@ test('permissions decide who may upload: the Skeleton Key is admins only, and op
   // Grace books the boardroom: ada is kept out.
   const grace = await join(o, 'grace', 'did:plc:grace');
   grace.msg({ t: 'book', op: 'create', room: 'board', start: 'now', minutes: 30, title: 'Secret plans' });
-  await settle(20);
+  await until(() => grace.last('booked'));
   const pos = (ws) => [...o.peers.values()].find((p) => p.name === ws);
   ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
   await settle();

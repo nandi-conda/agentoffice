@@ -8,11 +8,11 @@
 // without HTML. Without a sandbox, or when the call fails, the object is out
 // of order.
 //
-// Some answers need a permission (public/js/permissions.js): `take` (trusted)
-// and `unlock` (privileged: into a room someone else booked). The office's
+// Some answers need a permission (public/js/permissions.js): `take` and
+// `notify` (trusted) and `unlock` (privileged: into a room someone else booked). The office's
 // own objects have what their manifest declares; uploads what was granted at
-// upload, which the uploader's role decided. Without it, a take is dropped
-// and an unlock refused.
+// upload, which the uploader's role decided. Without it, a take or a note
+// is dropped and an unlock refused.
 
 import { log } from './logs.js';
 import { ZONES } from '../public/js/map.js';
@@ -36,6 +36,9 @@ const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, 
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
 export const MAX_WATCH = 12;
+export const MAX_NOTES = 10;
+export const MAX_NOTE_TO = 40;
+const KIND = /^[\w-]{1,16}$/;
 
 // What a client may send: an action id, some typed text, and some JSON.
 export function cleanRequest(m) {
@@ -168,6 +171,10 @@ export class PluginHost {
       result.append = [];
       result.clearFeed = false;
     }
+    if (!permissions.includes('notify') && result.notify.length) {
+      log('warning', `plugin:${object.id}`, 'answered with notify without the notify permission: dropped');
+      result.notify = [];
+    }
     if (result.unlock && !permissions.includes('unlock')) {
       log('warning', `plugin:${object.id}`, 'answered with unlock without the unlock permission: refused');
       result.unlock = null;
@@ -203,7 +210,7 @@ function cleanData(d, max = MAX_DATA) {
 export function sanitize(r) {
   r = r && typeof r === 'object' ? r : {};
   const act = (a) => (typeof a === 'string' && ACTION.test(a) ? a : null);
-  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [], unlock: null, append: [], clearFeed: !!r.clearFeed };
+  const out = { say: r.say ? clip(r.say, 280) : null, toast: r.toast ? clip(r.toast, 200) : null, display: null, ui: null, wakeAt: null, give: [], take: [], unlock: null, append: [], clearFeed: !!r.clearFeed, notify: [], reply: null };
   // Entries for the object's feed (needs the feed permission): plain JSON, each ≤ 8 KB.
   if (Array.isArray(r.append)) out.append = r.append.slice(0, MAX_APPEND).map((e) => cleanData(e, MAX_FEED_ENTRY)).filter((e) => e !== null);
   // Items for the person who used it (give), and things of theirs it uses up
@@ -213,6 +220,20 @@ export function sanitize(r) {
     out.take = r.take.slice(0, 5).filter((t) => typeof t?.kind === 'string' && /^[a-z0-9][a-z0-9:._-]{0,31}$/.test(t.kind))
       .map((t) => ({ kind: t.kind, qty: Math.max(1, Math.min(20, Math.floor(+t.qty) || 1)) }));
   }
+  // Notes for particular people anywhere in the office (needs the notify
+  // permission): `to` names them (keys, DIDs, handles, agent names), `inside`
+  // / `outside` a zone narrows it; no `to` means everyone in `inside`.
+  const zone = (z) => (typeof z === 'string' && ZONES.some((x) => x.id === z) ? z : null);
+  if (Array.isArray(r.notify)) {
+    out.notify = r.notify.slice(0, MAX_NOTES).filter((n) => n && typeof n.text === 'string' && n.text.trim()).map((n) => ({
+      text: clip(n.text, 280),
+      to: (Array.isArray(n.to) ? n.to : []).filter((x) => typeof x === 'string').map((x) => clip(x, 253)).filter(Boolean).slice(0, MAX_NOTE_TO),
+      inside: zone(n.inside), outside: zone(n.outside), keep: !!n.keep,
+      kind: KIND.test(n.kind || '') ? n.kind : null, re: typeof n.re === 'string' ? clip(n.re, 32) : null,
+    })).filter((n) => n.to.length || n.inside);
+  }
+  // Data for whoever called (the World, agents), never shown to anyone else.
+  out.reply = cleanData(r.reply);
   // Let the person who used it into a booked room (needs the unlock permission).
   const room = typeof r.unlock === 'string' ? r.unlock : r.unlock?.room;
   out.unlock = typeof room === 'string' && roomById(room) ? { room } : null;

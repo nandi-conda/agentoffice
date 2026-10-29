@@ -61,6 +61,7 @@ nav:
       - "wasm: Notice board": api/upload-notice-board.md
       - "wasm: Pomodoro timer": api/upload-pomodoro-timer.md
       - "wasm: Office Rally": api/upload-office-rally.md
+      - "wasm: Meeting room panel": api/upload-meeting-room-panel.md
       - "upload: Skeleton Key": api/upload-skeleton-key.md
       - "wasm: Vending machine": api/upload-vending-machine.md
       - "wasm: Whiteboard": api/upload-whiteboard.md

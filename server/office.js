@@ -11,10 +11,10 @@ import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { SPAWN, openSpot, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, deskAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
 import * as map from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
-import { ROOMS, roomById, activeBooking, restrictedAt } from '../public/js/rooms.js';
+import { ROOMS, roomById, activeBooking, restrictedAt, panelOf, toTime } from '../public/js/rooms.js';
 import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
-import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
+import { KINDS, MIRRORED, POMO_ZONES, ITEM } from './entities/kinds.js';
 import { str, int, num as numS, bool, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
 import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
@@ -264,7 +264,8 @@ export class Office {
     for (const d of DESKS) { const v = this.mirror.get(`desk:${d.id}`); if (v) out[d.id] = v; }
     return out;
   }
-  get bookings() { return ROOMS.flatMap((r) => this.mirror.get(`room:${r.id}`) || []).sort((a, b) => a.start - b.start); }
+  // Every room's schedule, as its door panel shows it.
+  get bookings() { return ROOMS.flatMap((r) => this.shown(panelOf(r.id))?.bookings || []).sort((a, b) => a.start - b.start); }
   get strokes() { return this.mirror.get('plugin:whiteboard')?.feed || []; }
   // What a plugin object shows everyone besides its label (display.data):
   // the notice board's notes, the coffee machine's count, the pomodoro.
@@ -375,6 +376,8 @@ export class Office {
       inventoryOf: (id) => { const p = this.peers.get(id); return p ? this.inventory(p) : []; },
       invApply: (id, change) => { const p = this.peers.get(id); return p?.ready ? this.invApply(p, change) : { error: 'they left' }; },
       walk: (key, target) => this.walk(key, target),
+      bookings: () => this.bookings,
+      enforce: () => this.enforce(),
     };
   }
 
@@ -444,7 +447,6 @@ export class Office {
     }
     switch (kind) {
       case 'desk': return this.broadcast({ t: 'desks', desks: this.desks });
-      case 'room': return this.broadcast({ t: 'bookings', bookings: this.bookings });
       case 'plugin': {
         const { name } = parse(from);
         this.broadcast({ t: 'obj', id: name, display: value?.display || null });
@@ -455,6 +457,7 @@ export class Office {
         else if (name === 'coffee') this.broadcast({ t: 'counters', counters: this.counters });
         else if (name === 'arcade') this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
         else if (POMOS.some((f) => f.id === name)) this.broadcastPomo();
+        else if (ROOMS.some((r) => panelOf(r.id) === name)) this.broadcast({ t: 'bookings', bookings: this.bookings });
         return;
       }
       case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
@@ -1223,7 +1226,11 @@ export class Office {
     this.broadcast({ t: 'peer', id: p.id, video: p.video, screen: p.screen });
   }
 
-  // ---- meeting room bookings: each room is its own entity -----------------
+  // ---- meeting room bookings: each room's door panel keeps them ----------
+  // The panels are a WASM plugin (plugins/wasm-rooms): changes go to the
+  // room's panel as a `book` event, which only the office can send, with
+  // what only the office knows (how many the owner has in the other rooms,
+  // who's being let in). The office keeps the door (enforce, move).
   // { t: 'book', op: 'create' | 'cancel' | 'extend' | 'end' | 'update' | 'admit', ref? }
   // Replies { t: 'booked', ref, booking } or { t: 'error', ref, message }.
   async book(p, m) {
@@ -1232,18 +1239,40 @@ export class Office {
     if (m.op === 'create' && !p.did && p.kind !== 'agent') return fail('sign in to book a room');
     const room = m.op === 'create' ? roomById(m.room)?.id : this.bookings.find((b) => b.id === m.id)?.room;
     if (!room) return fail(m.op === 'create' ? 'no such room' : 'no such booking');
-    const r = await this.ref(`room:${room}`).book(this.who(p), m, { all: this.bookings, presence: this.presence() });
-    if (r.error) return fail(r.error);
-    this.sendTo(p, { t: 'booked', ref, booking: r.booking });
+    const now = this.now(), who = this.who(p);
+    // Times are numbers by the time they reach the plugin ("HH:MM" is today here).
+    const time = (v) => (v === undefined || v === null || v === 'now' ? v : Number.isFinite(toTime(v, now)) ? toTime(v, now) : 'not a time');
+    const to = m.op === 'admit' ? this.peers.get(m.to) : null;
+    const data = {
+      op: String(m.op || ''), id: m.id, title: m.title, start: time(m.start), end: time(m.end), minutes: m.minutes,
+      invitees: m.invitees, lock: m.lock, autoRelease: m.autoRelease,
+      owned: this.bookings.filter((b) => b.room !== room && b.owner === who.key && b.end > now).length,
+      to: to?.ready ? this.who(to) : null,
+    };
+    const r = await this.ref(`plugin:${panelOf(room)}`).act(who, 'book', null, { type: 'book', zone: room, data }).catch((e) => ({ toast: e.message }));
+    const reply = r?.reply || { error: r?.toast || 'the room\'s panel didn\'t answer' };
+    if (reply.error) return fail(reply.error);
+    this.sendTo(p, { t: 'booked', ref, booking: reply.booking });
   }
 
-  // Rooms keep their own alarms; this nudges them all now (tests, catch-up).
+  // The panels keep their own alarms; this nudges them all now (tests, catch-up).
   tickRooms() {
-    const presence = this.presence();
-    return Promise.all(ROOMS.map((r) => this.ref(`room:${r.id}`).tick({ presence })));
+    return Promise.all(ROOMS.map((r) => this.ref(`plugin:${panelOf(r.id)}`).act(null, 'tick')));
   }
 
-  nextRoomEvent() { return nextRoomEvent(this.bookings, this.now()); }
+  // A booked room is for its meeting only: anyone else inside (there when
+  // it started, or in by any other route) is shown out. Moves are refused at
+  // the door (move); the panels call this after every turn.
+  enforce() {
+    const now = this.now(), list = this.bookings;
+    for (const q of this.peers.values()) {
+      if (!q.ready || q.kind === 'freeq') continue;
+      const room = restrictedAt(list, q.x, q.y, this.who(q), now);
+      if (!room) continue;
+      const b = activeBooking(list, room.id, now);
+      this.showOut(q, room, `🔒 ${room.name} is booked for “${b.title}” (${b.name}) until ${stamp(b.end)}, so you've been shown out. Knock to be let in.`);
+    }
+  }
 
   // ---- server roles and moderation (public/js/roles.js, MOD) ---------------
   // Someone's role, from who they proved they are: the roles:main directory

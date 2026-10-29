@@ -207,7 +207,8 @@ test('a wrong bearer is refused at initialize', async () => {
 });
 
 test('agents book, list and cancel meeting rooms over MCP', async () => {
-  const { office, connect } = await setup();
+  // The rooms' door panels keep the bookings: WASM plugins.
+  const { office, connect } = await setup({ plugins: wasmPlugins() });
   const c = await connect(OP);
   await call(c, 'join_office', { name: 'Sched Bot' });
   const start = new Date(Date.now() + 60 * 60 * 1000).toISOString();

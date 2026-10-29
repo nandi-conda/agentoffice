@@ -62,6 +62,17 @@ pub struct Person {
     pub id: String,
     pub name: String,
     pub handle: Option<String>,
+    /// Set only for people signed in with AT Protocol (and verified agents).
+    pub did: Option<String>,
+    /// `human` or `agent`.
+    pub kind: String,
+}
+
+impl Person {
+    /// Who they are across visits, like [`Actor::key`].
+    pub fn key(&self) -> String {
+        match &self.did { Some(d) if !d.is_empty() => d.clone(), _ => format!("{}:{}", self.kind, self.name) }
+    }
 }
 
 /// A stack of things the person carries.
@@ -89,15 +100,22 @@ impl Item {
     }
 }
 
-/// Someone walked into or out of a zone you watch ([`Response::watch`]).
+/// Something that happened, rather than someone pressing E: someone walked
+/// into or out of a zone you watch ([`Response::watch`]), or the office
+/// itself is calling with something only it can say (the meeting room
+/// panels get `book` and `unlock`). Uploads only ever get `enter` / `exit`;
+/// nobody can make one up from a panel.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Event {
-    /// `enter` or `exit`.
+    /// `enter` or `exit`, or one of the office's own.
     #[serde(rename = "type")]
     pub kind: String,
     /// The zone id (`kitchen`, `lounge`…).
     pub zone: String,
+    /// What the office sends with its own events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 /// A bookable meeting room, in [`Request::rooms`].
@@ -173,6 +191,10 @@ impl Request {
     /// The zone the actor just walked into, when this call is that event.
     pub fn entered(&self) -> Option<&str> {
         self.event.as_ref().filter(|e| e.kind == "enter").map(|e| e.zone.as_str())
+    }
+    /// The office's own event `kind` (not someone's panel), with its data.
+    pub fn office_event(&self, kind: &str) -> Option<&Value> {
+        self.event.as_ref().filter(|e| e.kind == kind).map(|e| e.data.as_ref().unwrap_or(&Value::Null))
     }
     /// The zone the actor just walked out of, when this call is that event.
     pub fn exited(&self) -> Option<&str> {

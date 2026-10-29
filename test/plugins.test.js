@@ -104,7 +104,25 @@ test('sanitize drops what the client can\'t safely show', () => {
   assert.equal(s.ui.buttons.length, 0);
   assert.equal(s.ui.input.maxLength, 500);
   assert.equal(s.ui.text, '<b>hi</b>'); // escaped by the client, never trusted as HTML
-  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [], unlock: null, append: [], clearFeed: false });
+  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [], unlock: null, append: [], clearFeed: false, notify: [], reply: null });
+});
+
+test('notes are cleaned: someone to send to, known zones, at most 10', () => {
+  const { notify, reply } = sanitize({
+    notify: [
+      { text: 'hi', to: ['did:plc:ada', 7, 'x'.repeat(300)], kind: 'soon', re: 'b1', keep: 1 },
+      { text: 'everyone in the boardroom', inside: 'board' },
+      { text: 'nobody', inside: 'nowhere' },
+      { text: '', to: ['ada'] },
+      ...Array.from({ length: 12 }, () => ({ text: 'spam', to: ['ada'], kind: '<b>' })),
+    ],
+    reply: { booking: { id: 'b1' } },
+  });
+  assert.equal(notify.length, 8, 'of the first 10, two reach nobody');
+  assert.deepEqual(notify[0], { text: 'hi', to: ['did:plc:ada', 'x'.repeat(253)], inside: null, outside: null, keep: true, kind: 'soon', re: 'b1' });
+  assert.equal(notify[1].inside, 'board');
+  assert.equal(notify[2].kind, null);
+  assert.deepEqual(reply, { booking: { id: 'b1' } });
 });
 
 test('cleanRequest', () => {

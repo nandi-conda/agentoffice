@@ -1,5 +1,6 @@
 // Interactive objects on the map (jukebox, vending machine, 8-ball, the
-// Office Rally, the coffee machine, notice board, pomodoro, arcade, whiteboard…): one entity per object, address `plugin:<object id>`.
+// Office Rally, the coffee machine, notice board, pomodoro, arcade, whiteboard,
+// the meeting room door panels…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
@@ -8,7 +9,7 @@ import { Entity } from './runtime.js';
 import { str, obj, opt, arr } from './schema.js';
 import { PLUGIN_OBJECTS, zoneAt } from '../../public/js/map.js';
 import { PluginHost, MAX_FEED, MAX_REQUEST_DATA } from '../plugins.js';
-import { ROOMS, activeBooking, isHolder } from '../../public/js/rooms.js';
+import { ROOMS, activeBooking, isHolder, keyOf, inRoomOrDoor, roomById, panelOf } from '../../public/js/rooms.js';
 
 const COOLDOWN_MS = 400;
 // Objects that used to be core entities start from what that entity kept
@@ -20,12 +21,19 @@ const ADOPT = {
   pomodoro: (v) => ({ ...(v?.state || {}), count: v?.count || 0 }),
   arcade: (v) => ({ scores: Array.isArray(v) ? v : [] }),
   whiteboard: (v) => ({ onBoard: Array.isArray(v) ? Math.min(v.length, MAX_FEED) : 0 }),
+  room: (v) => ({ bookings: Array.isArray(v) ? v : [] }),
 };
 // …and those whose old view was a long list start their feed with it.
 const ADOPT_FEED = {
   whiteboard: (v) => (Array.isArray(v) ? v : []),
 };
 const feedKey = (seq) => `f:${String(seq).padStart(10, '0')}`;
+const norm = (s) => String(s ?? '').trim().replace(/^@/, '').toLowerCase().replace(/\s+/g, '');
+// Is q one of the people a note names? Keys, DIDs, handles, or an agent's
+// name: the same matching as a booking's holders (rooms.js isHolder).
+const named = (to, q) => to.includes(keyOf(q)) || (q.did && to.includes(q.did.toLowerCase())) || (q.handle && to.includes(q.handle.toLowerCase())) || (q.kind === 'agent' && to.includes(norm(q.name)));
+// Standing in a zone; a bookable room's doorways count as the room.
+const within = (zone, q) => q.zone === zone || (!!roomById(zone) && inRoomOrDoor(roomById(zone), q.x, q.y));
 let offline = null; // a host with no sandbox, when the runtime didn't pass one
 // Who a plugin sees on a wake-up call: the office, not a person.
 const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, did: null, kind: 'system', zone: null };
@@ -46,6 +54,12 @@ export class PluginObject extends Entity {
     perform: {
       doc: 'A protocol message the World turns into an action (the whiteboard\'s `wb` strokes): like interact, without the cooldown between uses.',
       who: true, params: { req: { type: 'object', description: '{ action, input, data }' } }, mutates: true, internal: true,
+    },
+    act: {
+      doc: 'The office\'s own call into the object, without the use cooldown or the walk up: the meeting room panels get `book` (booking changes) and `unlock` (the Skeleton Key) this way, as an event only the office can send, and `tick` when the World nudges them. who=null calls as the office.',
+      params: { who: { type: ['object', 'null'], description: 'Who it is for (null: the office itself)' }, action: str('Action id', 64), input: opt({ type: ['string', 'null'], description: 'Typed text' }), event: opt(obj({ type: str('Event type'), zone: opt(str('Zone')), data: opt({ description: 'What goes with it' }) }, 'An office event')) },
+      returns: { type: ['object', 'null'], description: 'What the plugin answered, with its reply' },
+      mutates: true, internal: true,
     },
     wake: { doc: 'Make sure the object is showing what it should: one that used to be a core entity takes over that entity\'s state and shows it. The World calls it when it starts.', returns: { type: 'boolean', description: 'whether it took over old state' }, internal: true },
   };
@@ -110,6 +124,12 @@ export class PluginObject extends Entity {
     return this.run(who, action, input, null, data);
   }
 
+  // The office's own calls (bookings, the Skeleton Key, nudges): no cooldown.
+  async act(who, action, input = null, event = null) {
+    if (!this.object) throw new Error(`no object ${this.name}`);
+    return this.run(who || SYSTEM, action, input, event);
+  }
+
   // The plugin asked to be woken (result.wakeAt): call it with action 'tick'
   // as the office itself, e.g. so a jukebox moves on to the next song.
   async alarm() {
@@ -136,6 +156,8 @@ export class PluginObject extends Entity {
     let old = null;
     try { old = await this.ref(from).view(); } catch { /* starts fresh */ }
     this.state.data = shape(old);
+    // A room entity listened on its zone; the panel does now.
+    if (from.startsWith('room:')) await this.ref(from).retire().catch(() => {});
     const feed = ADOPT_FEED[kind]?.(old) || [];
     for (const e of feed.slice(-MAX_FEED)) await this.feedPush(e);
     return feed.length > 0;
@@ -162,11 +184,30 @@ export class PluginObject extends Entity {
 
   // The bookable rooms and what's on in each now, for plugins with the unlock permission.
   async rooms(who) {
-    const now = this.now();
-    return Promise.all(ROOMS.map(async (r) => {
-      const b = activeBooking(await this.ref(`room:${r.id}`).view().catch(() => []), r.id, now);
+    const now = this.now(), all = await this.world.bookings().catch(() => []);
+    return ROOMS.map((r) => {
+      const b = activeBooking(all, r.id, now);
       return { id: r.id, name: r.name, booking: b ? { title: b.title, name: b.name, until: b.end, yours: isHolder(b, who) } : null };
-    }));
+    });
+  }
+
+  // Notes for particular people (needs the notify permission, which the host
+  // checked): to whoever is in now, and kept in the actors of DIDs and
+  // agents named in `to` who aren't, when the note says keep. A room
+  // panel's notes are roomnotes, so the browser offers to walk there.
+  async sendNotes(notes, presence) {
+    const f = this.object, effects = [];
+    const msg = (n) => (f.room ? { t: 'roomnote', kind: n.kind || 'note', room: f.room, id: n.re || null, text: n.text } : { t: 'toast', text: `${f.name}: ${n.text}` });
+    for (const n of notes) {
+      const to = n.to.map((x) => x.toLowerCase().startsWith('did:') ? x.toLowerCase() : x);
+      const reached = presence.filter((q) => (!to.length || named(to, q)) && (!n.inside || within(n.inside, q)) && (!n.outside || !within(n.outside, q)));
+      for (const q of reached) effects.push({ op: 'send', to: q.id, msg: msg(n) });
+      if (!n.keep) continue;
+      const here = new Set(reached.map(keyOf));
+      const away = to.filter((k) => /^(did|agent):/.test(k) && !here.has(k) && !presence.some((q) => keyOf(q) === k));
+      await Promise.all(away.map((k) => this.tell(`actor:${k}`, 'deliver', msg(n)).catch(() => {})));
+    }
+    if (effects.length) await this.emit(...effects);
   }
 
   run(who, action, input, event = null, data = null) {
@@ -179,10 +220,13 @@ export class PluginObject extends Entity {
     const f = this.object;
     const adopted = await this.adopt();
     const spot = { x: f.x + f.w / 2, y: f.y + f.h + 0.5 };
-    const zone = zoneAt(spot.x, spot.y)?.id || null;
-    let nearby = [];
+    // An object that belongs to an area says so (a room's door panel hangs
+    // outside it), else it's where you stand to use it.
+    const zone = f.zone || zoneAt(spot.x, spot.y)?.id || null;
+    let presence = [], nearby = [];
     try {
-      nearby = (await this.world.presence()).filter((q) => q.zone === zone).map((q) => ({ id: q.id, name: q.name, handle: q.handle || null }));
+      presence = await this.world.presence();
+      nearby = presence.filter((q) => q.zone === zone).map((q) => ({ id: q.id, name: q.name, handle: q.handle || null, did: q.did || null, kind: q.kind }));
     } catch { /* the plugin just won't know who's around */ }
 
     // What they carry goes to the plugin, which can hand things out or use them up.
@@ -198,7 +242,8 @@ export class PluginObject extends Entity {
     // only for someone using it, not a wake-up call or a zone event.
     if (result.unlock) {
       const r = who.kind === 'system' || event ? { error: 'only someone using it can be let in' }
-        : await this.ref(`room:${result.unlock.room}`).unlock(who, f.name).catch((e) => ({ error: e.message }));
+        : await this.ref(`plugin:${panelOf(result.unlock.room)}`).act(who, 'unlock', null, { type: 'unlock', zone: result.unlock.room, data: { by: f.name } })
+          .then((a) => a?.reply || { error: a?.toast || 'its door panel is out of order' }, (e) => ({ error: e.message }));
       if (r.error) result = { ...result, unlock: null, toast: `${f.name}: ${r.error}` };
     }
     if ((result.give?.length || result.take?.length) && who.kind !== 'system') {
@@ -238,6 +283,10 @@ export class PluginObject extends Entity {
       if (fed.length) await this.emit(...fed);
       if (display || reached) await this.mirror({ display: this.state.display || null, via });
     }
+    if (result.notify?.length) await this.sendNotes(result.notify, presence);
+    // A room's door panel: the World keeps the door, from the schedule it
+    // just mirrored (a booking starting shows out whoever isn't in it).
+    if (f.room) await this.world.enforce();
     return { ...result, via };
   }
 }

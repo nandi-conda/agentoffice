@@ -4,6 +4,11 @@ import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
 import { ROOMS, MIN, checkSlot, roomStatus, isHolder, parseInvitees } from '../public/js/rooms.js';
 import { zoneAt, isBlocked, findPath, SPAWN, FURNITURE } from '../public/js/map.js';
+import { wasmPlugins, until } from './support/plugins.js';
+
+// The bookings are kept by each room's door panel, a WASM plugin
+// (plugins/wasm-rooms; its rules are tested in Rust too: just plugin-test
+// rooms). This is the office's side: the booking messages, the door, notes.
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -17,7 +22,7 @@ const T0 = Date.UTC(2026, 9, 28, 14, 0); // on a 5 minute boundary
 
 function office() {
   const clock = { t: T0 };
-  const o = new Office({}, { now: () => clock.t });
+  const o = new Office({}, { now: () => clock.t, plugins: wasmPlugins() });
   return { o, clock };
 }
 async function join(o, name, { did, kind = 'human', handle } = {}) {
@@ -29,7 +34,14 @@ async function join(o, name, { did, kind = 'human', handle } = {}) {
   return { ws, p };
 }
 const place = async (c, x, y) => { c.ws.msg({ t: 'move', x, y, dir: 0, moving: false, teleport: true }); await tick(); };
-const book = async (c, m) => { c.ws.msg({ t: 'book', op: 'create', ...m }); await tick(); return c.ws.last('booked')?.booking; };
+// A booking message and its answer (booked or error), which comes back once the panel's plugin ran.
+let refs = 0;
+const ask = (c, m) => {
+  const ref = `r${++refs}`;
+  c.ws.msg({ t: 'book', ...m, ref });
+  return until(() => c.ws.sent.find((x) => (x.t === 'booked' || x.t === 'error') && x.ref === ref));
+};
+const book = async (c, m) => (await ask(c, { op: 'create', ...m })).booking;
 
 test('bookable rooms have a walkable door spot and a panel', () => {
   assert.deepEqual(ROOMS.map((r) => r.id).sort(), ['board', 'booth1', 'booth2', 'booth3', 'huddle']);
@@ -84,7 +96,7 @@ test('guests cannot book; signed-in people and agents can', async () => {
   assert.equal(guest.ws.last('bookings').bookings.length, 1, 'everyone sees the schedule');
   const bot = await join(o, 'BuildBot', { kind: 'agent' });
   assert.ok(await book(bot, { room: 'huddle', start: new Date(T0 + 60 * MIN).toISOString(), end: new Date(T0 + 90 * MIN).toISOString() }));
-  assert.equal((await o.ref('room:huddle').inspect()).state.bookings.length, 1, 'each room keeps its own bookings');
+  assert.equal((await o.ref('plugin:panel-huddle').inspect()).state.data.bookings.length, 1, 'each room\'s panel keeps its own bookings');
 });
 
 test('only the booker can cancel or extend; extending checks the next booking', async () => {
@@ -93,13 +105,11 @@ test('only the booker can cancel or extend; extending checks the next booking', 
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
   const b = await book(ada, { room: 'huddle', start: T0, minutes: 30 });
   await book(bob, { room: 'huddle', start: T0 + 45 * MIN, minutes: 30 });
-  bob.ws.msg({ t: 'book', op: 'cancel', id: b.id }); await tick();
-  assert.match(bob.ws.last('error').message, /only the person/);
-  ada.ws.msg({ t: 'book', op: 'extend', id: b.id, minutes: 15 }); await tick();
+  assert.match((await ask(bob, { op: 'cancel', id: b.id })).message, /only the person/);
+  await ask(ada, { op: 'extend', id: b.id, minutes: 15 });
   assert.equal(o.bookings.find((x) => x.id === b.id).end, T0 + 45 * MIN);
-  ada.ws.msg({ t: 'book', op: 'extend', id: b.id, minutes: 15 }); await tick();
-  assert.match(ada.ws.last('error').message, /booked/);
-  ada.ws.msg({ t: 'book', op: 'cancel', id: b.id }); await tick();
+  assert.match((await ask(ada, { op: 'extend', id: b.id, minutes: 15 })).message, /booked/);
+  assert.equal((await ask(ada, { op: 'cancel', id: b.id })).booking.cancelled, true);
   assert.equal(o.bookings.length, 1);
 });
 
@@ -111,6 +121,7 @@ test('a booking keeps others out, shows them out at the start, and holders can a
   await place(bob, 40, 8); // bob is camped in the boardroom
   const b = await book(ada, { room: 'board', start: T0 + 10 * MIN, minutes: 30, invitees: 'cat.test', title: 'Offsite plan' });
   clock.t = T0 + 10 * MIN; await o.tickRooms();
+  assert.ok(b.invitees.includes('cat.test'));
   assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'open', 'bob was shown out');
   assert.match(bob.ws.last('bounce').text, /Offsite plan/);
   assert.match(ada.ws.last('roomnote').text, /starting now/);
@@ -119,7 +130,7 @@ test('a booking keeps others out, shows them out at the start, and holders can a
   assert.notEqual(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y)?.id, 'board');
   await place(cat, 40, 8);
   assert.equal(zoneAt(o.peers.get(cat.p.id).x, o.peers.get(cat.p.id).y).id, 'board');
-  cat.ws.msg({ t: 'book', op: 'admit', id: b.id, to: bob.p.id }); await tick();
+  await ask(cat, { op: 'admit', id: b.id, to: bob.p.id });
   await place(bob, 40, 8);
   assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'board');
   assert.match(bob.ws.last('roomnote').text, /let you in/);
@@ -182,7 +193,6 @@ test('rooms nobody turns up to are released after the grace period', async () =>
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   await book(ada, { room: 'booth1', start: T0, minutes: 60 });
   await book(ada, { room: 'booth2', start: T0, minutes: 60, autoRelease: false });
-  assert.ok(o.nextRoomEvent() > T0);
   clock.t = T0 + 11 * MIN; await o.tickRooms();
   assert.deepEqual(o.bookings.map((b) => b.room), ['booth2']);
   assert.match(ada.ws.last('roomnote').text, /Nobody turned up/);

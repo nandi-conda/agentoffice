@@ -41,7 +41,8 @@ test('generated tools: names, read-only split, no internal methods', () => {
   assert.ok(by.desk_view.readOnly && by.plugin_view.readOnly);
   // Retired kinds (the whiteboard, notice board, coffee machine and pomodoro are plugin objects now) have none.
   for (const n of ['whiteboard_view', 'whiteboard_clear', 'noticeboard_view', 'noticeboard_add', 'coffee_brew', 'pomodoro_start']) assert.ok(!by[n], `${n} is retired`);
-  assert.ok(by.room_book.input.properties.op && by.room_book.input.required.includes('name'));
+  // So do the rooms: their door panels (plugins too) keep the bookings; agents use book_room.
+  for (const n of ['room_book', 'room_view', 'room_retire', 'plugin_act']) assert.ok(!by[n], `${n} is retired or internal`);
   for (const n of ['desk_touch', 'room_tick', 'actor_sessionGet', 'actor_view', 'topic_publish', 'desk_inspect', 'desk_seed']) assert.ok(!by[n], `${n} should not be a tool`);
 });
 
@@ -68,7 +69,7 @@ test('MCP: observers read through generated tools but cannot act', async () => {
   const names = (await c.listTools()).tools.map((t) => t.name);
   for (const n of ['plugin_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
   // Tools they can't use aren't listed (and can't be called).
-  for (const n of ['desk_claim', 'plugin_interact', 'room_book', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
+  for (const n of ['desk_claim', 'plugin_interact', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
   assert.equal((await call(c, 'plugin_view', { name: 'whiteboard' })).feed, undefined, 'nothing drawn yet');
   assert.equal(await call(c, 'desk_view', { name: 'desk-1' }), null);
   await assert.rejects(call(c, 'desk_claim', { name: 'desk-1', goal: 'x' }), /disabled/i);
@@ -91,9 +92,8 @@ test('MCP: a joined agent acts through generated tools, with the World filling i
   assert.equal(notes[0].by, 'Docbot');
   assert.deepEqual(await call(c, 'desk_claim', { name: 'desk-3', goal: 'docs' }), { ok: true });
   assert.equal(office.desks['desk-3'].goal, 'docs');
-  const { booking } = await call(c, 'room_book', { name: 'huddle', op: 'create', title: 'sync', minutes: 30 });
-  assert.equal(booking.room, 'huddle');
-  assert.ok(office.bookings.some((b) => b.id === booking.id));
+  // A room's door panel is a plugin object like the rest: its schedule shows in plugin_view.
+  assert.deepEqual((await until(async () => (await call(c, 'plugin_view', { name: 'panel-huddle' })).display)).data, { bookings: [] });
   // The pomodoro lives in the Deep Work Den: not from the lobby.
   await assert.rejects(call(c, 'plugin_interact', { name: 'pomodoro', action: 'start' }), /walk_to pomodoro/);
   await c.close();

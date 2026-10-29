@@ -125,6 +125,10 @@ The Boardroom, Huddle Room and the three phone booths can be booked.
   (and who's next), and the booker can **extend** by 15 minutes or **end**
   early. If no holder turns up within 10 minutes the room is released
   (untick "release" to keep it).
+- **Under the hood** each room's door panel is a WASM plugin
+  (`plugins/wasm-rooms`) that keeps the room's bookings and all of the above
+  rules, reminders and releases; the office keeps the door (bouncing and
+  showing out non-holders) from the schedule the panels show.
 
 **A/V rooms.** Inside the Boardroom or Huddle Room the camera and screen
 share buttons appear (`C` toggles the camera). They ride on the same

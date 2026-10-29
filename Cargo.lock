@@ -112,6 +112,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rooms"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -94,21 +94,21 @@ saved to `$DATA_DIR/entities.json`):
 | Entity | Durable Object | Owns |
 | --- | --- | --- |
 | `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, what they carry, the OAuth session |
-| `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
+| `room:<id>` | `RoomDO` | retired: the bookings it kept before its door panel (`plugin:panel-<id>`) took them over |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
-| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, rally, coffee machine, notice board, arcade, pomodoro, whiteboard): its WASM plugin's state, what it shows, its feed (the whiteboard's strokes, one key each), its wake-up alarm |
+| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, rally, coffee machine, notice board, arcade, pomodoro, whiteboard, the meeting room door panels, which keep each room's bookings): its WASM plugin's state, what it shows, its feed (the whiteboard's strokes, one key each), its wake-up alarm |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
 | `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `floor:main` | `ItemDO` | things people put down, where they put them (cleared after a day) |
 | `topic:<name>` | `TopicDO` | a pub/sub channel's subscribers |
 
 They talk to each other three ways (`server/entities/runtime.js`): direct RPC
-(`this.ref('room:board').book(...)`), messages (`this.tell(address, type,
+(`this.ref('desk:desk-3').claim(...)`), messages (`this.tell(address, type,
 data)`, handled in `onMessage`), and pub/sub (`this.subscribe('zone:board')`,
 `this.publish('desks', ev)`, handled in `onEvent`). The World publishes
-`zone:<id>` enter/exit and `office` join/leave events, so a room notices its
-holder walking in, and desks hear each other on `desks` (claiming one lets go
+`zone:<id>` enter/exit and `office` join/leave events, so a room's door panel notices
+a holder walking in, and desks hear each other on `desks` (claiming one lets go
 of your old one). Entities reach people by handing the World effects
 (`send`, `broadcast`, `showOut`, and `mirror`: what they show changed). The
 World keeps that mirror (in its own storage too), so a welcome needs no round
@@ -314,6 +314,10 @@ The Boardroom, Huddle Room and the three phone booths can be booked.
   (and who's next), and the booker can **extend** by 15 minutes or **end**
   early. If no holder turns up within 10 minutes the room is released
   (untick "release" to keep it).
+- **Under the hood** each room's door panel is a WASM plugin
+  (`plugins/wasm-rooms`) that keeps the room's bookings and all of the above
+  rules, reminders and releases; the office keeps the door (bouncing and
+  showing out non-holders) from the schedule the panels show.
 
 **A/V rooms.** Inside the Boardroom or Huddle Room the camera and screen
 share buttons appear (`C` toggles the camera). They ride on the same

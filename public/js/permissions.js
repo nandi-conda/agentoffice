@@ -3,8 +3,8 @@
 // Manifest::permissions); each belongs to a level, and the level decides who
 // may upload it (a capability in public/js/roles.js). The office's own
 // objects (public/plugins) get whatever they declare. At run time the office
-// only honours what was declared and granted: a `take` without the
-// permission is dropped, an `unlock` refused.
+// only honours what was declared and granted: a `take` or a note without
+// the permission is dropped, an `unlock` refused.
 // Shared by the server, the upload panel and the docs.
 
 import { CAPS, can } from './roles.js';
@@ -18,6 +18,7 @@ export const LEVELS = {
 export const PERMISSIONS = {
   take: { level: 'trusted', label: 'Take things', doc: 'Use up things the person carries (Response::take), all or nothing with what it gives.' },
   feed: { level: 'trusted', label: 'Keep a feed', doc: 'Keep a long list every browser gets, beyond its 32 KB of state (Response::append, Response::clear_feed): the last 3000 entries of up to 8 KB, like the whiteboard\'s strokes. It\'s the office\'s storage and bandwidth.' },
+  notify: { level: 'trusted', label: 'Send notes', doc: 'Send notes to particular people anywhere in the office (Response::notify), kept for signed-in people who are away. The meeting room panels use it for invitations and reminders.' },
   unlock: { level: 'privileged', label: 'Open booked rooms', doc: 'Let whoever uses it into a meeting room someone else booked (Response::unlock), past the booking. The request carries `rooms`, each bookable room and what is on in it now.' },
 };
 
