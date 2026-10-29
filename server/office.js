@@ -16,7 +16,7 @@ import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM } from './entities/kinds.js';
 import { str, int, num as numS, bool, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
-import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace } from '../public/js/items.js';
+import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace, holdsKey } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
@@ -542,7 +542,7 @@ export class Office {
 
   // The parts of a peer worth keeping across a Durable Object hibernation.
   snapshot(p) {
-    const { ws, joined, cupTimer, emoteTimer, station, stationTimer, ...rest } = p;
+    const { ws, joined, cupTimer, emoteTimer, station, stationTimer, heldMove, unlocking, ...rest } = p;
     return rest;
   }
 
@@ -779,6 +779,7 @@ export class Office {
     }
     p.ready = true;
     p.shownRole = this.roleOf(p);
+    p.keyring = holdsKey(key ? arrival?.items : p.items);
     this.sendTo(p, this.welcome(p, key ? arrival?.items || [] : p.items));
     for (const msg of arrival?.inbox || []) this.sendTo(p, msg);
     this.broadcast({ t: 'join', peer: this.publicPeer(p) }, p);
@@ -843,7 +844,7 @@ export class Office {
     this.broadcast({ t: 'join', peer: this.publicPeer(p) });
   }
 
-  move(p, m, ws = null) {
+  move(p, m, ws = null, keyTried = false) {
     const x = num(m.x, 0, map.W, p.x), y = num(m.y, 0, map.H, p.y);
     if (isBlocked(Math.floor(x), Math.floor(y))) return;
     // Guard against teleport hacks beyond a generous per-message step.
@@ -853,6 +854,8 @@ export class Office {
     const from = zoneAt(p.x, p.y), to = zoneAt(x, y);
     const shut = restrictedAt(this.bookings, x, y, p, this.now());
     if (shut && shut !== restrictedAt(this.bookings, p.x, p.y, p, this.now())) {
+      // Carrying a skeleton key: the door opens as they walk up.
+      if (p.keyring && !keyTried) return this.useKey(p, shut, m, ws);
       const b = activeBooking(this.bookings, shut.id, this.now());
       return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: shut.id, text: `🔒 ${shut.name} is restricted: booked by ${b.name} for “${b.title}” until ${stamp(b.end)}. Knock to be let in.` });
     }
@@ -1069,6 +1072,7 @@ export class Office {
       if (r.items) p.items = r.items;
     }
     if (r.error) return r;
+    p.keyring = holdsKey(r.items);
     if (key) this.deliver(key, { t: 'inv', items: r.items });
     else this.sendTo(p, { t: 'inv', items: r.items });
     return r;
@@ -1253,6 +1257,22 @@ export class Office {
     const reply = r?.reply || { error: r?.toast || 'the room\'s panel didn\'t answer' };
     if (reply.error) return fail(reply.error);
     this.sendTo(p, { t: 'booked', ref, booking: reply.booking });
+  }
+
+  // Someone carrying a skeleton key walked up to a booked room: its panel
+  // lets them in (as it does for the Skeleton Key object), then the move
+  // goes through. Moves that come in meanwhile wait; the last one is made.
+  async useKey(p, room, m, ws) {
+    p.heldMove = { m, ws };
+    if (p.unlocking) return;
+    p.unlocking = room.id;
+    const r = await this.ref(`plugin:${panelOf(room.id)}`).act(this.who(p), 'unlock', null, { type: 'unlock', zone: room.id, data: { by: 'a skeleton key' } })
+      .then((a) => a?.reply || { error: a?.toast || 'its door panel is out of order' }, (e) => ({ error: e.message }));
+    const held = p.heldMove;
+    p.unlocking = null; p.heldMove = null;
+    if (!this.peers.has(p.id) || !held) return;
+    if (r.error) return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: room.id, text: `🗝️ The key won't turn: ${r.error}` });
+    return this.move(p, held.m, held.ws, true);
   }
 
   // The panels keep their own alarms; this nudges them all now (tests, catch-up).

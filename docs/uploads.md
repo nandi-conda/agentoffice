@@ -54,11 +54,17 @@ upload, privileged or not.
 
 **The Skeleton Key** ([`plugins/wasm-skeleton-key`](https://github.com/nandi-conda/agentoffice/tree/main/plugins/wasm-skeleton-key),
 built copy `public/plugins/skeleton_key.wasm`) is the privileged example:
-admins see a "the Skeleton Key" link in the 🧩 panel. Its panel lists every
-bookable room; for one that's booked and not yours, **open** lets you in as
-if the meeting had admitted you (until it ends), and the people in the
-meeting get a note that you let yourself in with the key. Anyone can use it
-once an admin has put it out, so put it somewhere sensible.
+admins see a "the Skeleton Key" link in the 🧩 panel. **Take a key** puts a
+🗝️ Skeleton Key (item kind `skeleton-key`) in your inventory, one each.
+While you carry it, any meeting room that's booked and not yours opens as
+you walk up: you're let in as if the meeting had admitted you (until it
+ends), and the people in the meeting get a note that you let yourself in
+with a skeleton key. Keys can be handed on, put down and picked up like
+anything else; only a plugin with the `unlock` permission can make one (a
+`skeleton-key` from any other plugin's `give` is dropped). The panel also
+lists every bookable room, and **open** lets you into one from there.
+Anyone can use it once an admin has put it out, so put it somewhere
+sensible.
 
 ## How they run
 

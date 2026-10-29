@@ -16,7 +16,7 @@
 
 import { log } from './logs.js';
 import { ZONES } from '../public/js/map.js';
-import { cleanItem } from '../public/js/items.js';
+import { cleanItem, SKELETON_KEY } from '../public/js/items.js';
 import { roomById } from '../public/js/rooms.js';
 import { cleanPermissions } from '../public/js/permissions.js';
 import { MAX_PROGRAM_ANSWER } from './sandbox.js';
@@ -174,6 +174,11 @@ export class PluginHost {
     if (!permissions.includes('notify') && result.notify.length) {
       log('warning', `plugin:${object.id}`, 'answered with notify without the notify permission: dropped');
       result.notify = [];
+    }
+    // A skeleton key opens booked rooms, so only a plugin that may unlock hands one out.
+    if (!permissions.includes('unlock') && result.give.some((i) => i.kind === SKELETON_KEY)) {
+      log('warning', `plugin:${object.id}`, 'gave a skeleton key without the unlock permission: dropped');
+      result.give = result.give.filter((i) => i.kind !== SKELETON_KEY);
     }
     if (result.unlock && !permissions.includes('unlock')) {
       log('warning', `plugin:${object.id}`, 'answered with unlock without the unlock permission: refused');

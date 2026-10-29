@@ -39,6 +39,14 @@ test('the office\'s own programs: method and args in, reply or error out, more s
   await assert.rejects(new PluginHost().program({ object: desk, actor, method: 'desktop' }), /workstation is out of order/);
 });
 
+test('only a plugin that may unlock hands out a skeleton key', async () => {
+  const answer = () => ({ give: [{ kind: 'skeleton-key' }, { kind: 'cookie' }] });
+  const plain = await fakePlugins(answer).interact({ object: juke, actor, action: 'use' });
+  assert.deepEqual(plain.result.give.map((i) => i.kind), ['cookie']);
+  const keyed = await fakePlugins(answer, { permissions: ['unlock'] }).interact({ object: juke, actor, action: 'use' });
+  assert.deepEqual(keyed.result.give.map((i) => i.kind), ['skeleton-key', 'cookie']);
+});
+
 test('the host runs the object\'s module with a seed, and its state comes back', async () => {
   const calls = [];
   const host = fakePlugins((req) => { calls.push(req); return { state: { n: (req.state?.n || 0) + 1 }, say: 'hi' }; });

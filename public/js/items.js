@@ -35,7 +35,13 @@ export const ITEMS = {
   gum: { name: 'Mint Gum', emoji: '🍬', verb: 'chews', consume: true, emote: 'silly' },
   soda: { name: 'Sparkling Water', emoji: '🥤', verb: 'drinks', consume: true, emote: 'happy' },
   cookie: { name: 'Giant Cookie', emoji: '🍪', verb: 'eats', consume: true, emote: 'happy' },
+  // Booked meeting rooms open for whoever carries one (server/office.js
+  // move). Only a plugin with the unlock permission can hand one out.
+  'skeleton-key': { name: 'Skeleton Key', emoji: '🗝️', verb: 'twirls' },
 };
+
+export const SKELETON_KEY = 'skeleton-key';
+export const holdsKey = (items) => (items || []).some((s) => s.kind === SKELETON_KEY);
 
 // Anything that claims to be an item (a plugin's grant, a client's echo),
 // reduced to the fields above. Returns null when it isn't one.

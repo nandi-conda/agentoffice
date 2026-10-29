@@ -13,7 +13,7 @@ import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
-import { label as itemLabel, placeTiles } from './items.js';
+import { label as itemLabel, placeTiles, holdsKey } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, restrictedAt, doorTiles, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 import { fmtHour, fmtClock, localize } from './time.js';
 import { can, rank, roleBadge, ROLES } from './roles.js';
@@ -1458,6 +1458,8 @@ const startTimes = (keep) => {
 };
 const statusDot = (state) => `<span class="dot st-${state}"></span>`;
 const canBook = () => !!me?.did;
+// Carrying a skeleton key: booked doors open as you walk up (the server lets you in).
+const keyed = () => holdsKey(items);
 const signInHint = '<p class="small muted">Sign in with your AT Protocol handle (on the way in) to book rooms. Guests can see the schedule.</p>';
 
 function walkInto(room) {
@@ -1630,7 +1632,7 @@ function openRoom(id) {
     const upcoming = forRoom(bookings, id).filter((b) => b.end > now).slice(0, 6);
     const gap = next ? next.start - now : 60 * MIN;
     const quick = Math.min(30 * MIN, Math.floor(gap / (5 * MIN)) * 5 * MIN);
-    const lockedOutNow = current && !isHolder(current, me);
+    const lockedOutNow = current && !isHolder(current, me) && !keyed();
     if (modal.rooms === render) modal.onclose = null; // redrawing, not closing
     modal.open(`
       <h2>${esc(room.name)} ${room.av ? '<span class="badge av">A/V</span>' : ''}</h2>
@@ -1642,7 +1644,7 @@ function openRoom(id) {
         ${!current && canBook() && quick >= RULES.minLen ? `<button class="btn primary quick" ${roomAsk.pending ? 'disabled' : ''}>${roomAsk.pending ? 'Booking…' : `Book now · ${quick / MIN} min`}</button>` : ''}
         ${canBook() ? '<button class="btn ghost later">Book a time…</button>' : ''}
         ${lockedOutNow ? '<button class="btn knock">🚪 Knock</button>' : ''}
-        ${zoneAt(me.x, me.y)?.id !== id && !lockedOutNow ? '<button class="btn ghost go">Walk in</button>' : ''}
+        ${zoneAt(me.x, me.y)?.id !== id && !lockedOutNow ? `<button class="btn ghost go">${current && !isHolder(current, me) ? '🗝️ Let yourself in' : 'Walk in'}</button>` : ''}
       </div>
       ${roomAsk.note ? `<p class="small room-note">${roomAsk.note}</p>` : ''}
       ${canBook() ? '' : signInHint}
@@ -1965,7 +1967,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (h.peer || h.item) cursor = 'pointer';
   else if (h.f) {
     const z = zoneAt(h.f.x + h.f.w / 2, h.f.y + h.f.h / 2);
-    const locked = z?.bookable && z !== zoneAt(me.x, me.y) && lockedOut(bookings, z.id, me, serverNow());
+    const locked = z?.bookable && z !== zoneAt(me.x, me.y) && !keyed() && lockedOut(bookings, z.id, me, serverNow());
     cursor = locked ? 'not-allowed' : 'pointer';
     if (locked) hover = null;
   }
@@ -2054,7 +2056,7 @@ function free(x, y) {
   for (const [cx, cy] of [[x - RAD, y - RAD * 0.6], [x + RAD, y - RAD * 0.6], [x - RAD, y + RAD * 0.6], [x + RAD, y + RAD * 0.6]]) {
     if (isBlocked(Math.floor(cx), Math.floor(cy))) return false;
     const shut = restrictedAt(bookings, cx, cy, me, now);
-    if (shut && shut !== here) { bumped(shut); return false; }
+    if (shut && shut !== here && !keyed()) { bumped(shut); return false; }
   }
   return true;
 }
@@ -2075,7 +2077,7 @@ doorSign.el.addEventListener('click', (e) => { if (e.target.closest('.knock')) k
 function updateDoorSign(t) {
   const now = serverNow();
   let best = null;
-  if (!restrictedAt(bookings, me.x, me.y, me, now)) {
+  if (!keyed() && !restrictedAt(bookings, me.x, me.y, me, now)) {
     for (const r of ROOMS) {
       if (!lockedOut(bookings, r.id, me, now)) continue;
       const bumpedHere = doorSign.bump?.room === r.id && t - doorSign.bump.at < 3000;

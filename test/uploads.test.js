@@ -268,6 +268,50 @@ test('permissions decide who may upload: the Skeleton Key is admins only, and op
   rt.stop();
 });
 
+test('a skeleton key in your inventory opens booked rooms as you walk up', async () => {
+  const clock = { t: Date.UTC(2026, 9, 29, 14, 0) };
+  const rt = new LocalRuntime({ kinds: KINDS, now: () => clock.t, services: { plugins: new PluginHost({ sandbox: new NodeSandbox(), wasm: bundledWasm(wasmFile) }), roles: { admins: ['did:plc:adm'] } } });
+  const o = new Office({}, { runtime: rt, now: () => clock.t });
+  await o.ready;
+  const adm = await join(o, 'adm', 'did:plc:adm');
+  adm.msg({ t: 'gallery', op: 'upload', rid: 1, req: { lang: 'wasm', code: plugin('skeleton_key.wasm') } });
+  await settle(50);
+  const item = adm.last('galleryres').result.object;
+  assert.ok(item, JSON.stringify(adm.last('galleryres')));
+  const grace = await join(o, 'grace', 'did:plc:grace');
+  grace.msg({ t: 'book', op: 'create', room: 'board', start: 'now', minutes: 30, title: 'Secret plans' });
+  await until(() => grace.last('booked'));
+  const pos = (n) => [...o.peers.values()].find((p) => p.name === n);
+
+  // Ada takes a key from the object…
+  const ada = await join(o, 'ada', 'did:plc:ada');
+  ada.msg({ t: 'move', x: 20.5, y: 26.5, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'use', id: item.id, action: 'take' });
+  await until(() => ada.last('inv')?.items.some((i) => i.kind === 'skeleton-key'));
+  assert.match(ada.last('objui').toast, /pocket a skeleton key/);
+  // …and the boardroom opens as she walks in.
+  ada.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => zoneAt(pos('ada').x, pos('ada').y)?.id === 'board');
+  assert.equal(ada.last('bounce'), undefined);
+  assert.match(grace.last('roomnote').text, /ada let themselves into Boardroom with a skeleton key/);
+  assert.ok(o.bookings.find((b) => b.room === 'board').admitted.includes('did:plc:ada'));
+
+  // Handed on, the key works for Bob too; Ada keeps her place in the meeting.
+  const bob = await join(o, 'bob', 'did:plc:bob');
+  bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await settle();
+  assert.match(bob.last('bounce').text, /restricted/);
+  ada.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
+  bob.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'inv', op: 'give', id: ada.last('inv').items.find((i) => i.kind === 'skeleton-key').id, to: 'bob' });
+  await until(() => bob.last('inv')?.items.some((i) => i.kind === 'skeleton-key'));
+  bob.msg({ t: 'move', x: 40, y: 8, dir: 0, moving: false, teleport: true });
+  await until(() => zoneAt(pos('bob').x, pos('bob').y)?.id === 'board');
+  rt.stop();
+});
+
 test('without a sandbox the office refuses uploads and says why', async () => {
   const o = new Office();
   await o.ready;

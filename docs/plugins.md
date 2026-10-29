@@ -48,7 +48,8 @@ the room, `legacy: 'room:<room>'`) runs `rooms.wasm`. The split:
   they're away. The schedule goes out in `display.data.bookings`, which is
   what the World reads (`office.bookings`) and what browsers draw.
 - **The office keeps the door.** Moves into a booked room or its doorway are
-  bounced and anyone else inside is shown out (`Office.enforce`, run after
+  bounced (unless you carry a skeleton key: then the office sends the panel
+  an `unlock` for you first) and anyone else inside is shown out (`Office.enforce`, run after
   every panel turn, so a booking starting clears the room). A/V stays with
   the room's zone as before.
 - **Only the office can change bookings.** The `book` protocol message
