@@ -356,6 +356,10 @@ input, select, textarea { font: inherit; color: inherit; }
 .tile .grow-btn { position: absolute; right: 6px; top: 6px; border: 0; background: rgba(0,0,0,0.55); color: #fff; border-radius: 6px; width: 26px; height: 26px; cursor: pointer; }
 .tile.cam.fq { width: 140px; }
 .tile.fq.waiting { width: 1px; height: 1px; opacity: 0; pointer-events: none; box-shadow: none; }
+.tile.cam.fq.nocam { width: auto; aspect-ratio: auto; height: 30px; min-width: 80px; }
+.tile.cam.fq.nocam canvas { opacity: 0; }
+.tile.cam.fq.nocam .grow-btn { display: none; }
+.tile.fq moq-publish, .tile.fq video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
 .tile.fq moq-watch, .tile.fq canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
 .tile.screen.fq canvas, .tile.big.fq canvas { object-fit: contain; }
 .fq-call { width: 200px; background: var(--card); border-radius: 12px; padding: 8px 10px; box-shadow: var(--shadow); font-size: 12px; display: flex; flex-direction: column; gap: 3px; }

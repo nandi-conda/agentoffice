@@ -1152,8 +1152,10 @@ export class Office {
   // Camera and screen share flags. The media itself is peer to peer; these
   // just let everyone draw who's on camera. Only meaningful in an A/V room.
   av(p, m) {
-    // Cameras belong to A/V rooms; a screen can also go up on your desk monitor.
-    const ok = !!zoneAt(p.x, p.y)?.av;
+    // Cameras belong to A/V rooms and channel rooms' freeq calls; a screen can
+    // also go up on your desk monitor.
+    const z = zoneAt(p.x, p.y);
+    const ok = !!(z?.av || z?.channel);
     p.video = ok && !!m.video;
     p.screen = (ok || !!this.deskOf(p)) && !!m.screen;
     this.broadcast({ t: 'peer', id: p.id, video: p.video, screen: p.screen });

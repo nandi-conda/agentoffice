@@ -1724,23 +1724,27 @@ async function toggleShare() {
 
 let sentAv = { video: false, screen: false };
 function mediaChanged(ended) {
-  const now = { video: !!voice.cam, screen: !!voice.screen };
-  camBtn.classList.toggle('on', now.video);
-  shareBtn.classList.toggle('on', now.screen);
+  camBtn.classList.toggle('on', !!voice.cam);
+  shareBtn.classList.toggle('on', !!voice.screen);
+  sendAv();
+  if (ended) toast('🖥️ You stopped sharing your screen.', [], 3000);
+  updateStage();
+}
+// Tell the office when our camera or screen is on, on WebRTC or a freeq call (📹 by your name).
+function sendAv() {
+  const now = { video: !!voice.cam || fqCall.cam, screen: !!voice.screen || fqCall.screen };
   if (me && (now.video !== sentAv.video || now.screen !== sentAv.screen)) {
     sentAv = now;
     me.video = now.video; me.screen = now.screen;
     net.send({ t: 'av', ...now });
   }
-  if (ended) toast('🖥️ You stopped sharing your screen.', [], 3000);
-  updateStage();
 }
 
 const stage = $('.av-stage');
 // A freeq-bridged channel room's voice is the channel's freeq call (freeq-av.js).
 const fqCall = createFreeqCall({
   send: (m) => net.send(m), stage, toast,
-  onChange: () => { syncAvButtons(); updateStage(); },
+  onChange: () => { syncAvButtons(); sendAv(); updateStage(); },
 });
 const tiles = new Map(); // key -> tile element
 function updateStage() {

@@ -35,6 +35,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
   let joined = null;   // { session, nick, instance, token } once freeq has us
   let joining = false;
   let pub = null;      // our <moq-publish> (mic, and camera when on)
+  let selfTile = null; // our own camera, in the stage, while it's on
   let screenPub = null; // a second one for our screen: `{broadcast}/screen`, as freeq's app does
   let screenOff = null; // unhooks the "Stop sharing" watch
   let cam = false, muted = false, deaf = false;
@@ -59,6 +60,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     pub.setAttribute('url', '');
     pub.remove();
     pub = null;
+    selfTile?.remove(); selfTile = null;
   }
 
   async function startPublish() {
@@ -67,7 +69,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     await loadMoq();
     if (!joined) return;
     pub = document.createElement('moq-publish');
-    pub.hidden = true;
+    pub.hidden = !cam;
     pub.setAttribute('url', dialUrl());
     pub.setAttribute('name', pathOf(joined.session, joined.nick, instance));
     pinH264(pub);
@@ -75,7 +77,16 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     if (!cam) pub.setAttribute('invisible', '');
     if (muted) { pub.setAttribute('muted', ''); pub.muted = true; }
     pub.setAttribute('source', 'camera');
-    stage.append(pub);
+    if (!cam) { stage.append(pub); return; }
+    // With the camera on, a <video> inside the element gets its own preview:
+    // that's our "You" tile, next to everyone else's.
+    pub.append(Object.assign(document.createElement('video'), { muted: true, autoplay: true, playsInline: true }));
+    selfTile = document.createElement('div');
+    selfTile.className = 'tile cam self fq';
+    selfTile.innerHTML = '<span class="tag">You</span><button class="grow-btn" title="Enlarge">⤢</button>';
+    selfTile.querySelector('.grow-btn').onclick = () => selfTile.classList.toggle('big');
+    selfTile.prepend(pub);
+    head ? head.after(selfTile) : stage.prepend(selfTile);
   }
 
   function stopScreen() {
@@ -162,6 +173,14 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
       tile.prepend(el);
       stage.append(tile);
       const w = { el, tile, off: null };
+      if (!r.screen) {
+        // Audio-only (camera off): a name chip instead of a black box. Only once
+        // the catalog has arrived and says so; anything unexpected shows the video.
+        const catalog = el.broadcast?.catalog;
+        const show = (c) => { tile.classList.toggle('nocam', !!(c && c.audio && !c.video)); onChange(); };
+        show(catalog?.peek?.());
+        w.off = catalog?.subscribe?.(show) || null;
+      }
       if (r.screen) {
         const status = el.broadcast?.status;
         const show = (st) => { tile.classList.toggle('waiting', st !== 'live'); onChange(); };
