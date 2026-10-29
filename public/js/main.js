@@ -186,6 +186,28 @@ function updateEnter() {
 }
 handleIn.addEventListener('input', updateEnter);
 
+// ---- boot screen: the spinner in index.html stays up until there's something real to show
+const bootEl = $('#boot');
+let bootTimer = null;
+function bootText(text) { bootEl.querySelector('.boot-text').textContent = text; }
+function bootShow(text) {
+  bootText(text);
+  bootEl.hidden = false; bootEl.classList.remove('gone', 'failed');
+}
+function bootDone() {
+  clearTimeout(window.__bootTimer); clearTimeout(bootTimer);
+  document.documentElement.classList.remove('booting');
+  if (bootEl.hidden || bootEl.classList.contains('gone') || bootEl.classList.contains('failed')) return;
+  bootEl.classList.add('gone');
+  setTimeout(() => { if (bootEl.classList.contains('gone')) bootEl.hidden = true; }, 400);
+}
+// Waiting on the server: give it a while, then offer a retry.
+function bootWait(text, ms = 15000) {
+  bootShow(text);
+  clearTimeout(window.__bootTimer); clearTimeout(bootTimer);
+  bootTimer = setTimeout(() => window.bootFail?.("Couldn't reach the office. Check your connection and try again."), ms);
+}
+
 async function loadAccount() {
   const params = new URLSearchParams(location.search);
   const err = params.get('auth_error');
@@ -207,6 +229,10 @@ async function loadAccount() {
   // Signed in already (just now, or on an earlier visit): the session cookie
   // lasts 30 days, so a refresh walks straight back in.
   if (account) enter();
+  else {
+    await document.fonts?.ready.catch(() => {});
+    bootDone();
+  }
 }
 async function signOut() {
   await fetch('/oauth/logout', { method: 'POST' }).catch(() => {});
@@ -222,7 +248,7 @@ function signInAgain() {
 updateEnter();
 const accountReady = loadAccount();
 
-let entered = false;
+let entered = false, spritesReady = false;
 async function enter() {
   // Never decide "not signed in" before /api/me has answered, or a quick
   // Enter on a prefilled handle would start a fresh OAuth sign-in.
@@ -236,6 +262,7 @@ async function enter() {
   }
   entered = true;
   const name = nameIn.value.trim() || account?.displayName || loginActor?.displayName || account?.handle || `guest-${Math.random().toString(36).slice(2, 6)}`;
+  bootWait('Walking in…');
   $('#login').hidden = true;
   $('#hud').hidden = false;
   start({ name, note: noteIn.value.trim() });
@@ -269,7 +296,9 @@ function onMessage(m) {
       me = { ...m.you, rx: m.you.x, ry: m.you.y, sheets: null };
       if (pos) { me.x = me.rx = pos.x; me.y = me.ry = pos.y; net.send({ t: 'move', x: me.x, y: me.y, dir: me.dir, moving: false, teleport: true }); }
       peers.set(me.id, me);
-      sheetsFor(me).then((s) => { me.sheets = s; buildEmotes(); });
+      sheetsFor(me).then((s) => { me.sheets = s; buildEmotes(); }).finally(() => { spritesReady = true; });
+      // Sprites can be slow (they come from your PDS); don't hold the door for more than a few seconds.
+      setTimeout(() => { spritesReady = true; }, 4000);
       for (const p of m.peers) addPeer(p);
       desks = m.desks; notes = m.notes; pomo = m.pomo; counters = m.counters; scores = m.scores; bookings = m.bookings || [];
       freeqRooms = m.freeq || {};
@@ -2057,6 +2086,8 @@ function loop(t) {
       target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, place, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
       hover, promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null, promptTarget: label ? target : null,
     });
+    // First frame with you (and your sprite) on it: lift the boot screen.
+    if (spritesReady && !bootEl.hidden) bootDone();
     // The prompt rides on the object it's about; without a spot it waits at the bottom of the map.
     const at = label && R.promptAt;
     promptEl.classList.toggle('anchored', !!at);
