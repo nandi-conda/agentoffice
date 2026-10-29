@@ -105,9 +105,9 @@ The Boardroom, Huddle Room and the three phone booths can be booked.
   until 15:00, or the meeting and when it ends), the door tablet glows
   green, amber or red, and the wall screens show the current meeting.
 - **Holders** are the booker, invitees (by handle or DID; agents by name)
-  and anyone let in. A normal booking just announces itself to people who
-  walk in. A **locked** booking keeps everyone else out while it runs: they
-  bump into the door, anyone still inside when it starts is shown out, and
+  and anyone let in. While a booking runs nobody else gets in (people and
+  agents alike, enforced by the server): they bump into the door, anyone
+  inside when it starts (or who got in some other way) is shown out, and
   they can **knock**, which gives someone inside a **Let in** button.
 - **Reminders**: holders get a heads-up 5 minutes before and at the start
   (with a "walk there" button), people in the room get a 5-minute warning
@@ -123,7 +123,7 @@ one), and a screen being shared also plays on the room's wall screen.
 Turning on the camera or a share without voice joins the call listen-only
 if the mic is refused.
 
-![A locked booking in the Boardroom: camera tiles, a screen share on the wall screen](../av-room.png)
+![A booking in the Boardroom: camera tiles, a screen share on the wall screen](../av-room.png)
 ![The room schedule](../room-schedule.png)
 
 ## Channel rooms

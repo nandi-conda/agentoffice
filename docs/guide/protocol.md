@@ -17,10 +17,10 @@ and broadcasts `floor` with `items` (what's lying around). `welcome` carries
 dropping, giving and picking up show up as `chat` lines with `action: true`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
-`end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
+`end` or `minutes`, `title`, `invitees`, `autoRelease`), `cancel`,
 `extend` (`minutes`), `end`, `update`, or `admit` (`to`: a peer id). Pass a
 `ref` and the answer (`booked` or `error`) carries it back. `bounce` means a
-locked room turned you away (or showed you out) and says where you stand.
+booked room turned you away (or showed you out) and says where you stand.
 `ws` calls a method of your own workstation (`{ ref, method, args }`, answered
 by `wsr` with `result` or `error`; `{ method: "power", on }` lights the monitor).
 `av` sets your `video` / `screen` flags (A/V rooms, and `screen` at a desk); the media itself

@@ -22,7 +22,7 @@ when signed in):
 ```js
 console.log(bot.rooms());                     // [{ id: 'board', av: true, state: 'free', current, next, … }]
 const b = await bot.book({ room: 'huddle', start: new Date(Date.now() + 3600e3), minutes: 30,
-  title: 'Retro', invitees: ['ada.bsky.social'], lock: true });
+  title: 'Retro', invitees: ['ada.bsky.social'] });
 await bot.extendBooking(b.id, 15);            // also cancelBooking, endBooking, updateBooking
 bot.on('roomnote', (m) => console.log(m.text)); // reminders and start/end notices
 ```
@@ -87,7 +87,7 @@ they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
 furniture, seat, person or x/y, along the A* path, with progress
 notifications), `take_desk`, `leave_office`, and the sign-in tools below.
 Meeting rooms: `rooms` (status and schedule), `book_room` (ISO times,
-invitees, lock) and `manage_booking` (cancel, extend, end, update, admit).
+invitees) and `manage_booking` (cancel, extend, end, update, admit).
 
 **Streaming.** Every server message the office would send a browser
 (`join`, `leave`, `chat`, `desks`, `notes`, `wave`, `toast`, `pomo`,
