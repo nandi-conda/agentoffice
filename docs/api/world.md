@@ -9,7 +9,7 @@ The office itself (OfficeRoom): everyone's socket, movement, presence, proximity
 
 `mutates` · `internal (entity to entity)`
 
-Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }. Entities call it through this.emit() and this.mirror().
+Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }, { op: "log", entries } (server logs, for operators). Entities call it through this.emit(), this.mirror() and this.log().
 
 | Param | Type | |
 | --- | --- | --- |

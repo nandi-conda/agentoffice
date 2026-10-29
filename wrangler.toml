@@ -73,5 +73,9 @@ entrypoint = "Kiosk"
 # binding = "LOADER"
 
 # Who can remove any uploaded object, besides its uploader (comma-separated DIDs).
+# Also who may read the server logs over MCP, unless LOG_DIDS is set
+# (logs_tail, logs_stream, office://logs; MCP_TOKEN operators always may).
+# Either can be a secret instead: `just cf-secret LOG_DIDS`.
 # [vars]
 # ADMIN_DIDS = "did:plc:..."
+# LOG_DIDS = "did:plc:..."

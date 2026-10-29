@@ -15,6 +15,7 @@
 // Dynamic Worker on Cloudflare, a worker thread on Node. They have no
 // built-in to fall back to; when the sandbox fails they're out of order.
 
+import { log } from './logs.js';
 import { OBJECTS } from '../plugins/objects/src/objects.js';
 import { cleanItem } from '../public/js/items.js';
 
@@ -78,7 +79,7 @@ export class PluginHost {
         } catch (e) {
           problem = clip(e?.message || e, 200);
           this.problems[object.id] = { at: req.now, message: problem };
-          console.error(`upload ${object.id}:`, problem);
+          log('error', `upload:${object.id}`, problem);
         }
       }
     } else if (binding) {
@@ -88,14 +89,14 @@ export class PluginHost {
         delete this.problems[object.plugin];
       } catch (e) {
         this.problems[object.plugin] = { at: req.now, message: clip(e?.message || e, 200) };
-        console.error(`plugin ${object.plugin}:`, e?.message || e);
+        log('error', `plugin:${object.plugin}`, String(e?.message || e));
       }
     }
     if (!via && !object.upload) {
       const builtin = this.builtins[object.plugin];
       if (builtin) {
         try { raw = await withTimeout(builtin(req, this.env), this.timeoutMs); via = 'builtin'; }
-        catch (e) { console.error(`builtin ${object.plugin}:`, e?.message || e); }
+        catch (e) { log('error', `plugin:${object.plugin}`, `builtin failed: ${e?.message || e}`); }
       }
     }
     if (!via) {
@@ -109,7 +110,7 @@ export class PluginHost {
     if (raw && 'state' in raw) {
       const json = JSON.stringify(raw.state ?? null);
       if (json.length <= MAX_STATE) next = JSON.parse(json);
-      else console.error(`plugin ${object.plugin}: state over ${MAX_STATE} bytes, not saved`);
+      else log('warning', `plugin:${object.plugin}`, `state over ${MAX_STATE} bytes, not saved`);
     }
     return { result, state: next, via };
   }

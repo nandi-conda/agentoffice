@@ -7,6 +7,7 @@ import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/type
 import { Office } from '../server/office.js';
 import { AgentAuth, PROOF_COLLECTION } from '../server/agentauth.js';
 import { McpHub, resolvePlace } from '../server/mcp.js';
+import { log, setLogSink } from '../server/logs.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -42,11 +43,11 @@ function fakeAtproto() {
   return { repo, fetch, resolve };
 }
 
-async function setup() {
+async function setup({ logDids = '' } = {}) {
   const at = fakeAtproto();
   const auth = new AgentAuth({ fetch: at.fetch, resolve: at.resolve });
   const office = new Office({});
-  const hub = new McpHub({ office, auth, token: 'op-token' });
+  const hub = new McpHub({ office, auth, token: 'op-token', logDids });
   // headers: e.g. { authorization: 'Bearer rmcp_good' }; none = read-only.
   const connect = async (headers = {}) => {
     const client = new Client({ name: 'test', version: '1' });
@@ -293,4 +294,64 @@ test('an MCP agent takes a desk and uses its workstation', async () => {
   assert.equal(d.owner, 'agent:Desk Bot');
   assert.equal(d.notes[0].id, n.id);
   await c.close();
+});
+
+test('server logs are only for operators and allowlisted DIDs', async () => {
+  const did = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+  const { office, connect } = await setup({ logDids: `did:plc:someoneelse, ${did}` });
+  setLogSink({ buffer: office.logs });
+  log('warning', 'freeq', 'listener disconnected', undefined, { print: false });
+
+  // Read-only and signed-in-but-not-listed sessions get a clear refusal.
+  const anon = await connect();
+  await assert.rejects(call(anon, 'logs_tail'), /operators only.*LOG_DIDS.*not signed in/s);
+  await assert.rejects(anon.readResource({ uri: 'office://logs' }), /operators only/);
+  const { office: other, connect: connectOther } = await setup({ logDids: 'did:plc:someoneelse' });
+  setLogSink({ buffer: other.logs });
+  const stranger = await connectOther({ authorization: 'Bearer rmcp_good' });
+  await assert.rejects(call(stranger, 'logs_stream'), new RegExp(`signed in as ${did}, which isn't on that list`));
+  assert.equal((await call(stranger, 'whoami')).canReadLogs, false);
+  setLogSink({ buffer: office.logs });
+
+  // A listed DID can tail; filters by level and source prefix.
+  const ok = await connect({ authorization: 'Bearer rmcp_good' });
+  assert.equal((await call(ok, 'whoami')).canReadLogs, true);
+  const tail = await call(ok, 'logs_tail', { level: 'warning' });
+  assert.ok(tail.entries.some((e) => e.source === 'freeq' && e.msg === 'listener disconnected'));
+  assert.ok(tail.entries.every((e) => ['warning', 'error'].includes(e.level)));
+  assert.deepEqual((await call(ok, 'logs_tail', { sources: ['plugin'] })).entries, []);
+
+  // Operators too, and the long-poll wakes up for a new entry.
+  const op = await connect(OP);
+  const waiting = call(op, 'logs_tail', { since: tail.next, wait_seconds: 5, sources: ['plugin'] });
+  await tick();
+  log('error', 'plugin:jukebox', 'boom with Bearer rmcp_secretsecret', { token: 'rmcp_abc', ok: 1 }, { print: false });
+  const got = await waiting;
+  assert.equal(got.entries.length, 1);
+  assert.equal(got.entries[0].msg, 'boom with Bearer rmcp_[redacted]');
+  assert.deepEqual(got.entries[0].data, { token: '[redacted]', ok: 1 });
+  for (const c of [anon, stranger, ok, op]) await c.close();
+  setLogSink({ buffer: null });
+});
+
+test('logs_stream pushes matching entries as log notifications', async () => {
+  const { office, connect } = await setup();
+  setLogSink({ buffer: office.logs });
+  const c = await connect(OP);
+  const seen = [];
+  c.setNotificationHandler(LoggingMessageNotificationSchema, (n) => { if (n.params.logger === 'server') seen.push(n.params.data); });
+  log('info', 'room:board', 'before streaming', undefined, { print: false });
+  const r = await call(c, 'logs_stream', { sources: ['room'], backfill: 5 });
+  assert.equal(r.streaming, true);
+  assert.equal(r.backfill.at(-1).msg, 'before streaming');
+  log('info', 'mcp', 'not a room', undefined, { print: false });
+  log('error', 'room:board', 'alarm failed: nope', undefined, { print: false });
+  for (let i = 0; i < 50 && !seen.length; i++) await tick();
+  assert.deepEqual(seen.map((e) => e.msg), ['alarm failed: nope']);
+  await call(c, 'logs_stream', { on: false });
+  log('error', 'room:board', 'after stopping', undefined, { print: false });
+  await tick(50);
+  assert.equal(seen.length, 1);
+  await c.close();
+  setLogSink({ buffer: null });
 });

@@ -572,6 +572,42 @@ Agents idle for 10 minutes are dropped. On Workers, MCP sessions live in the
 Durable Object's memory; if the object is evicted the client gets a 404 and
 re-initializes.
 
+### Server logs over MCP (operators)
+
+Operators can read and stream the office's server logs from any MCP client:
+the World, every entity Durable Object (rooms, actors, desks, plugins,
+uploaded objects), the freeq bridge, sign-in and MCP sessions, HTTP errors
+and anything that went to `console`. Entity objects forward their lines to a
+ring buffer in the World (the last 1000; the last 200 survive hibernation),
+so one MCP session sees all of it. Tokens and secrets are redacted before an
+entry is stored: Roost `rmcp_` tokens, `Bearer`/`DPoP` headers, JWTs, the
+`ao_session` cookie, OAuth `code`/`state` in URLs, fields named like
+`token`, `secret`, `credential` or `jwk`, and the exact values of
+`MCP_TOKEN`, `SESSION_SECRET` and the TURN keys.
+
+| Tool / resource | What it does |
+| --- | --- |
+| `logs_tail` | Recent entries `{ seq, ts, level, source, msg, data? }`. Filters: `level` (lowest: debug, info, notice, warning, error), `sources` (`freeq`, `mcp`, `auth`, `http`, `world`, `storage`, `console`, `plugin:<name>`, `upload:<id>`, entity addresses like `room:board`; a prefix like `plugin` or `room` matches all), `grep`. `since` + `wait_seconds` (up to 55) long-polls, so loop on it with `next`. |
+| `logs_stream` | Pushes each matching entry as a `notifications/message` with logger `server` (and `resources/updated` for `office://logs` if subscribed). Returns a `backfill`. `on: false` stops. |
+| `office://logs` | The last 100 entries (with the stream's filter, if set); subscribable. |
+
+**Who may read them.** Only sessions that connected with the operator
+`MCP_TOKEN`, or that are signed in (Roost token on connect, `roost_sign_in`
+or `atproto_verify`) as a DID on the allowlist. Everyone else gets an error
+that says why, and `whoami` shows `canReadLogs`.
+
+| Setting | Value | Where |
+| --- | --- | --- |
+| `LOG_DIDS` | comma-separated DIDs, e.g. `did:plc:abc…,did:plc:def…` | Workers: `just cf-secret LOG_DIDS` (or `LOG_DIDS = "…"` under `[vars]` in wrangler.toml); Node: env var |
+| `ADMIN_DIDS` | used instead when `LOG_DIDS` isn't set | same |
+| `MCP_TOKEN` | operator bearer, always allowed | `just cf-secret MCP_TOKEN`; Node: env var |
+
+Then connect with the header `Authorization: Bearer rmcp_…` (your Roost
+token, for a listed DID) or `Authorization: Bearer <MCP_TOKEN>`, and ask the
+agent to call `logs_stream` (or `logs_tail` with `wait_seconds` in a loop if
+your client doesn't show notifications). `wrangler tail` (`just cf-tail`)
+still shows the same lines, unfiltered by the office.
+
 ### Signing agents in with AT Protocol (and Roost)
 
 Browsers sign in with OAuth; agents can't, so they prove control of a DID by

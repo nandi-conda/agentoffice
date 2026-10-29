@@ -19,6 +19,7 @@ import { str, int, num as numS, arr, obj, opt, WHO, describeKind, paramList } fr
 import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
+import { LogBuffer, log } from './logs.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -26,7 +27,7 @@ export const WORLD = {
   doc: 'The office itself (OfficeRoom): everyone\'s socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.',
   api: {
     apply: {
-      doc: 'Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }. Entities call it through this.emit() and this.mirror().',
+      doc: 'Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }, { op: "log", entries } (server logs, for operators). Entities call it through this.emit(), this.mirror() and this.log().',
       params: { effects: arr({ type: 'object', description: '{ op, from, ... }' }, 'Effects') }, mutates: true, internal: true,
     },
     presence: { doc: 'Who is in the office now.', returns: arr(WHO, 'People'), internal: true },
@@ -81,6 +82,9 @@ export class Office {
     this.now = now;
     this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor } });
     this.runtime.setWorld?.(this.worldApi());
+    // Recent server logs, for operators over MCP (server/logs.js); the entry
+    // points make it this process's log sink.
+    this.logs = new LogBuffer({ now });
     this.mirror = new Map(mirror || []); // entity address -> what it shows
     this.onMirror = onMirror;
     // The channel wing, as last mirrored (a hibernation wake has it at once).
@@ -99,7 +103,7 @@ export class Office {
 
   // Background entity calls (publishing, touching desks…): never let one
   // failing take a message down with it.
-  bg(promise) { promise.catch((e) => console.error('entity call', e.message)); }
+  bg(promise) { promise.catch((e) => log('error', 'world', `entity call failed: ${e.message}`)); }
 
   // First start after the move to entities: hand the old single-object
   // state to the entities that own it now. Then pull what everyone shows.
@@ -127,7 +131,7 @@ export class Office {
     views.forEach((r, i) => {
       if (pushed.has(MIRRORED[i])) return;
       if (r.status === 'fulfilled') { this.mirror.set(MIRRORED[i], r.value); this.onMirror(MIRRORED[i]); }
-      else console.error(`${MIRRORED[i]} view`, r.reason?.message);
+      else log('error', MIRRORED[i], `view failed: ${r.reason?.message}`);
     });
     // Uploaded objects aren't in MIRRORED (people add them): pull what each shows.
     await Promise.allSettled(this.gallery.map(async (f) => {
@@ -311,12 +315,14 @@ export class Office {
   //   { op: 'mirror', from, value | push+max, except?, quiet? }  what `from` shows changed
   //   { op: 'send', to: peerId, msg }   { op: 'broadcast', msg, except? }
   //   { op: 'showOut', to: peerId, room, text }
+  //   { op: 'log', entries: [{ level, source, msg, data?, ts }] }   server logs from entity objects
   apply(effects) {
     for (const e of effects || []) {
       if (e.op === 'mirror') this.mirrored(e);
       else if (e.op === 'send') { const q = this.peers.get(e.to); if (q?.ready) this.sendTo(q, e.msg); }
       else if (e.op === 'broadcast') this.broadcast(e.msg, this.peers.get(e.except) || null);
       else if (e.op === 'showOut') { const q = this.peers.get(e.to), room = roomById(e.room); if (q?.ready && room) this.showOut(q, room, e.text); }
+      else if (e.op === 'log') for (const entry of (e.entries || []).slice(0, 200)) this.logs.add({ ...entry, source: entry.source || e.from || 'entity' });
     }
     return true;
   }

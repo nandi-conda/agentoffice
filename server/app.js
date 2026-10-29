@@ -3,6 +3,7 @@
 // server and the Cloudflare Durable Object route through the same code.
 // New endpoints belong here, written against fetch/Request/Response only.
 
+import { log } from './logs.js';
 import { loadActor, fetchBlob } from './atproto.js';
 import { describeApi } from './apidoc.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
@@ -59,6 +60,7 @@ export async function handleApi(request, { office, auth, agents, mcp, ice }) {
         if (url.pathname === '/api/agent/verify' && request.method === 'POST') return json(200, await agents.verify(body.handle, body.nonce));
         if (url.pathname === '/api/agent/roost-signin' && request.method === 'POST') return json(200, await agents.roostSignIn({ token: body.token, pds: body.pds }));
       } catch (e) {
+        log('notice', 'auth', `agent ${url.pathname.slice('/api/agent/'.length)} refused: ${e.message}`);
         return json(403, { error: e.message });
       }
       return null;
@@ -114,6 +116,7 @@ export async function handleApi(request, { office, auth, agents, mcp, ice }) {
     }
     if (url.pathname === '/healthz') return new Response('ok', { headers: { 'content-type': 'text/plain' } });
   } catch (e) {
+    log('error', 'http', `${request.method} ${url.pathname}: ${e.message}`);
     return json(502, { error: e.message });
   }
   return null;

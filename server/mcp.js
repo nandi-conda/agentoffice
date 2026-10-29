@@ -29,6 +29,7 @@ import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 import { isoize } from '../public/js/time.js';
 import { describeApi, generatedTools } from './apidoc.js';
+import { LEVELS, LogBuffer, log } from './logs.js';
 
 const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
@@ -86,6 +87,8 @@ class AgentSession {
     this.operator = false; // connected with MCP_TOKEN
     this.subscribed = false;
     this.verbose = false; // stream move events too
+    this.logStream = null; // { filter, off } while streaming server logs
+    this.logsSubscribed = false; // office://logs
     this.touch();
   }
 
@@ -151,6 +154,8 @@ class AgentSession {
   }
 
   close() {
+    this.logStream?.off();
+    this.logStream = null;
     this.client?.close();
     this.client = null;
     this.joinedAs = null;
@@ -164,8 +169,11 @@ export class McpHub {
   // what set() was given, or nothing once IDLE_MS has passed. With one,
   // sessions outlive a restart of the process or Durable Object: the agent's
   // next request picks its session up again and puts it back in the office.
-  constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '', store = null }) {
+  // logDids: who may read the server logs (comma-separated DIDs, or a list);
+  // LOG_DIDS, else ADMIN_DIDS. Operators with MCP_TOKEN always may.
+  constructor({ office, auth, token = globalThis.process?.env?.MCP_TOKEN || '', store = null, logDids = globalThis.process?.env?.LOG_DIDS ?? globalThis.process?.env?.ADMIN_DIDS ?? '' }) {
     Object.assign(this, { office, auth, token, store });
+    this.logDids = new Set((Array.isArray(logDids) ? logDids : String(logDids).split(',')).map((d) => d.trim()).filter(Boolean));
     this.sessions = new Map(); // mcp session id -> { transport, agent }
     // Observers (sessions that haven't joined) get the office-wide
     // broadcasts: joins, leaves, shouts, desks, notes, bookings, pomodoro…
@@ -178,6 +186,13 @@ export class McpHub {
     };
     const leave = office.leave.bind(office);
     office.leave = (p) => { (this.lastNames ||= new Map()).set(p.id, p.name); if (this.lastNames.size > 500) this.lastNames.clear(); leave(p); };
+  }
+
+  // The one access check for gated capabilities. 'logs': the server logs
+  // (logs_tail, logs_stream, office://logs).
+  can(agent, capability) {
+    if (capability === 'logs') return agent.operator || (!!agent.identity?.did && this.logDids.has(agent.identity.did));
+    return false;
   }
 
   sweep() {
@@ -276,12 +291,14 @@ export class McpHub {
           // Kept in memory so the agent can talk on freeq as its own DID.
           this.office.freeq?.rememberAgentToken(v.did, bearer, v.pds);
         } catch (e) {
+          log('warning', 'mcp', `sign-in on connect failed: ${e.message}`);
           return Response.json(
             { jsonrpc: '2.0', error: { code: -32001, message: `sign-in failed: ${e.message}. Send a Roost token as Authorization: Bearer rmcp_…, or no Authorization header for read-only access.` }, id: body?.id ?? null },
             { status: 401, headers: { 'www-authenticate': 'Bearer realm="agent office"' } });
         }
       }
       s = await this.open(agent);
+      log('info', 'mcp', `session opened (${agent.operator ? 'operator' : agent.identity ? `${agent.identity.handle || ''} ${agent.identity.did}`.trim() : 'read-only'})`);
     }
     s.agent.touch();
     this.persist(s.agent); // at most once a minute unless something changed, which keeps it from expiring
@@ -352,7 +369,7 @@ export class McpHub {
 
     tool('whoami', 'Your sign-in state: observer (read-only) or signed in as an AT Protocol identity, and how to sign in.', {},
       async () => json({
-        identity: agent.identity, operator: agent.operator, canAct: agent.canAct, inOffice: agent.joined,
+        identity: agent.identity, operator: agent.operator, canAct: agent.canAct, inOffice: agent.joined, canReadLogs: this.can(agent, 'logs'),
         ...(agent.canAct ? {} : { howToSignIn: SIGN_IN_HELP }),
       }), READ_ONLY);
 
@@ -635,6 +652,62 @@ export class McpHub {
       }, t.readOnly ? READ_ONLY : undefined);
     }
 
+    // ---- server logs (operators only: see can()) -----------------------------
+
+    const logs = office.logs;
+    const gate = () => { if (!this.can(agent, 'logs')) throw new Error(logsDenied(agent)); };
+    const logFilter = {
+      level: z.enum(LEVELS).optional().describe('Lowest level to include (default debug: everything)'),
+      sources: z.array(z.string().max(120)).max(20).optional().describe('Only these sources, e.g. ["freeq","mcp","plugin:jukebox","room:board"]; a prefix like "plugin" or "room" matches all of them'),
+      grep: z.string().max(200).optional().describe('Only entries whose message or data contain this (case-insensitive)'),
+    };
+    const known = () => [...new Set(logs.entries.map((e) => e.source.split(':')[0]))].sort();
+
+    tool('logs_tail',
+      'Recent server logs (operators only: MCP_TOKEN, or a DID in LOG_DIDS / ADMIN_DIDS). Entries are { seq, ts, level, source, msg, data? }, secrets redacted; sources are world, mcp, freeq, auth, storage, console, plugin:<name>, upload:<id> and entity addresses (room:board, actor:…). Waits up to wait_seconds for new entries, so loop on it with `next` as `since` to follow along, or use logs_stream for push notifications.',
+      {
+        since: z.number().int().min(0).optional().describe('Last seq you saw; default the most recent entries'),
+        limit: z.number().int().min(1).max(500).optional().describe('At most this many (default 100), the newest'),
+        wait_seconds: z.number().min(0).max(55).optional().describe('Long-poll this long if nothing new (default 0)'),
+        ...logFilter,
+      },
+      async ({ since, limit = 100, wait_seconds = 0, level, sources, grep }) => {
+        gate();
+        const filter = { level, sources, grep };
+        const from = since ?? 0;
+        if (wait_seconds > 0 && !logs.since(from, filter, 1).length) {
+          await new Promise((resolve) => {
+            const t = setTimeout(done, wait_seconds * 1000);
+            const off = logs.subscribe((e) => { if (e.seq > from && LogBuffer.match(e, filter)) done(); });
+            function done() { clearTimeout(t); off(); resolve(); }
+          });
+        }
+        return json({ entries: logs.since(from, filter, limit), next: logs.seq, sources: known() });
+      }, READ_ONLY);
+
+    tool('logs_stream',
+      'Stream server logs to this session as they happen (operators only, like logs_tail): each entry arrives as a notifications/message log notification with logger "server" (the entry is its data), and office://logs gets resources/updated if you subscribed to it. Returns the last `backfill` entries that match. on=false stops. Calling it again replaces the filter.',
+      {
+        on: z.boolean().optional().describe('Default true; false stops streaming'),
+        backfill: z.number().int().min(0).max(500).optional().describe('How many recent matching entries to return now (default 20)'),
+        ...logFilter,
+      },
+      async ({ on = true, backfill = 20, level, sources, grep }) => {
+        gate();
+        agent.logStream?.off();
+        agent.logStream = null;
+        if (!on) return json({ streaming: false });
+        const filter = { level, sources, grep };
+        const off = logs.subscribe((e) => {
+          if (!this.can(agent, 'logs')) { off(); agent.logStream = null; return; }
+          if (!LogBuffer.match(e, filter)) return;
+          agent.mcp?.server.sendLoggingMessage({ level: e.level, logger: 'server', data: e }).catch(() => {});
+          if (agent.logsSubscribed) agent.mcp?.server.sendResourceUpdated({ uri: 'office://logs' }).catch(() => {});
+        });
+        agent.logStream = { filter, off };
+        return json({ streaming: true, filter, backfill: backfill ? logs.since(0, filter, backfill) : [], next: logs.seq, sources: known() });
+      }, READ_ONLY);
+
     // ---- resources ----------------------------------------------------------
 
     mcp.registerResource('map', 'office://map', { title: 'Office map', description: 'Zones, named places and seats', mimeType: 'application/json' },
@@ -643,8 +716,22 @@ export class McpHub {
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(office.summary()) }] }));
     mcp.registerResource('events', 'office://events', { title: 'Office events', description: 'Your last events; subscribe for updates', mimeType: 'application/json' },
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ events: agent.events.filter((e) => e.type !== 'move').slice(-50), next: agent.seq }) }] }));
-    mcp.server.setRequestHandler(SubscribeRequestSchema, async (r) => { if (r.params.uri === 'office://events') agent.subscribed = true; return {}; });
-    mcp.server.setRequestHandler(UnsubscribeRequestSchema, async (r) => { if (r.params.uri === 'office://events') agent.subscribed = false; return {}; });
+    mcp.registerResource('logs', 'office://logs', { title: 'Server logs', description: 'Recent server logs, secrets redacted (operators only: MCP_TOKEN, or a DID in LOG_DIDS / ADMIN_DIDS). Uses the logs_stream filter if one is set; subscribe for updates while streaming.', mimeType: 'application/json' },
+      async (uri) => {
+        gate();
+        const filter = agent.logStream?.filter || {};
+        return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ entries: logs.since(0, filter, 100), next: logs.seq }) }] };
+      });
+    mcp.server.setRequestHandler(SubscribeRequestSchema, async (r) => {
+      if (r.params.uri === 'office://events') agent.subscribed = true;
+      if (r.params.uri === 'office://logs') { gate(); agent.logsSubscribed = true; }
+      return {};
+    });
+    mcp.server.setRequestHandler(UnsubscribeRequestSchema, async (r) => {
+      if (r.params.uri === 'office://events') agent.subscribed = false;
+      if (r.params.uri === 'office://logs') agent.logsSubscribed = false;
+      return {};
+    });
 
     return mcp;
   }
@@ -685,6 +772,8 @@ export function resolvePlace(place, c) {
 
 const SIGN_IN_HELP = `Read-only until you sign in with an AT Protocol identity. Easiest: connect with the header "Authorization: Bearer <Roost token>" (get one from roost_signup or https://roost.latha.org). Or, in this session: roost_sign_in { token }, or atproto_challenge + putRecord + atproto_verify. Then call join_office.`;
 
+const logsDenied = (agent) => `The server logs are for operators only. Connect with "Authorization: Bearer <MCP_TOKEN>", or sign in with an AT Protocol identity whose DID is in the office's LOG_DIDS (or ADMIN_DIDS when LOG_DIDS is unset). This session is ${agent.identity?.did ? `signed in as ${agent.identity.did}, which isn't on that list` : 'not signed in'}.`;
+
 const INSTRUCTIONS = `You are an agent in Agent Office, a 2D virtual coworking office shared with people.
 Without sign-in you are a read-only observer: look, rooms, read_events, whoami and the office:// resources work.
 To act (join, move, chat…) sign in with AT Protocol, ideally Roost: connect with "Authorization: Bearer <Roost token>", or call roost_signup then roost_sign_in (or atproto_challenge + atproto_verify). Then join_office.
@@ -692,4 +781,5 @@ Then look around with look, and keep up with the office through read_events (lon
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
 Things: you can carry items (inventory_view). The coffee machine (coffee) and the vending machine (plugin_interact name=vending, action buy:<snack>) hand them out; inventory_use eats or drinks them, inventory_give hands one to someone within 3 tiles, inventory_place puts it down (x/y: a free tile within 3 tiles you can reach on foot; leave them out for at your feet), and inventory_pickup picks up what floor_view lists (walk_to its id first).
-Meeting rooms: rooms shows the schedule, book_room books one (only you and invitees can walk in while it runs), manage_booking changes it; roomnote events carry reminders and start/end notices.`;
+Meeting rooms: rooms shows the schedule, book_room books one (only you and invitees can walk in while it runs), manage_booking changes it; roomnote events carry reminders and start/end notices.
+Operators (MCP_TOKEN, or a DID the office allows) can read the server logs: logs_tail, logs_stream and office://logs.`;

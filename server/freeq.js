@@ -20,6 +20,10 @@
 import { ZONES, isBlocked } from '../public/js/map.js';
 import { channelKey } from '../public/js/wing.js';
 import { Seen, Saver, missedSince, tagSeconds, usable, SNAPSHOT_VERSION } from './freeq-sync.js';
+import { log as serverLog } from './logs.js';
+
+// The bridge's lines go to the server logs (operators read them over MCP).
+const freeqLog = (m) => serverLog(/couldn't|failed|disconnected|error|refused/i.test(m) ? 'warning' : 'info', 'freeq', String(m).replace(/^freeq: /, ''));
 
 export const FREEQ_URL = 'wss://irc.freeq.at/irc';
 export const MAX_ROOMS = 12; // channels offered for rooms, busiest first
@@ -306,7 +310,7 @@ export class FreeqBridge {
   //
   // The office never waits on freeq: nothing here is awaited by joins, chat
   // or sign-in, and when freeq is unreachable the areas just stay plain.
-  constructor({ office, auth, openSocket, keyStore, stateStore = null, url = FREEQ_URL, rooms = '', always = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = console.log, signInMs = SIGN_IN_MS, graceMs = STALE_MS }) {
+  constructor({ office, auth, openSocket, keyStore, stateStore = null, url = FREEQ_URL, rooms = '', always = '', minMembers = 2, fetch: fetchImpl = globalThis.fetch, log = freeqLog, signInMs = SIGN_IN_MS, graceMs = STALE_MS }) {
     Object.assign(this, { office, auth, openSocket, keyStore, stateStore, url, minMembers, log, signInMs, graceMs });
     // Wrapped: calling a stored fetch as this.fetch() throws "Illegal invocation" on Workers.
     this.fetch = (...a) => fetchImpl(...a);

@@ -60,7 +60,7 @@ export async function runWasm(module, req) {
   if (outLen > 64 * 1024) throw new Error(`the plugin answered ${outLen} bytes (64 KB at most)`);
   if (outPtr + outLen > mem.buffer.byteLength) throw new Error('the plugin answered outside its memory');
   const answer = outLen ? JSON.parse(text(outPtr, outLen)) : {};
-  if (logs.length) console.log(`plugin ${req.object?.id}:`, logs.join(' | '));
+  if (logs.length) log('info', `upload:${req.object?.id}`, logs.join(' | '));
   return answer;
 }
 
@@ -159,6 +159,7 @@ export function checkUpload(lang, bytes) {
 // the uploaded module. The upload itself is plugin.wasm or plugin.js.
 export const WRAPPERS = {
   wasm: `import { WorkerEntrypoint } from 'cloudflare:workers';
+import { log } from './logs.js';
 import plugin from './plugin.wasm';
 const __name = (f) => f; // esbuild's keepNames helper, which runWasm's source may call
 const runWasm = ${runWasm.toString()};

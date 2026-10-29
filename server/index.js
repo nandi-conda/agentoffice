@@ -12,6 +12,7 @@ import { handleApi, isApiPath } from './app.js';
 import { createIce } from './turn.js';
 import { AgentAuth } from './agentauth.js';
 import { McpHub } from './mcp.js';
+import { captureConsole, setLogSink, addSecret, log } from './logs.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
 import { LocalRuntime } from './entities/runtime.js';
 import { PluginHost } from './plugins.js';
@@ -48,7 +49,7 @@ function saver(file, data) {
       try {
         if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
         await writeFile(file, JSON.stringify(data()), { mode: 0o600 });
-      } catch (e) { console.error('save failed', e.message); }
+      } catch (e) { log('error', 'storage', `save of ${path.basename(file)} failed: ${e.message}`); }
     }, 1000);
   };
 }
@@ -118,6 +119,10 @@ const office = new Office(saved, {
   loadActor: actorLoader,
   runtime,
 });
+// Server logs (operators tail them over MCP: logs_tail, logs_stream).
+captureConsole();
+setLogSink({ buffer: office.logs });
+for (const k of ['MCP_TOKEN', 'SESSION_SECRET', 'TURN_KEY_API_TOKEN']) addSecret(process.env[k]);
 const ice = createIce({ keyId: process.env.TURN_KEY_ID, token: process.env.TURN_KEY_API_TOKEN });
 const agents = new AgentAuth({ office: process.env.OFFICE_NAME || 'agent office' });
 const mcp = new McpHub({ office, auth: agents });

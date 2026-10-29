@@ -15,6 +15,7 @@ import { McpHub } from '../server/mcp.js';
 import { FreeqBridge, FREEQ_URL } from '../server/freeq.js';
 import { SESSION_TTL_MS } from '../server/auth.js';
 import { DORuntime } from './entities.js';
+import { captureConsole, setLogSink, addSecret, log } from '../server/logs.js';
 
 export { ActorDO, RoomDO, ItemDO, TopicDO } from './entities.js';
 
@@ -59,12 +60,29 @@ export class OfficeRoom extends DurableObject {
       onMirror: (k) => { this.mirrorDirty.add(k); this.scheduleSave(); },
     });
 
+    // Server logs: this isolate's console and log() calls, plus what entity
+    // objects forward, land in the World's ring buffer for operators (MCP
+    // logs_tail / logs_stream). The last 200 are kept across hibernation.
+    captureConsole();
+    setLogSink({ buffer: this.office.logs });
+    for (const k of ['MCP_TOKEN', 'SESSION_SECRET', 'TURN_KEY_API_TOKEN', 'TURN_KEY_ID']) addSecret(env[k]);
+    try {
+      const row = this.sql.exec("SELECT v FROM meta WHERE k = 'logs'").toArray()[0];
+      if (row) this.office.logs.restore(JSON.parse(row.v));
+    } catch { /* a bad snapshot just means no backfill */ }
+    this.office.logs.onAdd = () => {
+      this.logTimer ||= setTimeout(() => {
+        this.logTimer = null;
+        try { this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('logs', ?)", JSON.stringify(this.office.logs.snapshot())); } catch { /* best effort */ }
+      }, 5000);
+    };
+
     // Agents: DID proof / Roost sign-in, and the MCP endpoint. MCP sessions
     // live in memory but are noted in storage, so after a deploy or eviction
     // an agent's next request resumes its session and puts it back in the office.
     this.ice = createIce({ keyId: env.TURN_KEY_ID, token: env.TURN_KEY_API_TOKEN });
     this.agents = new AgentAuth({ office: env.OFFICE_NAME || 'agent office' });
-    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
+    this.mcp = new McpHub({ office: this.office, auth: this.agents, token: env.MCP_TOKEN || '', logDids: env.LOG_DIDS ?? env.ADMIN_DIDS ?? '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
 
     // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
     if (env.FREEQ !== 'off') {
@@ -256,7 +274,7 @@ export class OfficeRoom extends DurableObject {
       this.sql.exec('INSERT OR REPLACE INTO actors (did, v) VALUES (?, ?)', p.did, JSON.stringify(actor));
       p.actorSaved = true;
     }
-    try { p.ws.serializeAttachment(snap); } catch (e) { console.error('peer attachment', e.message); }
+    try { p.ws.serializeAttachment(snap); } catch (e) { log('error', 'world', `peer attachment: ${e.message}`); }
   }
 
   async webSocketMessage(ws, raw) {

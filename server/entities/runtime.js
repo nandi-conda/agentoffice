@@ -19,6 +19,8 @@
 // Everything crossing between entities is structured-cloned, here as on
 // Workers, so code that works on Node can't lean on shared objects.
 
+import { log } from '../logs.js';
+
 export const parse = (address) => {
   const i = String(address).indexOf(':');
   if (i < 1) throw new Error(`bad entity address ${address}`);
@@ -64,6 +66,8 @@ export class Entity {
   emit(...effects) { return this.world.apply(effects.map((e) => ({ from: this.address, ...e }))); }
   // What this entity shows the office; the World keeps a copy (see view()).
   mirror(value, extra = {}) { return this.emit({ op: 'mirror', value, ...extra }); }
+  // A server log line, tagged with this entity's address (server/logs.js).
+  log(level, msg, data) { log(level, this.address, msg, data); }
   tell(to, type, data) { return this.ref(to).receive({ type, data, from: this.address }); }
   publish(topic, ev) { return this.ref(`topic:${topic}`).publish(ev, this.address); }
   async subscribe(topic) {
@@ -121,12 +125,23 @@ export class EntityHost {
       throw new Error(`${this.address} has no method ${method}`);
     }
     await this.load();
-    return this.entity[method](...args);
+    try {
+      return await this.entity[method](...args);
+    } catch (e) {
+      // Most are refusals ("not your booking"), so notice, not error.
+      log('notice', this.address, `${method} failed: ${e?.message || e}`);
+      throw e;
+    }
   }
 
   async alarm() {
     await this.load();
-    return this.entity.alarm();
+    try {
+      return await this.entity.alarm();
+    } catch (e) {
+      log('error', this.address, `alarm failed: ${e?.message || e}`);
+      throw e;
+    }
   }
 }
 
@@ -191,7 +206,7 @@ export class LocalRuntime {
     if (t == null) return;
     const timer = setTimeout(() => {
       this.timers.delete(address);
-      this.host(address).alarm().catch((e) => console.error(`${address} alarm`, e.message));
+      this.host(address).alarm().catch(() => {}); // logged by the host
     }, Math.max(0, Math.min(t - this.now(), 2 ** 31 - 1)));
     timer.unref?.();
     this.timers.set(address, timer);

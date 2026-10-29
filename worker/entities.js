@@ -9,6 +9,7 @@ import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
 import { PluginHost } from '../server/plugins.js';
 import { DynamicSandbox } from '../server/sandbox.js';
+import { captureConsole, setLogSink, forwarder } from '../server/logs.js';
 
 import { BINDINGS } from '../server/entities/bindings.js';
 
@@ -46,6 +47,10 @@ class EntityDO extends DurableObject {
     super(ctx, env);
     this.runtime = new DORuntime(env);
     this.entity = null;
+    // Logs from this object go to the World's buffer (unless the World
+    // shares this isolate, in which case its buffer takes them directly).
+    captureConsole();
+    setLogSink({ forward: forwarder((entries) => this.runtime.ref('world:main').apply([{ op: 'log', entries }])) });
   }
 
   async hostFor(address) {

@@ -72,7 +72,7 @@ export class Topic extends Entity {
   async publish(ev, from) {
     const subs = (this.state.subs || []).filter((a) => a !== from);
     const out = await Promise.allSettled(subs.map((a) => this.ref(a).notify(this.name, ev, from)));
-    for (const [i, r] of out.entries()) if (r.status === 'rejected') console.error(`topic ${this.name} → ${subs[i]}:`, r.reason?.message);
+    for (const [i, r] of out.entries()) if (r.status === 'rejected') this.log('error', `publish to ${subs[i]} failed: ${r.reason?.message}`);
     return subs.length;
   }
 }

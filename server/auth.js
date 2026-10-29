@@ -11,6 +11,7 @@
 //  - public web client: PUBLIC_URL=https://office.example.com, and we serve
 //    the client metadata at /oauth/client-metadata.json.
 
+import { log } from './logs.js';
 import { OAuthClient } from '@atproto/oauth-client';
 import { JoseKey } from '@atproto/jwk-jose';
 import { buildAtprotoLoopbackClientId } from '@atproto/oauth-types';
@@ -223,6 +224,7 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
           const to = await client.authorize(handle, { scope: SCOPE, signal: request.signal });
           return redirect(to.toString());
         } catch (e) {
+          log('warning', 'auth', `couldn't start sign-in for @${handle}: ${reason(e)}`);
           return fail(`couldn't start sign-in for @${handle}: ${reason(e)}`);
         }
       }
@@ -230,16 +232,19 @@ export function createAuth({ publicUrl, port = 8080, secret, stateStore, session
         try {
           const { session } = await client.callback(url.searchParams);
           const did = session.did;
+          log('info', 'auth', `signed in ${did}`);
           // The session (scope `atproto`: identity only, no repo access) is
           // kept so freeq can check who you are when you talk there.
           return redirect('/?signedin=1', { 'set-cookie': cookie(await signSession(did, secret), MAX_AGE) });
         } catch (e) {
+          log('warning', 'auth', `sign-in callback failed: ${reason(e)}`);
           return fail(`sign-in failed: ${reason(e)}`);
         }
       }
       if (url.pathname === '/oauth/logout' && request.method === 'POST') {
         const did = await verifySession(parseCookies(request.headers.get('cookie'))[COOKIE], secret);
         if (did) await client.revoke(did).catch(() => {});
+        if (did) log('info', 'auth', `signed out ${did}`);
         return new Response(null, { status: 204, headers: { 'set-cookie': cookie('', 0) } });
       }
       return null;
