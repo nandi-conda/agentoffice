@@ -22,9 +22,10 @@ function fakeFreeq({ verify }) {
   const conns = new Set();
   const members = new Map(); // channel -> Set(conn)
   const history = new Map(); // channel -> [{ id, sender, text, timestamp, msgid, tags }]
+  const sessions = new Map(); // id -> { id, channel, participants: Map(instance -> { nick, did, instance_id }) }
   let n = 0;
   const server = {
-    conns, members, history, sent: [],
+    conns, members, history, sessions, sent: [],
     open() {
       const listeners = {};
       const c = { nick: null, buf: '', readyState: 1, account: null };
@@ -84,6 +85,34 @@ function fakeFreeq({ verify }) {
           members.get(m.params[0])?.delete(c);
           return;
         }
+        if (m.command === 'TAGMSG') {
+          // freeq calls: +freeq.at/av-start / av-join / av-leave.
+          const ch = m.params[0], t = m.tags, inst = t['+freeq.at/av-instance'];
+          const state = (s, action) => {
+            for (const o of members.get(ch) || []) o.out(`@+freeq.at/av-state=${action};+freeq.at/av-id=${s.id};+freeq.at/av-actor=${c.nick};+freeq.at/av-participants=${s.participants.size} :irc.freeq.at TAGMSG ${ch}`);
+          };
+          if ('+freeq.at/av-start' in t) {
+            const live = [...sessions.values()].find((x) => x.channel === ch);
+            if (live) return out(`@+freeq.at/av-error=start-collision;+freeq.at/av-id=${live.id} :irc.freeq.at TAGMSG ${c.nick}`);
+            const s = { id: `S${++n}`, channel: ch, participants: new Map([[inst, { nick: c.nick, did: c.account, instance_id: inst }]]) };
+            sessions.set(s.id, s);
+            state(s, 'started');
+            return out(`@+freeq.at/av-token=jwt.${s.id};+freeq.at/av-id=${s.id} :irc.freeq.at TAGMSG ${c.nick}`);
+          }
+          const s = sessions.get(t['+freeq.at/av-id']);
+          if ('+freeq.at/av-join' in t) {
+            if (!s) return out(`:irc.freeq.at NOTICE ${c.nick} :Cannot join session: not found`);
+            s.participants.set(inst, { nick: c.nick, did: c.account, instance_id: inst });
+            state(s, 'joined');
+            return out(`@+freeq.at/av-token=jwt.${s.id};+freeq.at/av-id=${s.id} :irc.freeq.at TAGMSG ${c.nick}`);
+          }
+          if ('+freeq.at/av-leave' in t && s) {
+            s.participants.delete(inst);
+            state(s, s.participants.size ? 'left' : 'ended');
+            if (!s.participants.size) sessions.delete(s.id);
+          }
+          return;
+        }
         if (m.command === 'PRIVMSG') {
           const ch = m.params[0], at = new Date(), msgid = `m${++n}`;
           if (!history.has(ch)) history.set(ch, []);
@@ -93,8 +122,18 @@ function fakeFreeq({ verify }) {
       }
       return c;
     },
-    // freeq's REST API: the channel list and per-channel history.
+    // freeq's REST API: the channel list, per-channel history and calls.
     fetch: (list) => async (url) => {
+      const sess = String(url).match(/\/api\/v1\/sessions\/([^/?]+)$/);
+      if (sess) {
+        const s = sessions.get(decodeURIComponent(sess[1]));
+        return s ? new Response(JSON.stringify({ id: s.id, state: 'Active', participants: [...s.participants.values()], participant_count: s.participants.size })) : new Response('Session not found', { status: 404 });
+      }
+      const cs = String(url).match(/\/channels\/([^/]+)\/sessions/);
+      if (cs) {
+        const s = [...sessions.values()].find((x) => x.channel === decodeURIComponent(cs[1]));
+        return new Response(JSON.stringify({ active: s ? { id: s.id, state: 'Active' } : null, recent: [] }));
+      }
       const h = String(url).match(/\/channels\/([^/]+)\/history/);
       if (h) return new Response(JSON.stringify([...(history.get(decodeURIComponent(h[1])) || [])].reverse()));
       return new Response(JSON.stringify(list));
@@ -107,6 +146,7 @@ function fakeFreeq({ verify }) {
         join: (ch) => c.socket.send(`JOIN ${ch}`),
         part: (ch) => c.socket.send(`PART ${ch}`),
         say: (ch, text) => c.socket.send(`PRIVMSG ${ch} :${text}`),
+        tag: (ch, tags) => c.socket.send(`@${Object.entries(tags).map(([k, v]) => (v === '' ? k : `${k}=${v}`)).join(';')} TAGMSG ${ch}`),
       };
     },
   };
@@ -569,4 +609,90 @@ test('the office works the same when freeq is unreachable', async () => {
   // A snapshot that can't be written is logged, not thrown.
   await bridge.saver.now();
   assert.ok(logs.some((l) => /couldn't save the snapshot: disk full/.test(l)));
+});
+
+test('in a bridged room, signed-in people join the channel\'s freeq call as themselves', async () => {
+  const server = fakeFreeq({ verify: async (r) => r.method === 'crypto' || r.method === 'pds-oauth' });
+  const office = new Office({}, { loadActor: null });
+  const auth = { freeqCredentials: async (did) => ({ did, pds: 'https://pds.example', accessToken: 't', dpopProof: 'p' }) };
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, auth, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: server.fetch([{ name: '#general', members: 3 }]),
+  });
+  // bob is on freeq and already in #general's call.
+  const bob = server.outsider('bob', 'did:plc:bob');
+  bob.join('#general');
+  bob.tag('#general', { '+freeq.at/av-start': '', '+freeq.at/av-instance': 'b0b0b0b0' });
+  const said = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did: 'did:plc:alice' });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  await bridge.start();
+  await tick();
+  stand(me, 'ch-general');
+  const until = async (f) => { for (let i = 0; i < 100 && !f(); i++) await tick(); return f(); };
+
+  // Walking in: what's the call?
+  await office.handle(me, { t: 'fq-call', op: 'look', zone: 'ch-general' });
+  assert.ok(await until(() => said.some((m) => m.t === 'fq-call' && m.call?.roster?.some((r) => r.nick === 'bob'))));
+  const look = said.filter((m) => m.t === 'fq-call').pop();
+  assert.equal(look.call.url, 'wss://irc.freeq.at/av/moq');
+  assert.equal(look.call.roster[0].instance, 'b0b0b0b0');
+
+  // Turning voice on joins bob's call (not a second one), on Alice's own connection.
+  await office.handle(me, { t: 'fq-call', op: 'join', zone: 'ch-general', instance: 'a11ce000' });
+  assert.ok(await until(() => said.some((m) => m.t === 'fq-call' && m.joined)), 'joined');
+  const joined = said.find((m) => m.joined).joined;
+  const sid = [...server.sessions.keys()][0];
+  assert.equal(server.sessions.size, 1);
+  assert.deepEqual(joined, { session: sid, nick: 'Alice', instance: 'a11ce000', token: `jwt.${sid}` });
+  const tag = server.sent.find((l) => l.includes('+freeq.at/av-join'));
+  assert.match(tag, new RegExp(`\\+freeq\\.at/av-id=${sid}`));
+  assert.equal(server.sessions.get(sid).participants.get('a11ce000').did, 'did:plc:alice');
+  // Everyone in the room is told who's on, Alice included (so WebRTC steps aside for her).
+  assert.ok(await until(() => said.some((m) => m.t === 'fq-call' && m.call?.roster?.length === 2)));
+
+  // Walking out (or leaving the office) leaves the call.
+  office.leave(me);
+  assert.ok(server.sent.some((l) => l.includes('+freeq.at/av-leave') && l.includes('a11ce000')));
+  assert.equal(server.sessions.get(sid).participants.size, 1);
+  bridge.stop();
+});
+
+test('with nobody on the call, joining starts one; guests can\'t join', async () => {
+  const server = fakeFreeq({ verify: async (r) => r.method === 'crypto' || r.method === 'pds-oauth' });
+  const office = new Office({}, { loadActor: null });
+  const auth = { freeqCredentials: async (did) => ({ did, pds: 'https://pds.example', accessToken: 't', dpopProof: 'p' }) };
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, auth, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: server.fetch([{ name: '#general', members: 3 }]),
+  });
+  server.outsider('bob', 'did:plc:bob').join('#general');
+  const said = [], gsaid = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did: 'did:plc:alice' });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  const guest = office.open({ readyState: 1, send: (s) => gsaid.push(JSON.parse(s)) });
+  await office.handle(guest, { t: 'hello', name: 'Gus' });
+  await bridge.start();
+  await tick();
+  stand(me, 'ch-general'); stand(guest, 'ch-general');
+  const until = async (f) => { for (let i = 0; i < 100 && !f(); i++) await tick(); return f(); };
+
+  await office.handle(guest, { t: 'fq-call', op: 'join', zone: 'ch-general', instance: '0000beef' });
+  assert.ok(await until(() => gsaid.some((m) => m.t === 'fq-call' && /sign in/.test(m.error || ''))));
+  assert.equal(server.sessions.size, 0);
+
+  await office.handle(me, { t: 'fq-call', op: 'join', zone: 'ch-general', instance: 'a11ce000' });
+  assert.ok(await until(() => said.some((m) => m.joined)));
+  assert.ok(server.sent.some((l) => l.includes('+freeq.at/av-start')));
+  assert.equal(server.sessions.size, 1);
+  // Last one out ends it.
+  await office.handle(me, { t: 'fq-call', op: 'leave' });
+  assert.equal(server.sessions.size, 0);
+  bridge.stop();
 });

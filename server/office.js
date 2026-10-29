@@ -565,6 +565,8 @@ export class Office {
       case 'book': return this.book(p, m);
       case 'chan': return this.chan(p, m);
       case 'rtc': return this.rtc(p, m);
+      // Voice in a freeq-bridged channel room is the channel's freeq call (freeq.js).
+      case 'fq-call': return void this.freeq?.onCallOp(p, m).catch(() => {});
       case 'ping': return this.sendTo(p, { t: 'pong', ts: m.ts });
     }
   }

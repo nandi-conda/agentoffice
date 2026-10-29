@@ -5,6 +5,7 @@ import { sheetsFor, facing } from './sprites.js';
 import { STATUS, markedName, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
 import { createVoice, DESK_VIEW } from './rtc.js';
+import { createFreeqCall } from './freeq-av.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
@@ -446,6 +447,7 @@ function onMessage(m) {
       break;
     }
     case 'rtc': voice.onSignal(m.from, m.data); break;
+    case 'fq-call': fqCall.onMessage(m); break;
     case 'error': toast(`⚠️ ${esc(localize(m.message))}`); break;
     case 'replaced': toast(esc(m.text)); break;
   }
@@ -1495,6 +1497,8 @@ async function ensureVoice() {
   return true;
 }
 async function toggleCam() {
+  // On a freeq call the camera goes out on our freeq broadcast instead.
+  if (!zoneAt(me.x, me.y)?.av && fqCall.joined) return fqCall.setCam(!fqCall.cam);
   if (voice.cam) return voice.stopCam();
   await ensureVoice();
   if (!(await voice.startCam())) toast('📷 Camera permission was blocked. Allow it in your browser to turn it on.');
@@ -1520,6 +1524,15 @@ function mediaChanged(ended) {
 }
 
 const stage = $('.av-stage');
+// A freeq-bridged channel room's voice is the channel's freeq call (freeq-av.js).
+const fqCall = createFreeqCall({
+  send: (m) => net.send(m), stage, toast,
+  onChange: () => {
+    const z = me && zoneAt(me.x, me.y);
+    if (!z?.av) { camBtn.hidden = !fqCall.joined; shareBtn.hidden = true; camBtn.classList.toggle('on', fqCall.cam); }
+    updateStage();
+  },
+});
 const tiles = new Map(); // key -> tile element
 function updateStage() {
   const z = me && zoneAt(me.x, me.y);
@@ -1553,7 +1566,7 @@ function updateStage() {
     el.querySelector('.tag').textContent = w.name;
     el.classList.toggle('speaking', !!(w.id && peers.get(w.id)?.speaking));
   }
-  stage.hidden = !want.length;
+  stage.hidden = !want.length && !fqCall.tiles;
 }
 
 // A screen being shared in my room also plays on the room's wall screen.
@@ -1889,6 +1902,7 @@ function zoneChanged(z, freeqOnly = false) {
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
   // Camera and screen share belong to A/V rooms; they stop at the door.
   camBtn.hidden = shareBtn.hidden = !z?.av;
+  if (!z?.av && fqCall.joined) camBtn.hidden = false;
   if (!z?.av && voice.cam) voice.stopCam();
   if (!z?.av && voice.screen && !atDesk()) voice.stopScreen();
   if (z?.av && !avHinted) { avHinted = true; toast(`🎥 ${esc(z.name)} is an A/V room: turn on your camera or share your screen with everyone in here.`, [['Camera', toggleCam], ['Share screen', toggleShare]], 7000); }
@@ -1988,7 +2002,13 @@ function loop(t) {
     // so screen shares and cameras reach you; it ends at the door.
     if (z?.av && !voice.on) voice.listen();
     else if (!z?.av && voice.listening) voice.disable();
-    const v = voice.update(me, others, deaf, { deskScreen: atDesk() && !z?.av });
+    // In a room bridged to freeq, voice is that channel's freeq call for
+    // signed-in people; everyone else (and any failed join) stays on WebRTC.
+    const fqZone = z?.channel && freeqRooms[z.id] && fqCall.usable(z.id) ? z.id : null;
+    fqCall.want(fqZone, !!(fqZone && me.did && voice.on && !voice.listening));
+    fqCall.setMuted(voice.muted);
+    fqCall.setDeaf(deaf);
+    const v = voice.update(me, others, deaf, { deskScreen: atDesk() && !z?.av, skip: fqCall.onCall });
     deskWatch(others, t);
     me.speaking = v.meSpeaking;
     if (voice.on || meterShown > 0 || hintOn) paintMeter(t, !!v.mutedTalking);

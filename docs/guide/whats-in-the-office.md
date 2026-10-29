@@ -205,6 +205,27 @@ without a token (DID proof record, or none at all) gets a `did:key` of its own,
 derived from the office's key and the agent's identity, so it's the same one
 every time.
 
+**Voice and video in a bridged room are the channel's freeq call**, so people
+in freeq's own apps are on the same call. Turn voice on in the room and the
+server joins (or starts) the channel's call on your freeq connection
+(`+freeq.at/av-join` / `av-start` TAGMSGs; freeq replies with the session and
+a MoQ token). Your browser then publishes one broadcast,
+`{session}/{nick}~{instance}`, and watches everyone else's, straight to
+freeq's media server at `wss://irc.freeq.at/av/moq` (MoQ, Media over QUIC,
+here over WebSocket), with the same `<moq-publish>` / `<moq-watch>` builds
+freeq's web app uses (`public/vendor/moq/`). Who's on the call comes from
+`GET /api/v1/sessions/{id}` and shows as tiles at the top left. The camera
+button turns your camera on in the call; screen share stays an A/V-room thing.
+
+The office never depends on it: guests, rooms freeq isn't bridging right now,
+and any join that fails use the office's own WebRTC voice (with TURN when
+configured) instead, and two people who are both on the freeq call skip their
+WebRTC link so nobody is heard twice. Two caveats, shown in the call tile:
+freeq's own notes say audio over its WebSocket path can crackle under steady
+use (its WebTransport path isn't working for browsers yet), and its media
+server doesn't require tokens yet, so others on freeq could listen in. The
+Boardroom, Huddle Room, booths and open areas always use WebRTC.
+
 Reading is done by one listener connection with the office's own `did:key`
 (an ed25519 key made on first run, `$DATA_DIR/freeq-key.json`, or the Durable
 Object's storage). It only runs while somebody is in the office, and hangs up

@@ -85,6 +85,7 @@ export async function identityFromSeed(seed) {
 
 // ---- IRC lines --------------------------------------------------------------
 
+const escapeTag = (v) => v.replace(/[\\;\s\r\n]/g, (c) => ({ '\\': '\\\\', ';': '\\:', ' ': '\\s', '\r': '\\r', '\n': '\\n' })[c] ?? '');
 const unescapeTag = (v) => v.replace(/\\(.)/g, (_, c) => ({ ':': ';', s: ' ', r: '\r', n: '\n', '\\': '\\' })[c] ?? c);
 
 export function parseLine(line) {
@@ -201,6 +202,12 @@ export class IrcClient {
   say(channel, text) {
     const t = oneLine(text);
     if (t) this.send(`PRIVMSG ${channel} :${t}`);
+  }
+
+  // An IRCv3 TAGMSG (freeq's call signalling rides on these).
+  tagmsg(target, tags) {
+    const t = Object.entries(tags).map(([k, v]) => (v === '' || v == null ? k : `${k}=${escapeTag(String(v))}`)).join(';');
+    this.send(`@${t} TAGMSG ${target}`);
   }
 
   async receive(line) {
@@ -326,6 +333,9 @@ export class FreeqBridge {
     this.users = new Map(); // keyOf(peer) -> { irc, ready, used }
     this.relayed = []; // { channel, text, at } lines our per-person connections sent, to skip their echo
     this.agentTokens = new Map(); // agent DID -> { did, token, pds }, memory only
+    this.calls = new Map(); // lower(channel) -> freeq's call there: { channel, id, count, roster, token }
+    this.inCall = new Map(); // office peer id -> { key, zoneId, channel, id, instance, nick }
+    this.callWaits = new Set(); // pending joins, fed by onCallReply
     this.seen = new Seen();
     this.saver = new Saver(stateStore, () => this.snapshot(), { log });
     office.freeq = this;
@@ -413,6 +423,7 @@ export class FreeqBridge {
     l?.close('office closed for the night');
     for (const u of this.users.values()) u.irc.close();
     this.users.clear();
+    this.calls.clear(); this.inCall.clear();
     clearInterval(this.sweeper); this.sweeper = null;
     this.unbindAll();
     this.saver.now();
@@ -832,6 +843,7 @@ export class FreeqBridge {
         if (f.peer) this.office.renameRemote(f.peer, f.nick);
         return;
       }
+      case 'TAGMSG': return this.onCallState(m);
       case 'TOPIC': {
         const b = this.bindings.get(this.zoneFor(m.params[0]));
         if (b) { b.topic = m.params[1] || null; this.announce(); }
@@ -930,6 +942,7 @@ export class FreeqBridge {
 
   // Replies on a person's own connection that mean a message didn't land.
   onUserLine(did, m) {
+    if (m.command === 'TAGMSG' || (m.command === 'NOTICE' && /^Cannot (join|start)/i.test(m.params.at(-1) || ''))) this.onCallReply(did, m);
     const last = m.params[m.params.length - 1] || '';
     const code = Number(m.command);
     if (m.command === 'FAIL' || (code >= 400 && code < 600 && code !== 433)) {
@@ -950,6 +963,7 @@ export class FreeqBridge {
       onClose: (why) => {
         if (this.users.get(did)?.irc !== irc) return;
         this.users.delete(did);
+        this.callDropped(did);
         if (irc.registered && why !== 'closed') this.notify(did, `Your freeq connection dropped (${why}); the next thing you say reconnects.`);
       },
     });
@@ -973,6 +987,7 @@ export class FreeqBridge {
 
   // Someone left the office, or went quiet for a long time: hang up for them.
   leave(p) {
+    this.callLeave(p);
     const key = this.keyOf(p);
     const u = this.users.get(key);
     if (u && ![...this.office.peers.values()].some((q) => q !== p && q.kind !== 'freeq' && this.keyOf(q) === key)) {
@@ -982,8 +997,202 @@ export class FreeqBridge {
   }
 
   sweep() {
+    for (const c of this.inCall.values()) { const u = this.users.get(c.key); if (u) u.used = Date.now(); }
     for (const [did, u] of this.users) if (Date.now() - u.used > USER_IDLE_MS) { this.users.delete(did); u.irc.close('idle'); }
     if (!this.users.size) { clearInterval(this.sweeper); this.sweeper = null; }
+  }
+
+  // ---- freeq calls (voice and video in channel rooms) ----------------------
+  //
+  // A bridged channel room's voice is the freeq channel's own call, so people
+  // in freeq's apps are on it too. Signalling is IRC: TAGMSGs with
+  // +freeq.at/av-start / av-join / av-leave go out on the person's own
+  // connection, freeq answers +freeq.at/av-state to the channel and sends the
+  // joiner a +freeq.at/av-token. The media never touches the office: browsers
+  // publish and watch over MoQ at FREEQ_AV_URL (see public/js/freeq-av.js).
+  // Who's on the call comes from GET /api/v1/sessions/{id}; it's pushed to
+  // everyone standing in the room as { t: 'fq-call' }. When freeq is down the
+  // room just isn't bridged and the office's own WebRTC voice takes over.
+
+  get avUrl() { return this.api.replace(/^http/, 'ws') + '/av/moq'; }
+
+  // A +freeq.at/av-state broadcast the listener heard in a channel.
+  onCallState(m) {
+    const t = m.tags;
+    const state = t['+freeq.at/av-state'];
+    const channel = m.params[0];
+    if (!state || !channel?.startsWith('#')) return;
+    const k = lower(channel);
+    if (state === 'ended') {
+      this.calls.delete(k);
+      for (const [pid, c] of this.inCall) if (lower(c.channel) === k) this.inCall.delete(pid);
+    } else {
+      const call = this.calls.get(k) || { channel, id: null, count: 0, roster: [], token: null };
+      if (t['+freeq.at/av-id'] && t['+freeq.at/av-id'] !== call.id) Object.assign(call, { id: t['+freeq.at/av-id'], roster: [], token: null });
+      call.count = Number(t['+freeq.at/av-participants']) || call.count;
+      this.calls.set(k, call);
+    }
+    this.rosterSoon(channel);
+  }
+
+  // Replies on a person's own connection: their token, freeq's verdict on
+  // their join, or a refusal. Pending joins pick out what's theirs.
+  onCallReply(key, m) {
+    const t = m.tags;
+    if (t['+freeq.at/av-token'] && t['+freeq.at/av-id']) {
+      for (const call of this.calls.values()) if (call.id === t['+freeq.at/av-id']) call.token = t['+freeq.at/av-token'];
+    }
+    for (const w of this.callWaits) if (w.key === key) w.on(m);
+  }
+
+  // Ask freeq who's on a channel's call (debounced), then tell the room.
+  rosterSoon(channel, ms = 300) {
+    const call = this.calls.get(lower(channel));
+    if (!call) return this.pushCall(channel);
+    clearTimeout(call.timer);
+    call.timer = setTimeout(() => this.fetchRoster(channel).catch((e) => this.log(`freeq: call roster for ${channel}: ${e.message}`)), ms);
+  }
+
+  async fetchRoster(channel) {
+    let call = this.calls.get(lower(channel));
+    if (!call?.id) {
+      // We may have missed the start (a restart): ask freeq for the channel's live call.
+      const r = await this.fetch(`${this.api}/api/v1/channels/${encodeURIComponent(channel)}/sessions`, { headers: { accept: 'application/json' } });
+      const active = r.ok ? (await r.json()).active : null;
+      if (!active?.id || (active.state && active.state !== 'Active')) { this.calls.delete(lower(channel)); return this.pushCall(channel); }
+      call = { channel, count: 0, roster: [], token: null, ...call, id: active.id };
+      this.calls.set(lower(channel), call);
+    }
+    const r = await this.fetch(`${this.api}/api/v1/sessions/${encodeURIComponent(call.id)}`, { headers: { accept: 'application/json' } });
+    if (r.status === 404) { this.calls.delete(lower(channel)); return this.pushCall(channel); }
+    if (!r.ok) throw new Error(`freeq answered ${r.status}`);
+    const s = await r.json();
+    if (s.state && s.state !== 'Active') { this.calls.delete(lower(channel)); return this.pushCall(channel); }
+    call.roster = (s.participants || []).map((x) => ({ nick: String(x.nick || ''), did: x.did && !String(x.did).startsWith('guest:') ? x.did : null, instance: x.instance_id || null })).filter((x) => x.nick).slice(0, 50);
+    call.count = s.participant_count ?? call.roster.length;
+    this.pushCall(channel);
+  }
+
+  // What a client in the room is told about its channel's call.
+  callView(channel) {
+    const call = this.calls.get(lower(channel));
+    return call?.id ? { session: call.id, count: call.count, roster: call.roster, token: call.token || null, url: this.avUrl } : null;
+  }
+
+  pushCall(channel) {
+    const zoneId = this.zoneFor(channel);
+    if (!zoneId) return;
+    const msg = { t: 'fq-call', zone: zoneId, channel, call: this.callView(channel) };
+    for (const q of this.office.peers.values()) if (q.ready && q.kind === 'human' && zoneById(zoneId) && this.inZone(q, zoneId)) this.office.sendTo(q, msg);
+  }
+
+  inZone(q, zoneId) {
+    const z = zoneById(zoneId);
+    return !!z && q.x >= z.x0 && q.x < z.x1 && q.y >= z.y0 && q.y < z.y1;
+  }
+
+  // From a browser: { t: 'fq-call', op: 'join' | 'leave' | 'look', zone, instance }.
+  async onCallOp(p, m) {
+    const b = this.bindings.get(m.zone);
+    if (m.op === 'leave') return this.callLeave(p);
+    if (!b) return this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: null, call: null, error: 'This room is not on freeq right now.' });
+    if (m.op === 'look') {
+      if (!this.calls.has(lower(b.channel))) await this.fetchRoster(b.channel).catch(() => {});
+      return this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel) });
+    }
+    if (m.op !== 'join') return;
+    try {
+      const joined = await this.callJoin(p, m.zone, String(m.instance || '').replace(/[^0-9a-f]/g, '').slice(0, 16));
+      this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), joined });
+      this.rosterSoon(b.channel, 100);
+    } catch (e) {
+      this.log(`freeq: ${p.handle || p.did} couldn't join the call in ${b.channel}: ${e.message}`);
+      this.office.sendTo(p, { t: 'fq-call', zone: m.zone, channel: b.channel, call: this.callView(b.channel), error: e.message });
+    }
+  }
+
+  // Start or join the channel's call as this person. Resolves
+  // { session, nick, instance, token } once freeq says they're on it.
+  async callJoin(p, zoneId, instance) {
+    const b = this.bindings.get(zoneId);
+    if (!b) throw new Error('this room is not on freeq right now');
+    if (p.kind !== 'human' || !p.did) throw new Error('sign in to join the freeq call');
+    if (!/^[0-9a-f]{8,16}$/.test(instance)) throw new Error('bad instance id');
+    const prev = this.inCall.get(p.id);
+    if (prev && prev.zoneId === zoneId && prev.instance === instance && this.calls.get(lower(b.channel))?.id === prev.id) {
+      return { session: prev.id, nick: prev.nick, instance, token: this.calls.get(lower(b.channel))?.token || null };
+    }
+    if (prev) this.callLeave(p);
+    const key = this.keyOf(p);
+    const u = await this.userConnection(p);
+    u.used = Date.now();
+    u.irc.join(b.channel);
+    if (!this.calls.get(lower(b.channel))?.id) await this.fetchRoster(b.channel).catch(() => {});
+    const channel = b.channel;
+    const result = await new Promise((resolve, reject) => {
+      let id = this.calls.get(lower(channel))?.id || null;
+      let session = null, token = null, tokenTimer = null;
+      const send = () => u.irc.tagmsg(channel, id
+        ? { '+freeq.at/av-join': '', '+freeq.at/av-id': id, '+freeq.at/av-instance': instance }
+        : { '+freeq.at/av-start': '', '+freeq.at/av-instance': instance });
+      const w = { key };
+      const done = (err, val) => {
+        clearTimeout(timer); clearTimeout(tokenTimer); this.callWaits.delete(w);
+        err ? reject(err) : resolve(val);
+      };
+      const finish = () => done(null, { session, nick: u.irc.nick, instance, token });
+      const timer = setTimeout(() => done(new Error('freeq didn\'t answer the call request within 10 seconds')), 10000);
+      w.on = (m) => {
+        const t = m.tags;
+        if (m.command === 'NOTICE') return done(new Error(m.params.at(-1)));
+        if (t['+freeq.at/av-error']) {
+          // Someone started the call first: join theirs.
+          if (t['+freeq.at/av-error'] === 'start-collision' && t['+freeq.at/av-id'] && !session) { id = t['+freeq.at/av-id']; return send(); }
+          return done(new Error(t['+freeq.at/av-reason'] || t['+freeq.at/av-error']));
+        }
+        if (t['+freeq.at/av-token'] && (!session || t['+freeq.at/av-id'] === session)) {
+          token = t['+freeq.at/av-token'];
+          if (session) finish();
+          return;
+        }
+        const st = t['+freeq.at/av-state'];
+        if ((st === 'started' || st === 'joined') && lower(m.params[0]) === lower(channel) && lower(t['+freeq.at/av-actor'] || '') === lower(u.irc.nick)) {
+          session = t['+freeq.at/av-id'] || id;
+          if (token) return finish();
+          // freeq sends the token right after; tokens are optional while it
+          // runs in migration mode, so don't hold the call up for one.
+          tokenTimer = setTimeout(finish, 1500);
+        }
+      };
+      this.callWaits.add(w);
+      send();
+    });
+    const call = this.calls.get(lower(channel)) || { channel, id: null, count: 0, roster: [], token: null };
+    if (call.id !== result.session) Object.assign(call, { id: result.session, roster: [] });
+    if (result.token) call.token = result.token;
+    this.calls.set(lower(channel), call);
+    this.inCall.set(p.id, { key, zoneId, channel, id: result.session, instance, nick: result.nick });
+    return { ...result, token: result.token || call.token || null };
+  }
+
+  // A person's freeq connection went away, and with it their place on calls.
+  callDropped(key) {
+    for (const [pid, c] of this.inCall) {
+      if (c.key !== key) continue;
+      this.inCall.delete(pid);
+      const q = this.office.peers.get(pid);
+      if (q) this.office.sendTo(q, { t: 'fq-call', zone: c.zoneId, channel: c.channel, call: this.callView(c.channel), dropped: true });
+    }
+  }
+
+  // Off the call (walked out, turned voice off, or left the office).
+  callLeave(p) {
+    const c = this.inCall.get(p.id);
+    if (!c) return;
+    this.inCall.delete(p.id);
+    const u = this.users.get(c.key);
+    if (u && !u.irc.closed) u.irc.tagmsg(c.channel, { '+freeq.at/av-leave': '', '+freeq.at/av-id': c.id, '+freeq.at/av-instance': c.instance });
+    this.rosterSoon(c.channel, 500);
   }
 }
 

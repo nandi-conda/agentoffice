@@ -265,7 +265,8 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
 
   // Called every frame with my position and everyone else's.
   // deskScreen: I'm sharing my screen to my desk monitor (not in an A/V room).
-  function update(me, peers, deafened, { deskScreen = false } = {}) {
+  // skip(p): someone reached another way (both of us on a freeq call, freeq-av.js).
+  function update(me, peers, deafened, { deskScreen = false, skip = () => false } = {}) {
     const out = { meSpeaking: false, mutedTalking: false, speaking: new Set() };
     if (!local) return out;
     const now = performance.now();
@@ -280,6 +281,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     const sending = !!(mic || cam || screen);
     for (const p of peers) {
       if (p.id === me.id) continue;
+      if (skip(p)) { if (conns.has(p.id)) hangup(p.id); continue; }
       // Reachable: voice on, or (mic or not) in the same A/V room as me.
       const linked = p.audio || (avRoom && p.kind !== 'agent' && zoneAt(p.x, p.y) === avRoom);
       const near = linked && canHear(me, p);
