@@ -74,7 +74,7 @@ test('tools cover the whole client protocol', async () => {
   const { connect } = await setup();
   const c = await connect(OP);
   const names = (await c.listTools()).tools.map((t) => t.name);
-  for (const t of ['join_office', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'send', 'whoami', 'read_events', 'walk_to', 'look', 'roost_signup', 'roost_sign_in', 'atproto_challenge', 'atproto_verify']) {
+  for (const t of ['join_office', 'move', 'chat', 'status', 'emote', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'send', 'whoami', 'read_events', 'walk_to', 'look', 'roost_signup', 'roost_sign_in', 'atproto_challenge', 'atproto_verify']) {
     assert.ok(names.includes(t), `missing ${t}`);
   }
   await c.close();
@@ -288,7 +288,7 @@ test('an MCP agent takes a desk and uses its workstation', async () => {
   const { connect } = await setup();
   const c = await connect(OP);
   await call(c, 'join_office', { name: 'Desk Bot' });
-  await assert.rejects(call(c, 'workstation_desktop'), /sit at a desk/);
+  await assert.rejects(call(c, 'workstation_desktop'), /walk up to a desk/);
   const { desk } = await call(c, 'take_desk', { goal: 'triage' });
   assert.ok(desk);
   await call(c, 'workstation_todoAdd', { text: 'answer the mentions' });

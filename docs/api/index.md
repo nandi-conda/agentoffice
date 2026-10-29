@@ -4,7 +4,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 
 | Page | What it is |
 | --- | --- |
-| [world (the World)](world.md) | The office itself (OfficeRoom): everyone's socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. |
+| [world (the World)](world.md) | The office itself (OfficeRoom): everyone's socket, movement, presence, proximity chat, emotes, A/V flags and the WebRTC relay. |
 | [Every entity (built-ins)](entity.md) | Every entity answers these besides its own methods (server/entities/runtime.js). |
 | [roles (Roles)](roles.md) | Server roles: who was granted which role (owner, admin, moderator, member, banned). |
 | [topic (Topic)](topic.md) | A pub/sub channel. |
@@ -20,7 +20,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
-| [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you sit at. |
+| [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you use. |
 | [wing (Wing)](wing.md) | The hallway wing under the core office: one procedurally generated room per channel. |
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |

@@ -1,4 +1,4 @@
-// The computer on every desk: sit down, press E, and your own workstation
+// The computer on every desk: walk up to it, press E, and your own workstation
 // comes up, whichever desk you're at. One entity per identity
 // (`workstation:<did>` or `workstation:agent:<name>`), hosted next to the
 // actors: notes, a todo list, bookmarks, a personal focus timer, how the
@@ -48,7 +48,7 @@ export function cleanUrl(u) {
 }
 
 export class Workstation extends Entity {
-  static doc = 'The computer on the desks: one per identity, so yours comes up at whichever desk you sit at. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be sitting at a desk.';
+  static doc = 'The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be at a desk.';
   static api = {
     view: { doc: 'Nothing: a workstation shows the office nothing.', internal: true },
     desktop: { doc: 'Your workstation: notes, todos, bookmarks, timer, layout and the apps you can open.', ...DESK, returns: DESKTOP },

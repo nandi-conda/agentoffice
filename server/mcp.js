@@ -3,7 +3,7 @@
 // Each MCP session is one agent in the office. It joins through an
 // in-process socket that speaks the exact WebSocket protocol the browser
 // uses, so there is one tool per client message (hello, move, chat, status,
-// emote, sit, desk, pomo, wb, note, coffee, score, wave, audio, rtc) plus
+// emote, desk, pomo, wb, note, coffee, score, wave, audio, rtc) plus
 // higher-level helpers (walk_to, take_desk, look), and every server message
 // (welcome, join, leave, move, peer, chat, desks, pomo, wb, notes, scores,
 // counters, wave, toast, rtc, error) is streamed back:
@@ -32,7 +32,7 @@ import { describeApi, generatedTools } from './apidoc.js';
 import { atLeast, can } from '../public/js/roles.js';
 import { LEVELS, LogBuffer, log } from './logs.js';
 
-const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
+const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 const MAX_EVENTS = 300;
 const IDLE_MS = 10 * 60 * 1000; // drop agents that stop calling in
@@ -68,7 +68,7 @@ function shapeEvent(m, client, office) {
     case 'chat': return { type: 'chat', from: m.name, fromId: m.id, text: m.text, scope: m.scope, mention: !!(m.mention || client?.mentions(m.text)) };
     case 'join': return { type: 'join', id: m.peer.id, name: m.peer.name, kind: m.peer.kind, handle: m.peer.handle, did: m.peer.did };
     case 'leave': return { type: 'leave', id: m.id, name: client?.lastNames.get(m.id) || m.lastName || m.id };
-    case 'move': return { type: 'move', id: m.id, name: name(m.id), x: round(m.x), y: round(m.y), seat: m.seat, zone: zoneAt(m.x, m.y)?.id };
+    case 'move': return { type: 'move', id: m.id, name: name(m.id), x: round(m.x), y: round(m.y), zone: zoneAt(m.x, m.y)?.id };
     case 'wb': return m.op === 'clear' ? { type: 'wb', op: 'clear' } : { type: 'wb', op: 'stroke', by: m.stroke?.by, color: m.stroke?.color, points: m.stroke?.points?.length };
     case 'wave': return { type: 'wave', from: m.name, fromId: m.from, kind: m.kind };
     case 'peer': { const { t, ...rest } = m; return { type: 'peer', name: name(m.id), ...rest }; }
@@ -413,14 +413,14 @@ export class McpHub {
         const online = office.summary().online.filter((p) => p.id !== me?.id);
         const people = online.map((p) => ({
           id: p.id, name: p.name, kind: p.kind, handle: p.handle, did: p.did, status: p.status, note: p.note,
-          zone: zoneAt(p.x, p.y)?.id, x: round(p.x), y: round(p.y), seat: p.seat,
+          zone: zoneAt(p.x, p.y)?.id, x: round(p.x), y: round(p.y),
           ...(me ? { distance: round(Math.hypot(p.x - me.x, p.y - me.y)), canHearYou: canHear(me, p) } : {}),
         })).sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
         const key = me && (me.did || `agent:${me.name}`);
         const mine = key && Object.entries(office.desks).find(([, v]) => v.owner === key)?.[0] || null;
         return json({
           you: me
-            ? { id: me.id, name: me.name, handle: me.handle, did: me.did, x: round(me.x), y: round(me.y), zone: zoneAt(me.x, me.y)?.id, seat: me.seat, status: me.status, note: me.note, desk: mine }
+            ? { id: me.id, name: me.name, handle: me.handle, did: me.did, x: round(me.x), y: round(me.y), zone: zoneAt(me.x, me.y)?.id, status: me.status, note: me.note, desk: mine }
             : { observer: true, signedInAs: agent.identity?.handle || agent.identity?.did || null, canJoin: agent.canAct },
           people,
           desks: { claimed: office.desks, free: DESKS.filter((d) => !office.desks[d.id]).map((d) => d.id) },
@@ -481,46 +481,24 @@ export class McpHub {
         return json({ arrived: ok, at: { x: round(c.me.x), y: round(c.me.y) }, zone: zoneAt(c.me.x, c.me.y)?.name, target: target.label });
       });
 
-    // Until the World has the agent on that seat, so the next call (a
-    // workstation tool, say) sees them sitting. Gives up after a second.
-    const seated = async (seat) => {
-      for (let i = 0; i < 50 && office.peers.get(agent.client?.me?.id)?.seat !== seat; i++) await new Promise((r) => setTimeout(r, 20));
+    // Until the World has the agent at that desk, so the next call (a
+    // workstation tool, say) finds them there. Gives up after a second.
+    const atDesk = async (id) => {
+      for (let i = 0; i < 50 && office.deskOf(office.peers.get(agent.client?.me?.id)) !== id; i++) await new Promise((r) => setTimeout(r, 20));
     };
 
-    tool('sit', 'Sit on a seat (protocol `sit`), walking there first. seat=null stands up. Seat ids: desk-N-chair, den-…-chair, board-chair-…, huddle-chair-…, booth-stool-N, k-chair-….',
-      { seat: z.string().nullable() },
-      async ({ seat }, extra) => {
-        const c = agent.need();
-        if (seat === null) { send({ t: 'sit', seat: null }); c.me.seat = null; return json({ ok: true }); }
-        const s = SEATS.find((q) => q.id === seat);
-        if (!s) return fail(`no seat ${seat}`);
-        await c.walkTo(s.x, s.y, progress(extra));
-        send({ t: 'sit', seat });
-        c.me.seat = seat;
-        await seated(seat);
-        return json({ ok: true, seat });
-      });
-
-    tool('desk', 'Desk actions (protocol `desk`): claim puts your name and goal on a desk, goal updates it, release frees it. Use take_desk to walk, sit and claim in one go.',
+    tool('desk', 'Desk actions (protocol `desk`): claim puts your name and goal on a desk, goal updates it, release frees it. Use take_desk to walk over and claim in one go.',
       { action: z.enum(['claim', 'goal', 'release']), desk: z.string().describe('desk-1…desk-26 or den-*'), goal: z.string().max(80).optional() },
       async ({ action, desk, goal = '' }) => { send({ t: 'desk', action, desk, goal }); return json({ ok: true }); });
 
-    tool('take_desk', 'Find your desk (or a free one), walk over, sit and claim it with a goal.',
+    tool('take_desk', 'Find your desk (or a free one), walk up to it and claim it with a goal.',
       { goal: z.string().max(80).optional(), den: z.boolean().optional().describe('Pick a quiet desk in the Deep Work Den') },
       async ({ goal = '', den }, extra) => {
         const c = agent.need();
-        if (den) {
-          const d = c.freeDesk('den-');
-          if (!d) return fail('no free den desk');
-          await c.walkTo(d.x + 1, d.y + 1, progress(extra));
-          await c.sit(`${d.id}-chair`);
-          send({ t: 'desk', action: 'claim', desk: d.id, goal });
-          await seated(`${d.id}-chair`);
-          return json({ desk: d.id });
-        }
-        const id = await c.takeDesk(goal);
-        if (id) await seated(`${id}-chair`);
-        return id ? json({ desk: id }) : fail('no free desk');
+        const id = await c.takeDesk(goal, { prefix: den ? 'den-' : 'desk-', onStep: progress(extra) });
+        if (!id) return fail(den ? 'no free den desk' : 'no free desk');
+        await atDesk(id);
+        return json({ desk: id });
       });
 
     tool('status', 'Set your status and/or "working on" note (protocol `status`).',

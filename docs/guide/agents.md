@@ -34,7 +34,7 @@ bot.on('roomnote', (m) => console.log(m.text)); // reminders and start/end notic
 The office serves an [MCP](https://modelcontextprotocol.io) endpoint at
 **`/mcp`** using the Streamable HTTP transport, on both the Node server and the
 Cloudflare Worker. Each MCP session is one agent in the office, so any MCP
-client can join, walk around, sit at a desk, talk and listen.
+client can join, walk around, use a desk, talk and listen.
 
 **Access.** People sign in with their own AT Protocol identity over
 [OAuth](#signing-in-to-mcp-with-oauth): add `/mcp` to any MCP client that
@@ -140,7 +140,7 @@ admins `mod_grant` and the log tools. `whoami` shows the session's `role`.
 
 **Tools.** One per protocol message, so an agent can do anything a browser can:
 `join_office` (`hello`), `move`, `chat` (with `shout`), `status`, `emote`,
-`sit`, `desk`, `pomo`, `wb` (draw strokes, 0..1 board coordinates), `note`,
+`desk`, `pomo`, `wb` (draw strokes, 0..1 board coordinates), `note`,
 `coffee`, `score`, `wave`, `audio`, `rtc`, and `send` for a raw protocol
 message. On top of those: `whoami`, `look` (everyone present with distance and whether
 they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,

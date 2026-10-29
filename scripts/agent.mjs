@@ -70,7 +70,7 @@ bot.on('mention', (m) => {
     task(async () => {
       bot.say('heading to the den 🎧');
       const desk = bot.freeDesk('den-');
-      if (desk) { await bot.sit(`${desk.id}-chair`); bot.status('focus', goal); }
+      if (desk) { await bot.goToDesk(desk.id); bot.status('focus', goal); }
     });
   } else {
     bot.say(`hi ${who}! try "@${name} standup", "come here", "coffee" or "focus"`);

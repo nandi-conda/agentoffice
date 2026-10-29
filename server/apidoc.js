@@ -91,7 +91,7 @@ export function generatedTools(api) {
       tools.push({
         name: `${e.kind}_${method}`,
         kind: e.kind, method,
-        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.atDesk ? ' You must be sitting at a desk: take_desk first.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
+        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.atDesk ? ' You must be at a desk: take_desk first.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
         input,
         readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near && !spec.self && !spec.role,
         // The least role that may use it (public/js/roles.js): the MCP hub
@@ -137,7 +137,7 @@ const flags = (spec) => [
   spec.inZone && 'caller must be in its zone',
   spec.near && `caller must be within ${spec.near} tiles`,
   spec.self && 'always the caller\'s own (the World picks the address)',
-  spec.atDesk && 'caller must sit at a desk',
+  spec.atDesk && 'caller must be at a desk',
   spec.role && `role ≥ ${spec.role}`,
   spec.cap && `${CAPS[spec.cap] || 'moderator'}s may for anyone (${spec.cap})`,
   spec.internal && 'internal (entity to entity)',

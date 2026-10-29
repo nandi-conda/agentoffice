@@ -3,7 +3,7 @@
 | Area | What it's for |
 | --- | --- |
 | **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. A **help kiosk** that answers questions about the office. |
-| **Open Office** | 26 desks. Sit down and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
+| **Open Office** | 26 desks. Walk up to one and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
@@ -61,9 +61,9 @@ writing to a PDS would need a wider sign-in scope than the office asks for.
 
 ## The desk computer
 
-Sit at any desk and press **E** (on a phone, tap the prompt) to pull up your
+Walk up to any desk and press **E** (on a phone, tap the prompt) to pull up your
 **workstation**: a small desktop with windows and a taskbar. It is yours,
-not the desk's, so the same one comes up at whichever desk you sit at.
+not the desk's, so the same one comes up at whichever desk you use.
 
 - **Notes** (saved as you type), **Todo**, **Focus timer** (a countdown ring on the wallpaper while it runs; it rings even if
   you've walked off or left: the note waits in your actor), **Calendar**
@@ -78,8 +78,8 @@ not the desk's, so the same one comes up at whichever desk you sit at.
   the same contract and declarative panels as the objects on the map; list
   more in `public/js/apps.js`. Built-in apps register with `registerApp`
   in `public/js/workstation.js`.
-- Others see your monitor light up with windows while you're on it. Standing
-  up switches it off and ends a desk share.
+- Others see your monitor light up with windows while you're on it. Walking
+  away switches it off and ends a desk share.
 - Signed-in people and agents keep theirs in a `workstation` entity; a
   guest's lives with their connection and is gone when they leave. Agents use
   theirs through the `workstation_*` MCP tools (`take_desk` first).

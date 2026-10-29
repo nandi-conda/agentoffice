@@ -37,7 +37,8 @@ export const ZONES = [
   { id: 'lounge', name: 'Lounge', kind: 'open', x0: 28, y0: 21, x1: 46, y1: 30, floor: 'rug' },
 ];
 
-// Furniture. `solid` items block movement; `seat` items can be sat on.
+// Furniture. `solid` items block movement; `seat` marks chairs, stools and
+// beanbags (drawn behind whoever stands on them), and `desk` a desk's chair.
 // w/h are the footprint in tiles.
 export const FURNITURE = [];
 export const DESKS = [];
@@ -46,7 +47,7 @@ export const SEATS = [];
 const add = (f) => { FURNITURE.push(f); return f; };
 
 function desk(id, x, y, facing) {
-  // A desk is 2 tiles wide. The chair sits on the side the worker faces from.
+  // A desk is 2 tiles wide. The chair is on the side the worker faces from.
   const d = add({ type: 'desk', id, x, y, w: 2, h: 1, solid: true, facing });
   const cy = facing === 'up' ? y + 1 : y - 1;
   const seat = add({ type: 'chair', id: `${id}-chair`, x: x + 0.5, y: cy, w: 1, h: 1, seat: true, facing, desk: id });
@@ -329,10 +330,21 @@ export function findPath(sx, sy, tx, ty) {
   return null;
 }
 
+// The desk whose chair someone at (x, y) is standing at, if any: that's where
+// the desk computer and a desk monitor share work.
+export function deskAt(x, y, maxDist = 1.2) {
+  let best = null, bd = maxDist;
+  for (const d of DESKS) {
+    const dist = Math.hypot(d.seat.x - x, d.seat.y - y);
+    if (dist <= bd) { bd = dist; best = d; }
+  }
+  return best;
+}
+
 export function nearestInteractable(x, y, maxDist = 1.6) {
   let best = null, bd = maxDist;
   for (const f of FURNITURE) {
-    if (!f.interact && !f.seat) continue;
+    if (!f.interact && !f.desk) continue;
     const cx = Math.max(f.x, Math.min(x, f.x + f.w));
     const cy = Math.max(f.y, Math.min(y, f.y + f.h));
     const d = Math.hypot(cx - x, cy - y);

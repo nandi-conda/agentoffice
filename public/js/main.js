@@ -1,4 +1,4 @@
-import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable, applyWing, grid } from './map.js';
+import { W, H, ZONES, FURNITURE, DESKS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable, deskAt, applyWing, grid } from './map.js';
 import { summary as accessOf, describe as describeAccess } from './policy.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
@@ -326,15 +326,14 @@ function onMessage(m) {
     case 'move': {
       const p = peers.get(m.id);
       if (!p || p === me) break;
-      p.x = m.x; p.y = m.y; p.dir = m.dir; p.moving = m.moving; p.seat = m.seat;
+      p.x = m.x; p.y = m.y; p.dir = m.dir; p.moving = m.moving;
       track(p);
       break;
     }
     case 'peer': {
       const p = peers.get(m.id);
       if (!p) break;
-      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'pc', 'cup', 'seat', 'role', 'muted']) if (key in m) p[key] = m[key];
-      if (p === me && 'seat' in m) me.seat = m.seat;
+      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'pc', 'cup', 'role', 'muted']) if (key in m) p[key] = m[key];
       if (p === me && ('role' in m || 'muted' in m)) roleChanged();
       if ('role' in m || 'muted' in m) modal.admin?.refresh();
       refreshPeople();
@@ -461,7 +460,7 @@ function onMessage(m) {
       break;
     }
     case 'bounce': {
-      me.x = me.rx = m.x; me.y = me.ry = m.y; me.seat = null;
+      me.x = me.rx = m.x; me.y = me.ry = m.y;
       path = null; walkTarget = null; pendingUse = null; follow = null;
       if (performance.now() - (onMessage.bounced || 0) > 4000) {
         onMessage.bounced = performance.now();
@@ -982,7 +981,7 @@ function openHelp() {
     <details style="margin-top:12px"><summary class="small">With a keyboard</summary>
     <div class="help-grid" style="margin-top:8px">` : ''}
       <kbd>WASD</kbd><span>Walk (or click anywhere on the floor)</span>
-      <kbd>E</kbd><span>Interact: sit, claim a desk, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball, help kiosk</span>
+      <kbd>E</kbd><span>Interact: claim a desk, desk computer, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball, help kiosk</span>
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
       <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
@@ -1272,17 +1271,7 @@ const ownerOnline = (owner) => [...peers.values()].some((p) => (p.did || `${p.ki
 function promptFor(f) {
   if (!f) return null;
   if (f.floorItem) { const e = floor.find((x) => x.id === f.floorItem); return e ? `Pick up ${itemLabel(e.item)}` : null; }
-  if (f.seat) {
-    const seat = SEATS.find((s) => s.id === f.id);
-    if (me.seat === f.id) return seat?.desk ? 'Use the computer' : 'Stand up';
-    if (seat?.desk) {
-      const c = desks[seat.desk];
-      if (!c) return 'Sit & claim this desk';
-      if (c.owner === ownerKey()) return 'Sit at your desk';
-      return `Sit at ${c.name}'s desk`;
-    }
-    return 'Sit';
-  }
+  if (f.desk) return desks[f.desk] ? 'Use the computer' : 'Claim this desk';
   switch (f.interact) {
     case 'whiteboard': return 'Open the whiteboard';
     case 'coffee': return 'Grab a coffee';
@@ -1306,24 +1295,13 @@ function promptFor(f) {
 function interact(f) {
   if (!f) return;
   if (f.floorItem) return net.send({ t: 'inv', op: 'pickup', id: f.floorItem });
-  if (f.seat) {
-    const seat = SEATS.find((s) => s.id === f.id);
-    if (me.seat === f.id) {
-      if (seat?.desk) return openStation();
-      me.seat = null; net.send({ t: 'sit', seat: null }); return;
-    }
-    const taken = [...peers.values()].some((p) => p !== me && p.seat === f.id);
-    if (taken) return toast('Someone is already sitting there.');
-    path = null; walkTarget = null;
-    me.seat = seat.id; me.x = me.rx = seat.x; me.y = me.ry = seat.y;
-    me.dir = { down: 0, left: 1, right: 2, up: 3 }[seat.facing] ?? 0; me.moving = false;
-    net.send({ t: 'sit', seat: seat.id });
-    if (seat.desk) {
-      const c = desks[seat.desk];
-      if (!c) openClaim(seat.desk);
-      else if (c.owner === ownerKey()) net.send({ t: 'desk', action: 'claim', desk: seat.desk, goal: c.goal });
-    }
-    return;
+  if (f.desk) {
+    // The desk computer works from the chair spot: step onto it first.
+    if (deskAt(me.x, me.y)?.id !== f.desk) return walkTo(f.x + 0.5, f.y + 0.5, f);
+    const c = desks[f.desk];
+    if (!c) return openClaim(f.desk);
+    if (c.owner === ownerKey()) net.send({ t: 'desk', action: 'claim', desk: f.desk, goal: c.goal });
+    return openStation();
   }
   switch (f.interact) {
     case 'whiteboard': modal.wb = openEditor(modal, board, (m) => net.send(m)); modal.onclose = () => (modal.wb = null); break;
@@ -1351,7 +1329,7 @@ function openClaim(deskId) {
     <h2>Make this your desk?</h2>
     <p class="small muted">Your name goes on the desk and stays there between visits, so coworkers know where to find you. Your monitor lights up while you're in.</p>
     <label class="small"><b>Today I'm working on</b><input class="goal" maxlength="80" value="${esc(me.note || '')}" placeholder="e.g. writing the Q4 plan"></label>
-    <div class="row"><button class="btn primary claim">Claim desk</button><button class="btn ghost skip">Just sitting</button></div>`);
+    <div class="row"><button class="btn primary claim">Claim desk</button><button class="btn ghost skip">Just use the computer</button></div>`);
   const goal = modal.body.querySelector('.goal');
   goal.focus();
   const claim = () => {
@@ -1361,7 +1339,7 @@ function openClaim(deskId) {
   };
   modal.body.querySelector('.claim').addEventListener('click', claim);
   goal.addEventListener('keydown', (e) => { if (e.key === 'Enter') claim(); });
-  modal.body.querySelector('.skip').addEventListener('click', () => modal.close());
+  modal.body.querySelector('.skip').addEventListener('click', () => openStation());
 }
 
 function openNotes() {
@@ -1735,7 +1713,7 @@ function screenFeed(z) {
 
 // ---- the desk computer ---------------------------------------------------------------
 // public/js/workstation.js draws it; the World and your Workstation entity keep it.
-const deskOf = (p) => (p?.seat ? SEATS.find((s) => s.id === p.seat)?.desk || null : null);
+const deskOf = (p) => (p ? deskAt(p.x, p.y)?.id || null : null);
 const atDesk = () => !!deskOf(me);
 const myScreen = Object.assign(document.createElement('video'), { muted: true, autoplay: true, playsInline: true });
 const station = createWorkstation({
@@ -1744,7 +1722,6 @@ const station = createWorkstation({
     me: () => me, bookings: () => bookings, serverNow, toast,
     deskId: () => deskOf(me),
     openSchedule: () => openSchedule(),
-    standUp: () => { if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); } },
     closeStation: () => station.close(),
     share: {
       on: () => !!voice.screen,
@@ -1769,7 +1746,7 @@ registerApp({
 });
 
 function openStation() {
-  if (!atDesk()) return toast('Sit at a desk to use its computer.');
+  if (!atDesk()) return toast('Walk up to a desk to use its computer.');
   modal.close();
   station.open();
 }
@@ -1850,7 +1827,7 @@ function hitAt(sx, sy, touch = false) {
   if (peer) return { peer, w };
   const item = nearestFloorItem(floor, w.x, w.y + 0.2, touch ? 0.7 : 0.5);
   if (item) return { item, w };
-  const f = FURNITURE.find((f2) => (f2.interact || f2.seat) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
+  const f = FURNITURE.find((f2) => (f2.interact || f2.desk) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
   return { f, w };
 }
 
@@ -1910,7 +1887,6 @@ canvas.addEventListener('pointermove', (e) => {
   if (gesture.kind === 'tap' && d > 14) {
     gesture.kind = 'stick';
     path = null; walkTarget = null; pendingUse = null; follow = null;
-    if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
     stickEl.style.left = `${gesture.x0}px`; stickEl.style.top = `${gesture.y0}px`;
     stickEl.hidden = false;
   }
@@ -1934,8 +1910,7 @@ canvas.addEventListener('contextmenu', (e) => { if (coarse) e.preventDefault(); 
 function walkTo(x, y, thenUse = null) {
   if (x === undefined || !me) return;
   if (thenUse?.floorItem && Math.hypot(x - me.x, y - me.y) <= 1.2) return interact(thenUse);
-  if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
-  const tx = thenUse?.seat ? thenUse.x + 0.5 : x, ty = thenUse?.seat ? thenUse.y + 0.5 : y;
+  const tx = thenUse?.desk ? thenUse.x + 0.5 : x, ty = thenUse?.desk ? thenUse.y + 0.5 : y;
   const p = findPath(me.x, me.y, tx, ty);
   if (!p) return;
   path = p.slice(1);
@@ -2038,7 +2013,6 @@ function stepMe(dt) {
     }
   }
   const moving = !!(vx || vy);
-  if (moving && me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); }
   if (moving) {
     const len = Math.hypot(vx, vy);
     const x0 = me.x, y0 = me.y;
@@ -2198,7 +2172,7 @@ function loop(t) {
 
     const others = [...peers.values()];
     const deaf = me.status === 'focus';
-    // A screen put up on a desk monitor stops when you stand up; so does the computer.
+    // A screen put up on a desk monitor stops when you walk away; so does the computer.
     if (!atDesk()) {
       if (voice.screen && !z?.av) voice.stopScreen();
       if (station.isOpen) station.close();

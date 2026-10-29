@@ -1,5 +1,5 @@
 // The World: the office hub that holds everyone's socket. Movement,
-// presence, proximity chat, sitting, emotes, A/V flags and the WebRTC
+// presence, proximity chat, emotes, A/V flags and the WebRTC
 // signalling relay happen here, because they need to be fast. Everything
 // else with its own state is an entity (server/entities): each actor, each
 // meeting room, each desk, each pomodoro timer, the whiteboard, the notice
@@ -8,10 +8,10 @@
 // and carries out the effects they send back (Office.apply).
 
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
-import { SPAWN, openSpot, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
+import { SPAWN, openSpot, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, deskAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
 import * as map from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
-import { ROOMS, roomById, lockedOut, activeBooking, restrictedAt } from '../public/js/rooms.js';
+import { ROOMS, roomById, activeBooking, restrictedAt } from '../public/js/rooms.js';
 import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
@@ -25,7 +25,7 @@ import { ROLES, GRANTABLE, atLeast, rank, effectiveRole, roleLabel } from '../pu
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
 export const WORLD = {
-  doc: 'The office itself (OfficeRoom): everyone\'s socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.',
+  doc: 'The office itself (OfficeRoom): everyone\'s socket, movement, presence, proximity chat, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.',
   api: {
     apply: {
       doc: 'Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the sender shows changed), { op: "send", to: peerId, msg }, { op: "broadcast", msg, except? }, { op: "showOut", to: peerId, room, text }, { op: "log", entries } (server logs, for operators). Entities call it through this.emit(), this.mirror() and this.log().',
@@ -249,7 +249,7 @@ export class Office {
   // someone in the office, inZone needs them standing in the entity's zone.
   // The World fills in `who` and `ctx`, so callers only pass the params.
   // `self` entities (workstations) are always the caller's own, whatever the
-  // address said; `atDesk` needs the caller sitting at a desk.
+  // address said; `atDesk` needs the caller standing at a desk.
   async call(p, address, method, args = [], { internal = false } = {}) {
     let { kind, name } = parse(address);
     const spec = kind === 'inventory' ? INVENTORY.api[method] : kind === 'mod' ? MOD.api[method] : KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
@@ -262,7 +262,7 @@ export class Office {
       const key = this.actorKey(p);
       if (key) { address = `${kind}:${key}`; name = key; } else target = this.guestStation(p, kind);
     }
-    if (spec.atDesk && !this.deskOf(p)) throw new Error('sit at a desk first (take_desk, or sit on a desk-N-chair)');
+    if (spec.atDesk && !this.deskOf(p)) throw new Error('walk up to a desk first (take_desk, or walk_to desk-N)');
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
     if (spec.near) {
       // Same rule as the browser: walk up to it (its nearest edge) first.
@@ -282,8 +282,8 @@ export class Office {
     return this.ref(address)[method](...all);
   }
 
-  // The desk whose chair p sits on, if any.
-  deskOf(p) { return p?.seat ? SEATS.find((s) => s.id === p.seat)?.desk || null : null; }
+  // The desk whose chair p stands at, if any.
+  deskOf(p) { return p ? deskAt(p.x, p.y)?.id || null : null; }
 
   // A guest has no actor, so their workstation lives with their connection
   // and is gone when they leave (or when a hibernating Worker wakes).
@@ -422,7 +422,7 @@ export class Office {
     return {
       id: p.id, name: p.name, handle: p.handle, did: p.did, kind: p.kind,
       actor: p.actor, x: p.x, y: p.y, dir: p.dir, moving: p.moving,
-      status: p.status, note: p.note, seat: p.seat, emote: p.emote, audio: p.audio,
+      status: p.status, note: p.note, emote: p.emote, audio: p.audio,
       video: p.video, screen: p.screen, pc: p.pc, cup: p.cup, joinedAt: p.joinedAt,
       role: this.roleOf(p), ...(this.mutedUntil(p) ? { muted: this.mutedUntil(p) } : {}),
     };
@@ -437,7 +437,7 @@ export class Office {
     const p = {
       id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did, operator: !!operator,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
-      status: 'available', note: '', seat: null, emote: null, audio: false, video: false, screen: false, cup: false,
+      status: 'available', note: '', emote: null, audio: false, video: false, screen: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
       ...restored, ws,
     };
@@ -505,8 +505,8 @@ export class Office {
   removeRemote(p) { this.leave(p); }
 
   moveRemote(p, x, y) {
-    p.x = x; p.y = y; p.moving = false; p.seat = null;
-    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: false, seat: null });
+    p.x = x; p.y = y; p.moving = false;
+    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: false });
   }
 
   noteRemote(p, note) {
@@ -594,7 +594,6 @@ export class Office {
       case 'chat': return this.chat(p, m);
       case 'status': return this.setStatus(p, m);
       case 'emote': return this.emote(p, m);
-      case 'sit': return this.sit(p, m);
       case 'desk': return this.desk(p, m);
       case 'pomo': return this.pomodoro(p, m);
       case 'wb': return this.whiteboard(p, m);
@@ -695,7 +694,7 @@ export class Office {
 
   move(p, m) {
     const x = num(m.x, 0, map.W, p.x), y = num(m.y, 0, map.H, p.y);
-    if (isBlocked(Math.floor(x), Math.floor(y)) && !p.seat) return;
+    if (isBlocked(Math.floor(x), Math.floor(y))) return;
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
     // A booking keeps everyone but its holders out of the room, doorway
@@ -715,10 +714,16 @@ export class Office {
         return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, door: true, text: `${a.icon} ${to.name} (${a.text}): ${how ? `${how[0].toLowerCase()}${how.slice(1)} to get in.` : 'closed.'} Read the sign by the door.` });
       }
     }
+    const desk = this.deskOf(p);
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
-    if (p.seat && m.moving) p.seat = null;
     if (!p.moving) this.keepSpot(p);
-    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving, seat: p.seat }, p);
+    this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving }, p);
+    // Walking away from a desk switches its computer off, and ends a share to its monitor.
+    if (desk && !this.deskOf(p) && (p.pc || (p.screen && !to?.av))) {
+      const off = { pc: false, ...(p.screen && !to?.av ? { screen: false } : {}) };
+      Object.assign(p, off);
+      this.broadcast({ t: 'peer', id: p.id, ...off });
+    }
     // Areas are topics: rooms (and anything else) can react to people coming and going.
     if (to !== from) {
       const who = this.who(p);
@@ -785,25 +790,6 @@ export class Office {
   emote(p, m) {
     p.emote = m.name ? clip(m.name, 24) : null;
     this.broadcast({ t: 'peer', id: p.id, emote: p.emote });
-  }
-
-  sit(p, m) {
-    if (m.seat === null) {
-      p.seat = null;
-      // Standing up switches the desk computer off, and ends a share to its monitor.
-      const off = { pc: false, ...(p.screen && !zoneAt(p.x, p.y)?.av ? { screen: false } : {}) };
-      Object.assign(p, off);
-      return this.broadcast({ t: 'peer', id: p.id, seat: null, ...off });
-    }
-    const seat = SEATS.find((s) => s.id === m.seat);
-    if (!seat || Math.hypot(seat.x - p.x, seat.y - p.y) > 2.5) return;
-    const sz = zoneAt(seat.x, seat.y);
-    if (sz?.bookable && sz !== zoneAt(p.x, p.y) && lockedOut(this.bookings, sz.id, p, this.now())) return this.sendTo(p, { t: 'error', message: `${sz.name} is booked right now` });
-    for (const q of this.peers.values()) if (q.seat === seat.id && q !== p) return this.sendTo(p, { t: 'error', message: 'someone is sitting there' });
-    p.seat = seat.id; p.x = seat.x; p.y = seat.y;
-    p.dir = { down: 0, left: 1, right: 2, up: 3 }[seat.facing] ?? 0;
-    p.moving = false;
-    this.broadcast({ t: 'move', id: p.id, x: p.x, y: p.y, dir: p.dir, moving: false, seat: p.seat });
   }
 
   // ---- items: each is its own entity -------------------------------------
@@ -1199,10 +1185,10 @@ export class Office {
     if (!zone) return { error: `no area called ${clip(b, 40)}` };
     const from = zoneAt(q.x, q.y);
     const at = openSpot((zone.x0 + zone.x1 + 1) / 2, (zone.y0 + zone.y1 + 1) / 2, [...this.peers.values()].filter((x) => x.ready && x !== q));
-    Object.assign(q, { x: at.x, y: at.y, seat: null, moving: false, video: false, screen: false });
+    Object.assign(q, { x: at.x, y: at.y, moving: false, video: false, screen: false });
     q.spotSaved = 0; this.keepSpot(q);
     this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: zone.id, moved: true, text: `${p.name} moved you to ${zone.name}` });
-    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false }, q);
     this.broadcast({ t: 'peer', id: q.id, video: false, screen: false });
     if (from !== zone) {
       const who = this.who(q);
@@ -1269,9 +1255,9 @@ export class Office {
     for (const q of here) {
       if (target.teleport) {
         const from = zoneAt(q.x, q.y);
-        Object.assign(q, { x: at.x, y: at.y, seat: null, moving: false });
+        Object.assign(q, { x: at.x, y: at.y, moving: false });
         this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: zone, moved: true, text });
-        this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+        this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false }, q);
         if (from?.id !== zone) {
           const who = this.who(q);
           if (from) this.publish(`zone:${from.id}`, { type: 'exit', who });
@@ -1296,10 +1282,10 @@ export class Office {
   }
 
   showOut(q, room, text) {
-    q.x = room.door.x; q.y = room.door.y; q.seat = null; q.moving = false;
+    q.x = room.door.x; q.y = room.door.y; q.moving = false;
     q.video = false; q.screen = false;
     this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: room.id, text });
-    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false }, q);
     this.broadcast({ t: 'peer', id: q.id, video: false, screen: false });
   }
 }

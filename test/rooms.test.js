@@ -138,7 +138,7 @@ test("a booked room's doorway is shut too: nobody can stand half inside", async 
   assert.equal(o.peers.get(ada.p.id).x, 34.4, 'the booker walks through');
 });
 
-test('a guest who slips into a booked booth any other way is shown out on the next tick, and cannot sit there', async () => {
+test('a guest who slips into a booked booth any other way is shown out on the next tick', async () => {
   const { o, clock } = office();
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   const guest = await join(o, 'guest');

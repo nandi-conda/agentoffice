@@ -2,7 +2,7 @@
 //
 // Agents speak the same WebSocket protocol as the browser client: they
 // appear on the map with an AGENT badge, walk (using the shared pathfinder),
-// sit at desks, claim them with a goal, chat, and get @mentions from
+// go to desks, claim them with a goal, chat, and get @mentions from
 // anywhere in the office.
 //
 //   import { AgentClient } from './agent-sdk.mjs';
@@ -12,7 +12,7 @@
 //   await bot.takeDesk('watching CI');
 
 import { EventEmitter } from 'node:events';
-import { DESKS, SEATS, findPath, zoneAt, applyWing } from '../public/js/map.js';
+import { DESKS, findPath, zoneAt, applyWing, deskAt } from '../public/js/map.js';
 import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { facing } from '../public/js/sprites.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
@@ -80,7 +80,7 @@ export class AgentClient extends EventEmitter {
     // Channel rooms off the hallway reshape the map; paths need to know.
     if (m.t === 'welcome' || m.t === 'wing') { this.wing = (m.t === 'wing' ? m.rooms : m.wing) || []; applyWing(this.wing); }
     // A booked room turned us away (or showed us out): stop walking, stand where the server says.
-    if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y, seat: null }); }
+    if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y }); }
     // Something in the office (a room, a plugin, a moderator) walks us somewhere.
     if (m.t === 'walk' && this.me) this.walkTo(m.x, m.y).catch(() => {});
     const wait = m.ref !== undefined && this.pending.get(m.ref);
@@ -102,7 +102,6 @@ export class AgentClient extends EventEmitter {
   // cancels an older one. `onStep(done, total)` reports progress.
   async walkTo(x, y, onStep = null) {
     const id = ++this.walkId;
-    if (this.me.seat) { this.send({ t: 'sit', seat: null }); this.me.seat = null; }
     const path = findPath(this.me.x, this.me.y, x, y);
     if (!path) return false;
     let done = 0;
@@ -131,26 +130,23 @@ export class AgentClient extends EventEmitter {
 
   freeDesk(prefix = 'desk-') {
     const taken = new Set(Object.keys(this.desks));
-    const sitting = new Set([...this.peers.values()].map((p) => p.seat));
-    return DESKS.find((d) => d.id.startsWith(prefix) && !taken.has(d.id) && !sitting.has(`${d.id}-chair`));
+    const used = new Set([...this.peers.values()].map((p) => deskAt(p.x, p.y)?.id));
+    return DESKS.find((d) => d.id.startsWith(prefix) && !taken.has(d.id) && !used.has(d.id));
   }
 
-  async sit(seatId) {
-    const seat = SEATS.find((s) => s.id === seatId);
-    if (!seat) return false;
-    await this.walkTo(seat.x, seat.y);
-    this.send({ t: 'sit', seat: seat.id });
-    this.me.seat = seat.id;
-    return true;
+  // Walk up to a desk, to its chair: that's where its computer works.
+  async goToDesk(deskId, onStep = null) {
+    const desk = DESKS.find((d) => d.id === deskId);
+    return !!desk && this.walkTo(desk.seat.x, desk.seat.y, onStep);
   }
 
-  // Find (or reuse) a desk, walk over, sit down and put a goal on it.
-  async takeDesk(goal = '') {
+  // Find (or reuse) a desk, walk over and put a goal on it.
+  async takeDesk(goal = '', { prefix = 'desk-', onStep } = {}) {
     const key = this.me.did || `agent:${this.name}`;
     const mine = Object.entries(this.desks).find(([, v]) => v.owner === key);
-    const desk = mine ? DESKS.find((d) => d.id === mine[0]) : this.freeDesk();
+    const desk = mine ? DESKS.find((d) => d.id === mine[0]) : this.freeDesk(prefix);
     if (!desk) return null;
-    await this.sit(`${desk.id}-chair`);
+    await this.goToDesk(desk.id, onStep);
     this.send({ t: 'desk', action: 'claim', desk: desk.id, goal });
     return desk.id;
   }

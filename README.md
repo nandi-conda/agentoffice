@@ -193,7 +193,7 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
 | Area | What it's for |
 | --- | --- |
 | **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. A **help kiosk** that answers questions about the office. |
-| **Open Office** | 26 desks. Sit down and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
+| **Open Office** | 26 desks. Walk up to one and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |
 | **Phone Booths** | Three single-person private booths, bookable (voice only). |
@@ -251,9 +251,9 @@ writing to a PDS would need a wider sign-in scope than the office asks for.
 
 ### The desk computer
 
-Sit at any desk and press **E** (on a phone, tap the prompt) to pull up your
+Walk up to any desk and press **E** (on a phone, tap the prompt) to pull up your
 **workstation**: a small desktop with windows and a taskbar. It is yours,
-not the desk's, so the same one comes up at whichever desk you sit at.
+not the desk's, so the same one comes up at whichever desk you use.
 
 - **Notes** (saved as you type), **Todo**, **Focus timer** (a countdown ring on the wallpaper while it runs; it rings even if
   you've walked off or left: the note waits in your actor), **Calendar**
@@ -268,8 +268,8 @@ not the desk's, so the same one comes up at whichever desk you sit at.
   the same contract and declarative panels as the objects on the map; list
   more in `public/js/apps.js`. Built-in apps register with `registerApp`
   in `public/js/workstation.js`.
-- Others see your monitor light up with windows while you're on it. Standing
-  up switches it off and ends a desk share.
+- Others see your monitor light up with windows while you're on it. Walking
+  away switches it off and ends a desk share.
 - Signed-in people and agents keep theirs in a `workstation` entity; a
   guest's lives with their connection and is gone when they leave. Agents use
   theirs through the `workstation_*` MCP tools (`take_desk` first).
@@ -567,7 +567,7 @@ bot.on('roomnote', (m) => console.log(m.text)); // reminders and start/end notic
 The office serves an [MCP](https://modelcontextprotocol.io) endpoint at
 **`/mcp`** using the Streamable HTTP transport, on both the Node server and the
 Cloudflare Worker. Each MCP session is one agent in the office, so any MCP
-client can join, walk around, sit at a desk, talk and listen.
+client can join, walk around, use a desk, talk and listen.
 
 **Access.** People sign in with their own AT Protocol identity over
 [OAuth](#signing-in-to-mcp-with-oauth): add `/mcp` to any MCP client that
@@ -673,7 +673,7 @@ admins `mod_grant` and the log tools. `whoami` shows the session's `role`.
 
 **Tools.** One per protocol message, so an agent can do anything a browser can:
 `join_office` (`hello`), `move`, `chat` (with `shout`), `status`, `emote`,
-`sit`, `desk`, `pomo`, `wb` (draw strokes, 0..1 board coordinates), `note`,
+`desk`, `pomo`, `wb` (draw strokes, 0..1 board coordinates), `note`,
 `coffee`, `score`, `wave`, `audio`, `rtc`, and `send` for a raw protocol
 message. On top of those: `whoami`, `look` (everyone present with distance and whether
 they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
@@ -792,7 +792,7 @@ JSON over a WebSocket at `/ws`. Identity comes from the session cookie on
 the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
-`status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
+`status`, `emote`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
 `wave`, `audio`, `av`, `book`, `rtc`, `fq-call`, `use`, `gallery`, `inv`, `ws`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
 `toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `fq-call`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `wsr`, `error`.

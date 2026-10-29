@@ -17,7 +17,7 @@
 //                                              thing on the map this entity is named after
 //       self: true,                            the entity is always the caller's own: the World
 //                                              names it after them, whatever address was asked for
-//       atDesk: true,                          the caller must be sitting at a desk
+//       atDesk: true,                          the caller must be standing at a desk
 //       role: 'moderator',                     the caller needs at least this role (public/js/roles.js);
 //                                              the World checks it, the MCP hub only lists the tool to them
 //       cap: 'notes.remove',                   anyone may call it for their own things, and whoever has

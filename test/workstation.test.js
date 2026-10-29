@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
+import { DESKS, SPAWN } from '../public/js/map.js';
 import { describeApi, generatedTools } from '../server/apidoc.js';
 import { cleanUrl } from '../server/entities/workstation.js';
 
@@ -19,11 +20,12 @@ async function join(o, name, { did, kind = 'human' } = {}) {
   await tick();
   return { ws, p };
 }
-// Sit on a desk chair (teleporting next to it first, as a test may).
-async function sit(u, seat = 'desk-1-chair', at = { x: 17, y: 2.5 }) {
-  u.ws.msg({ t: 'move', ...at, teleport: true }); await tick();
-  u.ws.msg({ t: 'sit', seat }); await tick();
+// Stand at a desk's chair (teleporting there, as a test may), or away from it.
+async function toDesk(u, id = 'desk-1') {
+  const { seat } = DESKS.find((d) => d.id === id);
+  u.ws.msg({ t: 'move', x: seat.x, y: seat.y, teleport: true }); await tick();
 }
+async function walkAway(u) { u.ws.msg({ t: 'move', x: SPAWN.x, y: SPAWN.y, teleport: true }); await tick(); }
 // A workstation call over the socket, as the browser makes it.
 let ref = 0;
 async function ws(u, method, ...args) {
@@ -37,11 +39,11 @@ async function ws(u, method, ...args) {
   throw new Error('no answer');
 }
 
-test('the desk computer needs you sitting at a desk, and is yours wherever you sit', async () => {
+test('the desk computer needs you at a desk, and is yours at any desk', async () => {
   const o = new Office({});
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
-  await assert.rejects(ws(ada, 'desktop'), /sit at a desk/);
-  await sit(ada);
+  await assert.rejects(ws(ada, 'desktop'), /walk up to a desk/);
+  await toDesk(ada);
   const d = await ws(ada, 'desktop');
   assert.equal(d.owner, 'did:plc:ada');
   assert.ok(d.apps.some((a) => a.id === 'oracle'));
@@ -52,15 +54,14 @@ test('the desk computer needs you sitting at a desk, and is yours wherever you s
   await ws(ada, 'todoSet', { id: t.id, done: true });
 
   // Another desk, same computer.
-  ada.ws.msg({ t: 'sit', seat: null }); await tick();
-  await sit(ada, 'desk-2-chair', { x: 19, y: 2.5 });
+  await toDesk(ada, 'desk-2');
   const again = await ws(ada, 'desktop');
   assert.equal(again.notes[0].text, 'Plan\n- ship the workstation');
   assert.deepEqual(again.todos.map((x) => [x.text, x.done]), [['write tests', false], ['push to main', true]]);
 
   // Someone else at ada's old desk gets their own.
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
-  await sit(bob);
+  await toDesk(bob);
   const theirs = await ws(bob, 'desktop');
   assert.equal(theirs.owner, 'did:plc:bob');
   assert.equal(theirs.notes.length, 0);
@@ -73,7 +74,7 @@ test('the desk computer needs you sitting at a desk, and is yours wherever you s
 test('the shell runs office commands against your workstation', async () => {
   const o = new Office({});
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
-  await sit(ada);
+  await toDesk(ada);
   assert.match((await ws(ada, 'run', 'help')).out, /todo add/);
   assert.match((await ws(ada, 'run', 'who')).out, /ada/);
   assert.match((await ws(ada, 'run', 'todo add buy milk')).out, /1\. +\[ \] buy milk/);
@@ -92,7 +93,7 @@ test('the focus timer rings through your actor, even after you left', async () =
   let now = 1_000_000;
   const o = new Office({}, { now: () => now });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
-  await sit(ada);
+  await toDesk(ada);
   const t = await ws(ada, 'timerStart', { minutes: 25, label: 'Deep work' });
   assert.equal(t.endsAt, now + 25 * 60000);
   ada.ws.readyState = 3; o.leave(ada.p); await tick();
@@ -100,7 +101,7 @@ test('the focus timer rings through your actor, even after you left', async () =
   await o.runtime.host('workstation:did:plc:ada').alarm();
   const back = await join(o, 'ada', { did: 'did:plc:ada' });
   assert.match(back.ws.last('toast').text, /Deep work: your 25-minute timer is up/);
-  await sit(back);
+  await toDesk(back);
   assert.equal((await ws(back, 'desktop')).timer, null);
   o.runtime.stop();
 });
@@ -108,7 +109,7 @@ test('the focus timer rings through your actor, even after you left', async () =
 test('apps on plugin Workers answer with panels; guests get a workstation that goes with them', async () => {
   const o = new Office({});
   const guest = await join(o, 'visitor');
-  await sit(guest);
+  await toDesk(guest);
   const d = await ws(guest, 'desktop');
   assert.equal(d.guest, true);
   await ws(guest, 'noteSave', { text: 'hello' });
@@ -125,26 +126,26 @@ test('apps on plugin Workers answer with panels; guests get a workstation that g
   o.runtime.stop();
 });
 
-test('standing up switches the computer off and ends a share to the desk monitor', async () => {
+test('walking away switches the computer off and ends a share to the desk monitor', async () => {
   const o = new Office({});
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
   ada.ws.msg({ t: 'av', screen: true }); await tick();
   assert.equal(ada.p.screen, false, 'no screen share out in the open');
-  await sit(ada);
+  await toDesk(ada);
   ada.ws.msg({ t: 'ws', method: 'power', on: true });
   ada.ws.msg({ t: 'av', screen: true }); await tick();
   assert.equal(ada.p.pc, true);
   assert.equal(ada.p.screen, true, 'shared to the desk monitor');
   assert.ok(bob.ws.sent.some((m) => m.t === 'peer' && m.id === ada.p.id && m.pc === true));
-  ada.ws.msg({ t: 'sit', seat: null }); await tick();
+  await walkAway(ada);
   assert.equal(ada.p.pc, false);
   assert.equal(ada.p.screen, false);
-  assert.deepEqual(bob.ws.last('peer'), { t: 'peer', id: ada.p.id, seat: null, pc: false, screen: false });
+  assert.deepEqual(bob.ws.last('peer'), { t: 'peer', id: ada.p.id, pc: false, screen: false });
   o.runtime.stop();
 });
 
-test('workstation MCP tools are always your own: no name to pick, sitting at a desk', () => {
+test('workstation MCP tools are always your own: no name to pick, at a desk', () => {
   const tools = generatedTools(describeApi()).filter((t) => t.kind === 'workstation');
   const names = tools.map((t) => t.name).sort();
   assert.ok(names.includes('workstation_desktop') && names.includes('workstation_run') && names.includes('workstation_todoAdd'));
@@ -153,7 +154,7 @@ test('workstation MCP tools are always your own: no name to pick, sitting at a d
     assert.ok(!('name' in t.input.properties), `${t.name} takes no entity name`);
     assert.equal(t.readOnly, false);
     assert.equal(t.address({ name: 'did:plc:someone-else' }), 'workstation:self');
-    assert.match(t.description, /sitting at a desk/);
+    assert.match(t.description, /at a desk/);
   }
 });
 

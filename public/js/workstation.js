@@ -1,4 +1,4 @@
-// The desk computer: sit at a desk, press E (or tap the monitor), and your
+// The desk computer: walk up to a desk, press E (or tap the monitor), and your
 // workstation comes up over the office. A small desktop with windows and a
 // taskbar; the apps are pluggable (registerApp), and the ones that run on
 // plugin Workers (apps.js) get a generic window that draws their panels.
@@ -90,8 +90,7 @@ export function createWorkstation({ send, office }) {
           <div class="ws-tasks"></div>
           <button class="ws-share" title="Put your screen on your desk monitor for people nearby">🖥️ <span>Share</span></button>
           <span class="ws-clock"></span>
-          <button class="ws-off" title="Close the workstation (Esc). You stay seated.">⏻</button>
-          <button class="ws-stand" title="Stand up and close it">Stand up</button>
+          <button class="ws-off" title="Close the workstation (Esc)">⏻</button>
         </div>
       </div>
     </div>`);
@@ -100,7 +99,6 @@ export function createWorkstation({ send, office }) {
     bar = root.querySelector('.ws-bar');
     bar.querySelector('.ws-off').onclick = () => close();
     root.querySelector('.ws-focus').onclick = () => openApp('timer');
-    bar.querySelector('.ws-stand').onclick = () => { close(); office.standUp(); };
     bar.querySelector('.ws-share').onclick = () => office.share.toggle();
     const menu = root.querySelector('.ws-menu');
     bar.querySelector('.ws-start').onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };

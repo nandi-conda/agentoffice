@@ -1,6 +1,6 @@
 # world (the World)
 
-The office itself (OfficeRoom): everyone's socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.
+The office itself (OfficeRoom): everyone's socket, movement, presence, proximity chat, emotes, A/V flags and the WebRTC relay. It hands entities requests, mirrors what they show, and carries out the effects they send back.
 
 - address `world:main`
 - Durable Object binding `OFFICE` (class `OfficeRoom`)

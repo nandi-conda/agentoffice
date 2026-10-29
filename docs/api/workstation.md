@@ -1,6 +1,6 @@
 # workstation (Workstation)
 
-The computer on the desks: one per identity, so yours comes up at whichever desk you sit at. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be sitting at a desk.
+The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be at a desk.
 
 - address `workstation:<name>`
 - Durable Object binding `ACTOR` (class `ActorDO`)
@@ -13,7 +13,7 @@ Nothing: a workstation shows the office nothing.
 
 ## `desktop(who)`
 
-`read-only` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_desktop`**
+`read-only` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_desktop`**
 
 Your workstation: notes, todos, bookmarks, timer, layout and the apps you can open.
 
@@ -21,7 +21,7 @@ Returns `{ owner, guest, notes, todos, links, timer, prefs, apps }`
 
 ## `noteSave(who, note)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_noteSave`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_noteSave`**
 
 Write a note. Without an id it makes a new one (30 at most); with one it replaces that note.
 
@@ -36,7 +36,7 @@ Returns `{ id, title, text, updated }`
 
 ## `noteDelete(who, id)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_noteDelete`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_noteDelete`**
 
 Throw a note away.
 
@@ -48,7 +48,7 @@ Returns `{ ok }`
 
 ## `todoAdd(who, text)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_todoAdd`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_todoAdd`**
 
 Add something to your todo list (100 at most).
 
@@ -60,7 +60,7 @@ Returns `{ id, text, done, at }`
 
 ## `todoSet(who, todo)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_todoSet`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_todoSet`**
 
 Tick off, untick or reword a todo.
 
@@ -75,7 +75,7 @@ Returns `{ id, text, done, at }`
 
 ## `todoRemove(who, id)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_todoRemove`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_todoRemove`**
 
 Remove a todo, or every finished one with id "done".
 
@@ -87,7 +87,7 @@ Returns `{ removed }`
 
 ## `linkAdd(who, link)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_linkAdd`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_linkAdd`**
 
 Bookmark a page (http/https, or an office path like /docs).
 
@@ -101,7 +101,7 @@ Returns `{ id, title, url }`
 
 ## `linkRemove(who, id)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_linkRemove`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_linkRemove`**
 
 Drop a bookmark.
 
@@ -113,7 +113,7 @@ Returns `{ ok }`
 
 ## `timerStart(who, timer)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_timerStart`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_timerStart`**
 
 Start your own focus timer. When it rings you get a note, even if you have left the office by then.
 
@@ -127,7 +127,7 @@ Returns `object | null`
 
 ## `timerStop(who)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_timerStop`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_timerStop`**
 
 Stop your focus timer.
 
@@ -135,7 +135,7 @@ Returns `{ ok }`
 
 ## `prefs(who, prefs)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · `internal (entity to entity)`
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · `internal (entity to entity)`
 
 Keep the window layout and wallpaper (what the browser sends; 8 KB at most).
 
@@ -145,7 +145,7 @@ Keep the window layout and wallpaper (what the browser sends; 8 KB at most).
 
 ## `run(who, line)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_run`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_run`**
 
 Run one line in the workstation shell (try "help"): who, desks, rooms, todo, notes, timer, links and more. Returns what it printed.
 
@@ -157,7 +157,7 @@ Returns `{ out, open?, url? }`
 
 ## `app(who, req)`
 
-`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must sit at a desk` · MCP tool **`workstation_app`**
+`mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_app`**
 
 Use an app that runs on a plugin Worker. `action` is "use" to open it or an action id from the panel it answered with; `input` is typed text.
 

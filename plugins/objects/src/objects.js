@@ -156,7 +156,7 @@ export const KIOSK_PERSONA = 'You are the friendly help kiosk in a virtual cowor
 export const KIOSK_HELP = {
   rooms: 'The office has the Deep Work Den, Phone Booths, Lobby, Open Office, Boardroom, Huddle Room, Kitchen and Lounge.',
   book: 'Walk up to a meeting room door and press E to book it, or use the Rooms button.',
-  desk: 'Sit at any free desk in the Open Office and claim it. Your name stays on it between visits.',
+  desk: 'Walk up to any free desk in the Open Office and claim it. Your name stays on it between visits.',
   coffee: 'The coffee machine is in the Kitchen. Grab a mug and people nearby will know you\'re up for a chat.',
   focus: 'The Deep Work Den has a shared pomodoro timer. Chat there only reaches people right next to you.',
   arcade: 'Byte Snake lives in the Lounge, top right. High scores go on the board.',

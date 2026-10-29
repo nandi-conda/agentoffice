@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
-import { SEATS } from '../public/js/map.js';
 import * as map from '../public/js/map.js';
 
 class FakeWs extends EventEmitter {
@@ -69,17 +68,6 @@ test('desk claims are exclusive while the owner is around', async () => {
   a.ws.msg({ t: 'desk', action: 'claim', desk: 'desk-2' }); await tick();
   assert.equal(o.desks['desk-1'], undefined, 'claiming a new desk frees the old one');
   assert.equal(o.runtime.data['desk:desk-2'].state.holder.name, 'ada', 'the desk entity keeps its own state');
-});
-
-test('sitting snaps to the seat and blocks double booking', async () => {
-  const o = new Office();
-  const a = await join(o, 'ada'), b = await join(o, 'grace');
-  const seat = SEATS.find((s) => s.id === 'bean1');
-  await place(o, a, seat.x + 1, seat.y); await place(o, b, seat.x + 1, seat.y + 0.5);
-  a.ws.msg({ t: 'sit', seat: 'bean1' }); await tick();
-  assert.equal(b.ws.last('move').seat, 'bean1');
-  b.ws.msg({ t: 'sit', seat: 'bean1' }); await tick();
-  assert.ok(b.ws.last('error'));
 });
 
 test('shared pomodoro runs in the den', async () => {

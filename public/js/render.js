@@ -1173,9 +1173,7 @@ export function createRenderer(canvas) {
       items.push({ k: e.y, drop: e });
     }
     for (const p of st.peers) {
-      let k = p.ry + 0.2;
-      if (p.seat) k = p.ry + 0.4;
-      items.push({ k, p });
+      items.push({ k: p.ry + 0.2, p });
     }
     items.sort((a, b) => a.k - b.k);
     for (const it of items) {

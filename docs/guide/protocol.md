@@ -4,7 +4,7 @@ JSON over a WebSocket at `/ws`. Identity comes from the session cookie on
 the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
-`status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
+`status`, `emote`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
 `wave`, `audio`, `av`, `book`, `rtc`, `fq-call`, `use`, `gallery`, `inv`, `ws`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
 `toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `fq-call`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `wsr`, `error`.
