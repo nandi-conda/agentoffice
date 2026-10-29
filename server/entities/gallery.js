@@ -121,13 +121,23 @@ export class Gallery extends Entity {
   }
   view() { return this.items; }
 
+  // The per-person cap counts exactly what the list shows standing as
+  // theirs, and names it, so nobody is told they're full of objects they
+  // can't see. Null while there's room.
+  full(did) {
+    const mine = this.items.filter((i) => placed(i) && i.owner?.did === did);
+    if (mine.length < MAX_PER_OWNER) return null;
+    return `you have ${MAX_PER_OWNER} objects out already (${mine.map((i) => `${i.name} ${i.id}`).join(', ')})`;
+  }
+
   async upload(who, req = {}) {
     if (!who?.did) return { error: 'sign in with your AT Protocol handle to upload objects' };
     const sandbox = this.services.plugins?.sandbox;
     const lang = req.lang === 'js' ? 'js' : 'wasm';
     if (!sandbox) return { error: 'this office can\'t run uploaded plugins: it was deployed without the Worker Loader binding (LOADER in wrangler.toml), which needs the Workers Paid plan (docs/uploads.md)' };
     if (!sandbox.langs.includes(lang)) return { error: `this office runs ${sandbox.langs.join(' and ')} uploads, not ${lang}` };
-    if (this.items.filter((i) => placed(i) && i.owner?.did === who.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: pick one up or remove one first` };
+    const full = this.full(who.did);
+    if (full) return { error: `${full}: pick one up or remove one first` };
     if (this.items.length >= MAX_OBJECTS) return { error: 'the office is full of uploaded objects right now' };
     let bytes, info;
     try {
@@ -206,7 +216,8 @@ export class Gallery extends Entity {
     if (item.look === CARRIED) return { error: `${item.name} isn't something that stands in a room` };
     const tx = Math.floor(x), ty = Math.floor(y);
     if (this.items.some((i) => placed(i) && i.x === tx && i.y === ty)) return { error: 'something already stands there' };
-    if (owner?.did && this.items.filter((i) => placed(i) && i.owner?.did === owner.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: pick one up first` };
+    const full = owner?.did && this.full(owner.did);
+    if (full) return { error: `${full}: pick one up first` };
     const out = { ...item, x: tx, y: ty, zone: zoneAt(tx + 0.5, ty + 0.5)?.id || null, owner: owner || null };
     delete out.carried;
     this.state.items = this.items.map((i) => (i.id === id ? out : i));

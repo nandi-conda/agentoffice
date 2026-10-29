@@ -410,3 +410,24 @@ test('looks: plinths are gone, and sprites come from the manifest', async () => 
   const items = Object.getOwnPropertyDescriptor(Gallery.prototype, 'items').get;
   assert.deepEqual(items.call({ state: { items: [{ look: 'plinth' }, { look: 'sprite' }, { look: 'item', carried: true }] } }).map((i) => i.look), ['kiosk', 'kiosk', 'item']);
 });
+
+test('a World waking on a stale saved mirror pulls the gallery again, so an upload never vanishes while still counting', async () => {
+  const { o, rt } = office();
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada');
+  for (let i = 0; i < MAX_PER_OWNER; i++) { ada.msg({ t: 'gallery', op: 'upload', rid: i, req: upload }); await settle(20); }
+  const ids = o.gallery.map((i) => i.id);
+  assert.equal(ids.length, MAX_PER_OWNER);
+  // The last push never made it into the saved copy (a deploy before the save).
+  const saved = [...o.mirror].map(([k, v]) => [k, k === 'gallery:main' ? v.slice(0, -1) : v]);
+  const woke = new Office({ migrated: true }, { runtime: rt, mirror: saved });
+  assert.equal(woke.gallery.length, MAX_PER_OWNER - 1, 'up at once on the saved copy');
+  await until(() => woke.gallery.length === MAX_PER_OWNER);
+  assert.deepEqual(woke.gallery.map((i) => i.id), ids);
+  // And the cap names what it counts.
+  ada.msg({ t: 'gallery', op: 'upload', rid: 9, req: upload });
+  await settle(20);
+  const err = ada.last('galleryres').result.error;
+  for (const id of ids) assert.ok(err.includes(id), err);
+  rt.stop();
+});

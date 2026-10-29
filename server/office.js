@@ -201,22 +201,27 @@ export class Office {
       this.onChange();
     }
     this.migrated = true;
-    if (cached) return;
+    // Then pull what everyone shows. With a saved mirror (a hibernation wake,
+    // a deploy) the office is already up on it, and this refreshes it behind:
+    // the saved copy can be older than the entities, when a push came in
+    // after the last save and the World went away before the next one (an
+    // upload that then vanished from the map and the gallery while
+    // gallery:main still counted it).
     // Anything an entity pushes meanwhile is newer than the view it answered.
     const pushed = (this.pushed = new Set());
+    const take = (address, r) => {
+      if (pushed.has(address)) return;
+      if (r.status !== 'fulfilled') return log('error', address, `view failed: ${r.reason?.message}`);
+      if (cached && JSON.stringify(this.mirror.get(address) ?? null) === JSON.stringify(r.value ?? null)) return;
+      this.mirrored({ from: address, value: r.value, quiet: !cached });
+    };
     const views = await Promise.allSettled(MIRRORED.map((a) => this.ref(a).view()));
-    this.pushed = null;
-    views.forEach((r, i) => {
-      if (pushed.has(MIRRORED[i])) return;
-      if (r.status === 'fulfilled') { this.mirror.set(MIRRORED[i], r.value); this.onMirror(MIRRORED[i]); }
-      else log('error', MIRRORED[i], `view failed: ${r.reason?.message}`);
-    });
+    views.forEach((r, i) => take(MIRRORED[i], r));
     // Uploaded objects aren't in MIRRORED (people add them): pull what each shows.
-    await Promise.allSettled(this.gallery.map(async (f) => {
-      const v = await this.ref(`uobj:${f.id}`).view();
-      if (!this.mirror.has(`uobj:${f.id}`)) { this.mirror.set(`uobj:${f.id}`, v); this.onMirror(`uobj:${f.id}`); }
-    }));
-    this.layout(this.mirror.get('wing:main'), false);
+    const ups = this.gallery.map((f) => `uobj:${f.id}`);
+    (await Promise.allSettled(ups.map((a) => this.ref(a).view()))).forEach((r, i) => take(ups[i], r));
+    this.pushed = null;
+    if (!cached) this.layout(this.mirror.get('wing:main'), false);
   }
 
   // ---- the channel wing (entities/channels.js, public/js/wing.js) ----------
