@@ -1622,17 +1622,40 @@ async function ensureVoice() {
   micPopSync();
   return true;
 }
+// A freeq-bridged channel room where you can be on its call (signed in, join hasn't failed).
+const fqRoom = (z) => !!(z && !z.av && z.channel && freeqRooms[z.id] && me?.did && fqCall.usable(z.id));
+// Camera and screen share belong to A/V rooms and freeq channel rooms' calls.
+function syncAvButtons() {
+  const z = me && zoneAt(me.x, me.y);
+  camBtn.hidden = shareBtn.hidden = !(z?.av || fqCall.joined || fqRoom(z));
+  if (!z?.av) {
+    camBtn.classList.toggle('on', fqCall.camWanted);
+    shareBtn.classList.toggle('on', fqCall.screen);
+  }
+}
 async function toggleCam() {
-  // On a freeq call the camera goes out on our freeq broadcast instead.
-  if (!zoneAt(me.x, me.y)?.av && fqCall.joined) return fqCall.setCam(!fqCall.cam);
+  // On a freeq call the camera goes out on our freeq broadcast instead. Before
+  // we're on it, turning the camera on also turns voice on, which joins the call.
+  const z = zoneAt(me.x, me.y);
+  if (!z?.av && (fqCall.joined || fqRoom(z))) {
+    const on = !fqCall.camWanted;
+    await fqCall.setCam(on);
+    if (on && !fqCall.joined && !(await ensureVoice())) { await fqCall.setCam(false); toast('🎙️ The freeq call needs your mic. Allow it in your browser to join with your camera.'); }
+    return;
+  }
   if (voice.cam) return voice.stopCam();
   await ensureVoice();
   if (!(await voice.startCam())) toast('📷 Camera permission was blocked. Allow it in your browser to turn it on.');
 }
 async function toggleShare() {
   // On a freeq call the screen goes out as its own freeq broadcast.
-  if (!zoneAt(me.x, me.y)?.av && fqCall.joined) {
+  const z = zoneAt(me.x, me.y);
+  if (!z?.av && fqCall.joined) {
     if (!(await fqCall.setScreen(!fqCall.screen))) toast('🖥️ Screen sharing isn\'t available in this browser.');
+    return;
+  }
+  if (!z?.av && fqRoom(z)) {
+    if (await ensureVoice()) toast('📞 Joining the freeq call. Press share again once you\'re on it.', [], 4000);
     return;
   }
   if (voice.screen) return voice.stopScreen();
@@ -1658,15 +1681,7 @@ const stage = $('.av-stage');
 // A freeq-bridged channel room's voice is the channel's freeq call (freeq-av.js).
 const fqCall = createFreeqCall({
   send: (m) => net.send(m), stage, toast,
-  onChange: () => {
-    const z = me && zoneAt(me.x, me.y);
-    if (!z?.av) {
-      camBtn.hidden = shareBtn.hidden = !fqCall.joined;
-      camBtn.classList.toggle('on', fqCall.cam);
-      shareBtn.classList.toggle('on', fqCall.screen);
-    }
-    updateStage();
-  },
+  onChange: () => { syncAvButtons(); updateStage(); },
 });
 const tiles = new Map(); // key -> tile element
 function updateStage() {
@@ -1799,7 +1814,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'b') openSchedule();
   else if (key === 'u') showGallery();
   else if (key === 'g' && can(me.role, 'roles.view')) showAdmin();
-  else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
+  else if (key === 'c' && !camBtn.hidden) toggleCam();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);
   else if (key === '0') zoomToFit();
@@ -2079,9 +2094,8 @@ function zoneChanged(z, freeqOnly = false) {
   if (meeting && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }
   else if (autoStatus === 'meeting' && !meeting) { autoStatus = null; setStatus('available'); }
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
-  // Camera and screen share belong to A/V rooms; they stop at the door.
-  camBtn.hidden = shareBtn.hidden = !z?.av;
-  if (!z?.av && fqCall.joined) camBtn.hidden = shareBtn.hidden = false;
+  // Camera and screen share belong to A/V rooms (and freeq calls); they stop at the door.
+  syncAvButtons();
   if (!z?.av && voice.cam) voice.stopCam();
   if (!z?.av && voice.screen && !atDesk()) voice.stopScreen();
   if (z?.av && !avHinted) { avHinted = true; toast(`🎥 ${esc(z.name)} is an A/V room: turn on your camera or share your screen with everyone in here.`, [['Camera', toggleCam], ['Share screen', toggleShare]], 7000); }

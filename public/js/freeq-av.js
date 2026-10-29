@@ -192,6 +192,9 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     if (joining || joined || !zone || failed.has(zone)) return;
     joining = true;
     send({ t: 'fq-call', op: 'join', zone, instance });
+    // No answer at all (freeq or our connection to it is down): fall back like an error.
+    const z = zone;
+    setTimeout(() => { if (joining && zone === z) onMessage({ zone: z, call, error: 'no answer from freeq' }); }, 20000);
   }
 
   function leave() {
@@ -253,6 +256,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     // The camera goes out on the same broadcast; changing it re-announces.
     async setCam(on) { cam = on; if (joined) await startPublish(); onChange(); },
     get cam() { return cam && !!joined; },
+    get camWanted() { return cam; },
     async setScreen(on) { const ok = on ? await startScreen() : (stopScreen(), true); onChange(); return ok; },
     get screen() { return !!screenPub; },
     get joined() { return !!joined; },
