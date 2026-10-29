@@ -108,8 +108,16 @@ export function parseLine(line) {
 const oneLine = (s, n = 400) => String(s ?? '').replace(/[\r\n\u0000]+/g, ' ').trim().slice(0, n);
 export const ircNick = (s) => (String(s || '').split('.')[0].replace(/[^A-Za-z0-9_\-\[\]\\^{}|`]/g, '').replace(/^[-0-9]+/, '') || 'office').slice(0, 24);
 
-// SASL responses go in 400-byte pieces; a final full piece is followed by "+".
+// A SASL response goes on one line whenever it fits freeq's 8192-byte line
+// limit. IRCv3 says 400-byte pieces, but freeq only reassembles pieces since
+// 2026-10-19; older servers (irc.freeq.at was one) decode each line on its own
+// and answer "bad response: response is not JSON". One line works on both.
+// Only a response too long for one line is split (a final full piece is
+// followed by "+").
+export const MAX_SASL_LINE = 8177;
 export function saslLines(payload) {
+  if (!payload.length) return ['AUTHENTICATE +'];
+  if (payload.length <= MAX_SASL_LINE) return [`AUTHENTICATE ${payload}`];
   const out = [];
   for (let i = 0; i < payload.length; i += 400) out.push(`AUTHENTICATE ${payload.slice(i, i + 400)}`);
   if (!payload.length || payload.length % 400 === 0) out.push('AUTHENTICATE +');

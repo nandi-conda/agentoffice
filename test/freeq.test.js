@@ -112,11 +112,16 @@ test('IRC line parsing with tags, prefix and trailing', () => {
   assert.deepEqual(parseLine('PING :x').params, ['x']);
 });
 
-test('SASL responses are split in 400-byte pieces', () => {
+test('SASL responses go on one line unless they exceed freeq\'s line limit', () => {
   assert.deepEqual(saslLines('abc'), ['AUTHENTICATE abc']);
-  const full = 'x'.repeat(800);
-  assert.deepEqual(saslLines(full).map((l) => l.length), [413, 413, 14]);
-  assert.equal(saslLines('y'.repeat(401)).length, 2);
+  // A pds-oauth response (token + DPoP proof) is a few KB: still one line,
+  // because freeq servers before 2026-10-19 decode every line on its own.
+  assert.deepEqual(saslLines('x'.repeat(3000)).map((l) => l.length), [3013]);
+  assert.equal(saslLines('y'.repeat(8177)).length, 1);
+  // Past the limit: 400-byte pieces, then "+" after a final full piece.
+  assert.deepEqual(saslLines('z'.repeat(8400)).map((l) => l.length).slice(-2), [413, 14]);
+  assert.equal(saslLines('z'.repeat(8400)).length, 22);
+  assert.deepEqual(saslLines(''), ['AUTHENTICATE +']);
 });
 
 test('did:key encodes ed25519 keys the standard way', () => {
@@ -153,8 +158,11 @@ test('a person signs in with pds-oauth, retrying with the DPoP nonce freeq relay
   const who = await irc.open();
   assert.equal(who.did, 'did:plc:alice');
   assert.deepEqual(proofs, ['proof(null)', 'proof(pds-nonce-1)']);
-  // The response was long enough to be chunked.
-  assert.ok(server.sent.filter((l) => l.startsWith('AUTHENTICATE ') && l.length === 413).length > 1);
+  // Each answer is one line that decodes to JSON on its own, the way an
+  // irc.freeq.at that predates SASL reassembly reads it.
+  const answers = server.sent.filter((l) => l.startsWith('AUTHENTICATE ') && l !== 'AUTHENTICATE ATPROTO-CHALLENGE');
+  assert.equal(answers.length, 2);
+  for (const l of answers) assert.equal(JSON.parse(new TextDecoder().decode(unb64url(l.slice(13)))).method, 'pds-oauth');
 });
 
 test('populated channels attach to areas, and talk flows both ways', async () => {
