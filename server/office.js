@@ -1081,9 +1081,13 @@ export class Office {
       if (r.items) p.items = r.items;
     }
     if (r.error) return r;
-    const had = p.keyring;
+    // Whether they carry a skeleton key, on every connection of theirs (an
+    // MCP session and a browser tab share one actor's things). Without one,
+    // any room a key let them into shuts again: checked on every change, not
+    // only when this connection saw the key go, so nothing stale keeps it open.
     p.keyring = holdsKey(r.items);
-    if (had && !p.keyring) await this.relock(p);
+    if (key) for (const q of this.peers.values()) if (q !== p && this.actorKey(q) === key) q.keyring = p.keyring;
+    if (!p.keyring) await this.relock(p);
     if (key) this.deliver(key, { t: 'inv', items: r.items });
     else this.sendTo(p, { t: 'inv', items: r.items });
     return r;

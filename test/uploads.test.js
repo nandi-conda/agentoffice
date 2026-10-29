@@ -265,6 +265,9 @@ test('the Skeleton Key is admins only, one key in their inventory, and booked ro
   adm.msg({ t: 'move', x: 30, y: 8, dir: 0, moving: false, teleport: true });
   bob.msg({ t: 'move', x: 31, y: 8, dir: 0, moving: false, teleport: true });
   await settle();
+  // (Even when this connection didn't know it had the key: say it came in
+  // over another of hers, or before a restart.)
+  pos('adm').keyring = false;
   adm.msg({ t: 'inv', op: 'give', id: keys(adm)[0].id, to: 'bob' });
   await until(() => keys(bob).length);
   assert.equal(keys(adm).length, 0, 'there is just the one');
