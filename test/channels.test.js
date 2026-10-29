@@ -173,3 +173,23 @@ test('rooms people open: invite only, knock and let in; the wing keeps slots', a
   bob.ws.msg({ t: 'chan', op: 'close', name: '#random' }); await tick();
   assert.match(bob.ws.last('error').message, /only Ada/);
 });
+
+test('a room opened "open to anyone" lets anyone walk straight in', async () => {
+  const office = new Office({}, { loadActor: null });
+  const ada = await join(office, 'Ada', { did: 'did:plc:ada' });
+  // What the Open a room form sends with 🚪 Anyone ticked.
+  ada.ws.msg({ t: 'chan', op: 'open', name: 'hangout', access: 'open', ref: 'o' }); await tick();
+  const room = ada.ws.last('chan').room;
+  assert.deepEqual(room.access, { icon: '🚪', text: 'open', open: true });
+  assert.equal(room.policy, null);
+  await tick();
+  const spot = inside(room.id), door = roomRect(room.slot, room.tier).outside;
+  for (const [name, auth] of [['Bob', { did: 'did:plc:bob' }], ['Gus', {}]]) {
+    const c = await join(office, name, auth);
+    await at(c, door.x, door.y); await at(c, spot.x, spot.y);
+    assert.equal(c.ws.last('bounce'), undefined, `${name} was turned away`);
+    assert.equal(zoneAt(c.p.x, c.p.y)?.id, room.id);
+    c.ws.msg({ t: 'chan', op: 'check', room: room.id, ref: 'c' }); await tick();
+    assert.equal(c.ws.last('chan').result.ok, true);
+  }
+});
