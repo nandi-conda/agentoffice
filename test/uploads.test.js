@@ -449,6 +449,10 @@ test('an uploaded whiteboard, notice board or coffee machine is the real thing, 
   await until(() => bob.sent.some((m) => m.t === 'obj' && m.id === wb.id && m.feed?.push));
   assert.equal(o.strokes.length, 0);
   assert.equal((await join(o, 'cy')).last('welcome').feeds[wb.id].length, 1);
+  // Wiping it, from the editor or its panel, clears it for everyone.
+  bob.msg({ t: 'wb', op: 'clear', id: wb.id });
+  await until(() => ada.sent.some((m) => m.t === 'obj' && m.id === wb.id && m.feed?.clear));
+  assert.equal((await join(o, 'di')).last('welcome').feeds[wb.id], undefined);
 
   ada.msg({ t: 'note', op: 'add', text: 'standup moved', board: nb.id });
   await until(() => bob.sent.some((m) => m.t === 'obj' && m.id === nb.id && m.display?.data?.notes?.length));

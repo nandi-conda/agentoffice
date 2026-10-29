@@ -5,6 +5,7 @@
 // standing in a room becomes a map object here, drawn, prompted and used
 // exactly like the office's own (render.js, objects.js).
 
+import { ask } from './ask.js';
 import { FURNITURE } from './map.js';
 import { readManifest, LOOKS, CARRIED, SURFACES, lookOf } from './manifest.js';
 import { PERMISSIONS, LEVELS, levelOf, levelRole, uploadError } from './permissions.js';
@@ -84,7 +85,8 @@ export function openGallery(modal, { me, items, request, toast, walkTo, moderato
     const it = items.find((x) => x.id === row.dataset.id);
     row.querySelector('.gal-go')?.addEventListener('click', () => { modal.close(); walkTo(it.x + 0.5, it.y + 1.5); });
     row.querySelector('.gal-rm')?.addEventListener('click', async (e) => {
-      if (!confirm(`Remove ${it.name}? Its code and memory are deleted.`)) return;
+      const btn = e.currentTarget;
+      if (!(await ask(btn, `Remove ${it.name}? Its code and memory are deleted.`, 'Remove'))) return;
       e.target.disabled = true;
       const r = await request('remove', { id: it.id });
       if (r.error) { toast(esc(r.error)); e.target.disabled = false; } else { toast(`${esc(it.emoji)} ${esc(it.name)} is gone.`); row.remove(); }

@@ -1,6 +1,8 @@
 // Shared whiteboard. Strokes use 0..1 coordinates so the full-size editor
 // and the tiny board drawn in the boardroom share one source of truth.
 
+import { ask } from './ask.js';
+
 export const WB_W = 1200, WB_H = 640;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -61,7 +63,7 @@ export function openEditor(modal, board, send, { title = 'Boardroom whiteboard',
   }));
   el.querySelector('.swatch').classList.add('on');
   el.querySelector('.wb-size').addEventListener('change', (e) => (size = +e.target.value));
-  el.querySelector('.wb-clear').addEventListener('click', () => { if (confirm('Clear the whiteboard for everyone?')) send({ t: 'wb', op: 'clear' }); });
+  el.querySelector('.wb-clear').addEventListener('click', async (e) => { if (await ask(e.currentTarget, 'Clear it for everyone?', 'Clear')) send({ t: 'wb', op: 'clear' }); });
 
   let cur = null;
   const pt = (e) => {

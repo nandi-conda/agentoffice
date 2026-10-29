@@ -681,3 +681,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .door-sign .muted { color: #9a3412; opacity: 0.8; }
 .door-sign .knock { margin-top: 4px; font: 600 12px Inter, system-ui; border: 0; border-radius: 8px; padding: 5px 12px; cursor: pointer; background: #ea580c; color: #fff; }
 .door-sign::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -7px; border: 7px solid transparent; border-bottom: 0; border-top-color: #ea580c; }
+/* inline "are you sure?" (ask.js) */
+.ask { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 6px; }
+.ask .btn { padding: 4px 10px; }

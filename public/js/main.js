@@ -1,4 +1,5 @@
 import { W, H, ZONES, FURNITURE, DESKS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable, deskAt, applyWing, grid } from './map.js';
+import { ask } from './ask.js';
 import { summary as accessOf, describe as describeAccess } from './policy.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
@@ -386,7 +387,7 @@ function onMessage(m) {
       // An uploaded whiteboard's strokes.
       if (m.feed) {
         const b = boardFor(m.id);
-        if (m.feed.clear) b.clear(); else if (m.feed.push) b.add(m.feed.push);
+        if (m.feed.clear) b.clear(); else if (m.feed.set) b.set(m.feed.set); else if (m.feed.push) b.add(m.feed.push);
         if (modal.wb?.id === m.id) modal.wb.repaint();
       }
       if ('display' in m && modal.notesOpen === m.id) openNotes(FURNITURE.find((x) => x.id === m.id));
@@ -1246,7 +1247,7 @@ function openSign(roomId) {
     body.querySelector('.accept')?.addEventListener('click', (e) => net.send({ t: 'chan', op: 'accept', room: roomId, hash: e.target.dataset.hash }));
     body.querySelector('.knock')?.addEventListener('click', () => net.send({ t: 'chan', op: 'knock', room: roomId }));
     body.querySelector('.go')?.addEventListener('click', () => { modal.close(); walkToZone(ZONES.find((z) => z.id === roomId)); });
-    body.querySelector('.close-room')?.addEventListener('click', () => { if (confirm(`Close ${r.channel} for everyone? It stays closed until a moderator opens it again.`)) { net.send({ t: 'chan', op: 'close', name: r.channel }); modal.close(); } });
+    body.querySelector('.close-room')?.addEventListener('click', async (e) => { if (await ask(e.currentTarget, `Close ${r.channel} for everyone? It stays closed until a moderator opens it again.`, 'Close it')) { net.send({ t: 'chan', op: 'close', name: r.channel }); modal.close(); } });
     const form = body.querySelector('.access-form');
     if (form) {
       wireAccess(form);
@@ -1360,7 +1361,7 @@ function openProfile(p) {
   const modAct = async (op, extra = {}) => { const r = await modRequest(op, { to: p.id, ...extra }); if (r.error) toast(`⚠️ ${esc(r.error)}`); else modal.close(); };
   modal.body.querySelector('.act-mute')?.addEventListener('click', () => (p.muted > serverNow() ? modAct('unmute') : modAct('mute', { minutes: 10 })));
   modal.body.querySelector('.act-lobby')?.addEventListener('click', () => modAct('move', { place: 'lobby' }));
-  modal.body.querySelector('.act-kick')?.addEventListener('click', () => { if (confirm(`Send ${p.name} out of the office?`)) modAct('kick', { reason: prompt(`Why? ${p.name} sees this (optional)`) || undefined }); });
+  modal.body.querySelector('.act-kick')?.addEventListener('click', async (e) => { if (await ask(e.currentTarget, `Send ${p.name} out of the office?`, 'Kick')) modAct('kick', { reason: prompt(`Why? ${p.name} sees this (optional)`) || undefined }); });
   const give = modal.body.querySelector('.act-give'), pick = modal.body.querySelector('.give-pick');
   give?.addEventListener('click', () => {
     pick.hidden = !pick.hidden;
@@ -1663,12 +1664,12 @@ function bookingRow(b, now) {
 }
 
 function wireBookingRows(body) {
-  body.querySelectorAll('li[data-id] button').forEach((btn) => btn.addEventListener('click', () => {
+  body.querySelectorAll('li[data-id] button').forEach((btn) => btn.addEventListener('click', async () => {
     const id = btn.closest('li').dataset.id, act = btn.dataset.act;
     const b = bookings.find((x) => x.id === id);
     if (!b) return;
     if (act === 'go') { modal.close(); walkInto(roomById(b.room)); return; }
-    if (act === 'cancel' && !confirm(`Cancel “${b.title}”?`)) return;
+    if (act === 'cancel' && !(await ask(btn, `Cancel “${b.title}”?`, 'Cancel it'))) return;
     net.send({ t: 'book', op: act, id, minutes: 15 });
   }));
 }

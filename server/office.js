@@ -474,7 +474,11 @@ export class Office {
         else if (ROOMS.some((r) => panelOf(r.id) === name)) this.broadcast({ t: 'bookings', bookings: this.bookings });
         return;
       }
-      case 'uobj': return this.broadcast({ t: 'obj', id: parse(from).name, display: value?.display || null });
+      case 'uobj': {
+        const id = parse(from).name;
+        // A whole feed (refreshed after a wake): an uploaded whiteboard's strokes.
+        return this.broadcast({ t: 'obj', id, display: value?.display || null, ...(Array.isArray(value?.feed) ? { feed: { set: value.feed } } : {}) });
+      }
       case 'gallery': return this.broadcast({ t: 'gallery', items: this.gallery });
       case 'floor': return this.broadcast({ t: 'floor', items: this.floor });
       case 'wing': return this.layout(value);

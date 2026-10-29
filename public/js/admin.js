@@ -3,6 +3,7 @@
 // message answered with { t: 'modres' }; the World checks each one again
 // (Office.call), so this only hides buttons people can't use.
 
+import { ask } from './ask.js';
 import { ROLES, GRANTABLE, can, rank, roleBadge, grantError } from './roles.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -55,7 +56,7 @@ export function openAdmin(modal, { me, request, toast, fmtTime, zoneName }) {
     b.querySelectorAll('.adm-row button[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
       const p = online.find((x) => x.id === btn.closest('.adm-row').dataset.id);
       const act = btn.dataset.act;
-      if (act === 'kick' && !confirm(`Send ${p.name} out of the office?`)) return;
+      if (act === 'kick' && !(await ask(btn, `Send ${p.name} out of the office?`, 'Kick'))) return;
       const reason = act === 'kick' || act === 'mute' ? (prompt(`Why? ${p.name} sees this (optional)`) || undefined) : undefined;
       btn.disabled = true;
       const r = await request(act, { to: p.id, reason, ...(act === 'move' ? { place: 'lobby' } : {}), ...(act === 'mute' ? { minutes: 10 } : {}) });
@@ -64,7 +65,7 @@ export function openAdmin(modal, { me, request, toast, fmtTime, zoneName }) {
     }));
     b.querySelectorAll('.adm-role').forEach((sel) => sel.addEventListener('change', async () => {
       const role = sel.value;
-      if (role === 'banned' && !confirm('Ban them? They are sent out and kept out.')) return load();
+      if (role === 'banned' && !(await ask(sel, 'Ban them? They are sent out and kept out.', 'Ban'))) return load();
       const r = await request('grant', { to: sel.dataset.did, role });
       if (r.error) toast(`⚠️ ${esc(r.error)}`);
       load();

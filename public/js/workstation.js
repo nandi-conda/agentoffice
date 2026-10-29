@@ -8,6 +8,7 @@
 // { t: 'ws', ref, method, args } → { t: 'wsr', ref, result | error }.
 // On a phone every window is full screen and the desktop is the launcher.
 
+import { ask } from './ask.js';
 import { WS_APPS } from './apps.js';
 import { renderUi } from './objects.js';
 import { ROOMS, roomById, fmtTime, fmtRange, isHolder } from './rooms.js';
@@ -318,7 +319,7 @@ registerApp({
     body.querySelector('.ws-new').onclick = () => { show(null); title.focus(); };
     body.querySelector('.ws-del').onclick = async () => {
       if (!cur) return show(null);
-      if (!confirm(`Delete “${cur.title}”?`)) return;
+      if (!(await ask(body.querySelector('.ws-del'), `Delete “${cur.title}”?`, 'Delete'))) return;
       dirty = false; save.cancel();
       await ctx.call('noteDelete', cur.id).catch((e) => ctx.toast(e.message));
       cur = null;
