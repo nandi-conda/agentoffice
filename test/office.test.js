@@ -190,3 +190,18 @@ test('logic moves people through their actor: walking if in, kept if away', asyn
   const denied = await o.ref('actor:agent:bot').moveTo({ key: 'did:plc:someone', role: 'member' }, { place: 'lobby' });
   assert.match(denied.error, /moderators/);
 });
+
+test('a refresh puts a signed-in person back, even before the old tab has closed', async () => {
+  const o = new Office();
+  const auth = { did: 'did:plc:refresher' };
+  const a = await join(o, 'v', {}, auth);
+  await place(o, a, 20.5, 7.5);
+  await place(o, a, 22.5, 7.5); // stopped again within 2 s: not saved yet
+  const b = await join(o, 'v', {}, auth); // the old socket is still open
+  await settle();
+  const you = b.ws.last('welcome').you;
+  assert.deepEqual([you.x, you.y], [22.5, 7.5]);
+  b.ws.emit('close'); await settle();
+  const c = await join(o, 'v', {}, auth);
+  assert.deepEqual([c.ws.last('welcome').you.x, c.ws.last('welcome').you.y], [22.5, 7.5]);
+});

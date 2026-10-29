@@ -653,8 +653,12 @@ export class Office {
     // Back where they were last time (signed-in people and agents), else
     // at the door; either way not on top of whoever else is standing there.
     if (p.x === SPAWN.x && p.y === SPAWN.y) {
-      const back = this.canStand(arrival?.at, p) ? arrival.at : SPAWN;
-      const at = openSpot(back.x, back.y, [...this.peers.values()].filter((q) => q.ready && q !== p));
+      // A refresh opens the new tab before the old one closes: where the old
+      // one stands is newer than what the actor kept.
+      const older = p.did && [...this.peers.values()].find((q) => q !== p && q.ready && q.did === p.did && q.kind !== 'freeq');
+      const kept = older ? this.spotOf(older) : arrival?.at;
+      const back = this.canStand(kept, p) ? kept : SPAWN;
+      const at = openSpot(back.x, back.y, [...this.peers.values()].filter((q) => q.ready && q !== p && !(p.did && q.did === p.did)));
       p.x = at.x; p.y = at.y;
       if (back !== SPAWN) p.dir = (+back.dir || 0) | 0;
     }
