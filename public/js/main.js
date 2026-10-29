@@ -2082,7 +2082,9 @@ function stepMe(dt) {
     if (t && Math.hypot(t.x - me.x, t.y - me.y) > 1.6 && (!stepMe.lastFollow || performance.now() - stepMe.lastFollow > 700)) {
       stepMe.lastFollow = performance.now();
       const p = findPath(me.x, me.y, t.x, t.y);
-      if (p) { path = p.slice(1, -1); walkTarget = null; }
+      // Stop a tile short of them. Already next to them leaves nothing to walk,
+      // and an empty path would block every later repath.
+      if (p && p.length > 2) { path = p.slice(1, -1); walkTarget = null; }
     }
   }
   let reach = SPEED * dt;
