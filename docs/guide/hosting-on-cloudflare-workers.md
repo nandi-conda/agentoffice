@@ -22,6 +22,8 @@ saved to `$DATA_DIR/entities.json`):
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
 | `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
+| `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
+| `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `topic:<name>` | `TopicDO` | a pub/sub channel's subscribers |
 
 They talk to each other three ways (`server/entities/runtime.js`): direct RPC

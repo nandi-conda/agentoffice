@@ -13,8 +13,12 @@ server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
 server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
+server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
+server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
 plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
 public/js/objects.js    panels for plugin objects
+public/js/gallery.js    the upload panel, and uploaded objects on the map
+plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in

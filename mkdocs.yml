@@ -33,6 +33,7 @@ nav:
   - "Protocol": guide/protocol.md
   - "Layout": guide/layout.md
   - "Writing a plugin": plugins.md
+  - "Uploading your own objects": uploads.md
   - "API reference":
       - "Overview": api/index.md
       - "world (the World)": api/world.md
@@ -47,6 +48,8 @@ nav:
       - "coffee (CoffeeMachine)": api/coffee.md
       - "pomodoro (Pomodoro)": api/pomodoro.md
       - "plugin (PluginObject)": api/plugin.md
+      - "gallery (Gallery)": api/gallery.md
+      - "uobj (UploadedObject)": api/uobj.md
       - "plugin: Jukebox": api/plugin-jukebox.md
       - "plugin: Vending machine": api/plugin-vending.md
       - "plugin: Magic 8-ball": api/plugin-eightball.md

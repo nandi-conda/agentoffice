@@ -45,7 +45,7 @@ Send due reminders and announcements, release no-shows. Safe to call as often as
 | Param | Type | |
 | --- | --- | --- |
 | `opts` *(optional)* | `{ presence }` |  |
-| &nbsp;&nbsp;&nbsp;`opts.presence` | `{ id, key, name, handle?, did?, kind?, zone? }[]` | Who is in |
+| &nbsp;&nbsp;&nbsp;`opts.presence` | `{ id, key, name, handle?, did?, kind?, zone?, x?, y? }[]` | Who is in |
 
 ## Events
 

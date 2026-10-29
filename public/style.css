@@ -370,6 +370,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .gal-acts .btn { padding: 4px 10px; font-size: 13px; }
 .gal-form { display: grid; gap: 8px; }
 .gal-form label { display: grid; gap: 4px; }
-.gal-form .row { gap: 10px; flex-wrap: wrap; align-items: end; }
+.gal-form .row { display: grid; grid-template-columns: 5em 5em 1fr; gap: 10px; align-items: end; }
+.gal-form .row input, .gal-form .row select { height: 40px; box-sizing: border-box; width: 100%; }
+.gal-form .gal-glow { padding: 3px; cursor: pointer; }
 .gal-err { color: #b91c1c; margin: 0; }
 .obj-by { margin-top: 10px; }

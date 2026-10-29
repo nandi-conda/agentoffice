@@ -52,7 +52,7 @@ export function openGallery(modal, { me, items, request, toast, walkTo }) {
         <label class="small"><b>Prompt</b><input class="gal-prompt" maxlength="60" placeholder="Sign the guestbook"></label>
         <label class="small"><b>What it does</b><input class="gal-doc" maxlength="280" placeholder="Leave a note for the office"></label>
         <div class="row">
-          <label class="small"><b>Emoji</b><input class="gal-emoji" maxlength="8" value="🧩" style="width:4em"></label>
+          <label class="small"><b>Emoji</b><input class="gal-emoji" maxlength="8" value="🧩"></label>
           <label class="small"><b>Colour</b><input type="color" class="gal-glow" value="#a78bfa"></label>
           <label class="small"><b>Looks like</b><select class="gal-look">${Object.entries(LOOKS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
         </div>

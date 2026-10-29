@@ -98,6 +98,8 @@ saved to `$DATA_DIR/entities.json`):
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
 | `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
+| `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
+| `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `topic:<name>` | `TopicDO` | a pub/sub channel's subscribers |
 
 They talk to each other three ways (`server/entities/runtime.js`): direct RPC
@@ -183,6 +185,17 @@ state, a speech bubble, a label and a small panel. The example plugin is in
 binding is missing or fails, the object falls back to a built-in copy, so the
 office (and the Node server) works without it. Writing your own:
 [docs/plugins.md](docs/plugins.md).
+
+### Uploaded objects
+
+Signed-in people can upload a plugin of their own from the browser (**U**,
+or 🧩 in the toolbar) and drop it on the floor next to them: a WebAssembly
+module speaking a small JSON ABI, or on Cloudflare a JS module. It follows the
+same contract as the plugin Workers. Uploads never run inside the office: on
+Cloudflare each one is its own Dynamic Worker with no network (needs the
+Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
+limit. Only the uploader (or an admin in `ADMIN_DIDS`) can remove one. How it
+works and how to write one: [docs/uploads.md](docs/uploads.md).
 
 ### Talking
 
@@ -496,9 +509,9 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`, `use`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `error`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
@@ -525,8 +538,12 @@ server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
 server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
+server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
+server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
 plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
 public/js/objects.js    panels for plugin objects
+public/js/gallery.js    the upload panel, and uploaded objects on the map
+plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
 worker/entities.js      entities as Durable Objects
 server/mcp.js           MCP server (Streamable HTTP) putting AI agents in the office
 server/agentauth.js     DID proof for agents, Roost signup and sign-in

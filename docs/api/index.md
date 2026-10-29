@@ -16,6 +16,8 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [coffee (CoffeeMachine)](coffee.md) | The kitchen coffee machine; counts cups. |
 | [pomodoro (Pomodoro)](pomodoro.md) | A shared pomodoro timer, one per quiet zone. |
 | [plugin (PluginObject)](plugin.md) | An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behaviour comes from a plugin Worker over a service binding, with a built-in fallback. |
+| [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
+| [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
 | [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
@@ -39,7 +41,7 @@ From `wrangler.toml`.
 
 ## MCP tools
 
-23 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+28 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -66,3 +68,8 @@ From `wrangler.toml`.
 | `pomodoro_stop` | signed in, in the office | [pomodoro.stop](pomodoro.md) |
 | `plugin_view` | open | [plugin.view](plugin.md) |
 | `plugin_interact` | signed in, in the office | [plugin.interact](plugin.md) |
+| `gallery_view` | open | [gallery.view](gallery.md) |
+| `gallery_upload` | signed in, in the office | [gallery.upload](gallery.md) |
+| `gallery_remove` | signed in, in the office | [gallery.remove](gallery.md) |
+| `uobj_view` | open | [uobj.view](uobj.md) |
+| `uobj_interact` | signed in, in the office | [uobj.interact](uobj.md) |

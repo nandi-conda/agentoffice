@@ -5,9 +5,9 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`, `use`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `error`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
 `end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,

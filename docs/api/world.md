@@ -21,7 +21,7 @@ Carry out effects: { op: "mirror", value | push+max, except?, quiet? } (what the
 
 Who is in the office now.
 
-Returns `{ id, key, name, handle?, did?, kind?, zone? }[]`
+Returns `{ id, key, name, handle?, did?, kind?, zone?, x?, y? }[]`
 
 ## `deliver(key, msg)`
 

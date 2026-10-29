@@ -23,6 +23,17 @@ binding is missing or fails, the object falls back to a built-in copy, so the
 office (and the Node server) works without it. Writing your own:
 [docs/plugins.md](../plugins.md).
 
+## Uploaded objects
+
+Signed-in people can upload a plugin of their own from the browser (**U**,
+or 🧩 in the toolbar) and drop it on the floor next to them: a WebAssembly
+module speaking a small JSON ABI, or on Cloudflare a JS module. It follows the
+same contract as the plugin Workers. Uploads never run inside the office: on
+Cloudflare each one is its own Dynamic Worker with no network (needs the
+Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
+limit. Only the uploader (or an admin in `ADMIN_DIDS`) can remove one. How it
+works and how to write one: [docs/uploads.md](../uploads.md).
+
 ## Talking
 
 - **Proximity chat and voice.** In open areas you reach anyone within a few
