@@ -20,6 +20,13 @@ const newInstance = () => [...crypto.getRandomValues(new Uint8Array(4))].map((b)
 
 const pathOf = (session, nick, instance) => (instance ? `${session}/${nick}~${instance}` : `${session}/${nick}`);
 
+// H.264 (capped at 1080p) before `source` starts the encoder, as freeq's app
+// does: native freeq clients can't hardware-decode the AV1 browsers prefer.
+function pinH264(pub) {
+  const cfg = { codec: 'avc1', maxPixels: 1920 * 1080 };
+  try { pub.broadcast?.video?.hd?.config?.set(cfg); pub.broadcast?.video?.sd?.config?.set(cfg); } catch { /* older bundle */ }
+}
+
 export function createFreeqCall({ send, stage, onChange = () => {}, toast = () => {} }) {
   let zone = null;     // the bridged room we're standing in
   let talk = false;    // whether we want to be on its call (voice on, signed in)
@@ -27,7 +34,9 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
   let channel = null;
   let joined = null;   // { session, nick, instance, token } once freeq has us
   let joining = false;
-  let pub = null;      // our <moq-publish>
+  let pub = null;      // our <moq-publish> (mic, and camera when on)
+  let screenPub = null; // a second one for our screen: `{broadcast}/screen`, as freeq's app does
+  let screenOff = null; // unhooks the "Stop sharing" watch
   let cam = false, muted = false, deaf = false;
   const failed = new Set(); // rooms where joining failed: WebRTC there until we come back
   const watches = new Map(); // broadcast path -> { el, tile }
@@ -61,11 +70,52 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     pub.hidden = true;
     pub.setAttribute('url', dialUrl());
     pub.setAttribute('name', pathOf(joined.session, joined.nick, instance));
+    pinH264(pub);
     // `invisible` before `source`: audio only, so a busy camera can't sink the call.
     if (!cam) pub.setAttribute('invisible', '');
     if (muted) { pub.setAttribute('muted', ''); pub.muted = true; }
     pub.setAttribute('source', 'camera');
     stage.append(pub);
+  }
+
+  function stopScreen() {
+    screenOff?.(); screenOff = null;
+    if (!screenPub) return;
+    screenPub.removeAttribute('source');
+    screenPub.setAttribute('url', '');
+    screenPub.remove();
+    screenPub = null;
+  }
+
+  // Share our screen on its own broadcast, video only (muted before `source`
+  // so no tab audio goes out). `source="screen"` opens the browser's picker.
+  async function startScreen() {
+    stopScreen();
+    if (!joined || !navigator.mediaDevices?.getDisplayMedia) return false;
+    await loadMoq();
+    if (!joined) return false;
+    const el = screenPub = document.createElement('moq-publish');
+    el.hidden = true;
+    el.setAttribute('url', dialUrl());
+    el.setAttribute('name', `${pathOf(joined.session, joined.nick, instance)}/screen`);
+    pinH264(el);
+    el.setAttribute('muted', ''); el.muted = true;
+    stage.append(el);
+    el.setAttribute('source', 'screen');
+    // The capture shows up on el.video.source ({ video, audio } for screens);
+    // its track ending is the browser's own "Stop sharing" button.
+    let track = null, inner = null;
+    const ended = () => { if (screenPub === el) { stopScreen(); onChange(); } };
+    const outer = el.video?.subscribe?.((v) => {
+      inner?.(); inner = null;
+      inner = v?.source?.subscribe?.((val) => {
+        track?.removeEventListener('ended', ended);
+        track = val instanceof MediaStreamTrack ? val : val?.video || null;
+        track?.addEventListener('ended', ended);
+      });
+    });
+    screenOff = () => { inner?.(); outer?.(); track?.removeEventListener('ended', ended); };
+    return true;
   }
 
   // ---- watching -------------------------------------------------------------
@@ -74,6 +124,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     const w = watches.get(key);
     if (!w) return;
     // Pause first: removing the element alone keeps its audio playing.
+    w.off?.();
     w.el.paused = true;
     w.el.setAttribute('url', ''); w.el.setAttribute('name', '');
     w.tile.remove();
@@ -86,6 +137,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
       for (const r of call.roster || []) {
         if (r.instance === instance || (!r.instance && r.nick === joined.nick)) continue;
         want.set(pathOf(joined.session, r.nick, r.instance), r);
+        want.set(`${pathOf(joined.session, r.nick, r.instance)}/screen`, { ...r, screen: true });
       }
     }
     for (const key of [...watches.keys()]) if (!want.has(key)) dropWatch(key);
@@ -93,9 +145,12 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     for (const [key, r] of want) {
       if (watches.has(key) || !customElements.get('moq-watch')) continue;
       const tile = document.createElement('div');
-      tile.className = 'tile cam fq';
-      tile.innerHTML = '<span class="tag"></span>';
-      tile.querySelector('.tag').textContent = r.nick;
+      // A screen tile waits, nearly invisible but on screen (the watcher only
+      // runs while its canvas intersects), until that broadcast goes live.
+      tile.className = r.screen ? 'tile screen fq waiting' : 'tile cam fq';
+      tile.innerHTML = '<span class="tag"></span><button class="grow-btn" title="Enlarge">⤢</button>';
+      tile.querySelector('.grow-btn').onclick = () => tile.classList.toggle('big');
+      tile.querySelector('.tag').textContent = r.screen ? `${r.nick}'s screen` : r.nick;
       const el = document.createElement('moq-watch');
       // The watcher only decodes while its canvas is on screen, so the tile stays visible.
       el.append(document.createElement('canvas'));
@@ -106,7 +161,14 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
       el.setAttribute('name', key);
       tile.prepend(el);
       stage.append(tile);
-      watches.set(key, { el, tile });
+      const w = { el, tile, off: null };
+      if (r.screen) {
+        const status = el.broadcast?.status;
+        const show = (st) => { tile.classList.toggle('waiting', st !== 'live'); onChange(); };
+        show(status?.peek?.());
+        w.off = status?.subscribe?.(show) || null;
+      }
+      watches.set(key, w);
     }
     paintHead();
   }
@@ -135,7 +197,7 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
   function leave() {
     if (joined || joining) send({ t: 'fq-call', op: 'leave' });
     joined = null; joining = false;
-    stopPublish();
+    stopPublish(); stopScreen();
     for (const key of [...watches.keys()]) dropWatch(key);
     paintHead();
     instance = newInstance();
@@ -169,8 +231,8 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
       if (first) toast(`📞 You're on ${esc(channel)}'s call, shared with people on freeq.`, [], 4000);
       startPublish().catch(() => { toast('📞 Couldn\'t start publishing to the freeq call.'); leave(); failed.add(zone); });
     }
-    if (m.dropped && joined) { joined = null; stopPublish(); }
-    if (joined && call?.session && call.session !== joined.session) { joined = null; stopPublish(); }
+    if (m.dropped && joined) { joined = null; stopPublish(); stopScreen(); }
+    if (joined && call?.session && call.session !== joined.session) { joined = null; stopPublish(); stopScreen(); }
     syncWatches();
     onChange();
   }
@@ -191,6 +253,8 @@ export function createFreeqCall({ send, stage, onChange = () => {}, toast = () =
     // The camera goes out on the same broadcast; changing it re-announces.
     async setCam(on) { cam = on; if (joined) await startPublish(); onChange(); },
     get cam() { return cam && !!joined; },
+    async setScreen(on) { const ok = on ? await startScreen() : (stopScreen(), true); onChange(); return ok; },
+    get screen() { return !!screenPub; },
     get joined() { return !!joined; },
     get tiles() { return !!head; },
     get zone() { return zone; },

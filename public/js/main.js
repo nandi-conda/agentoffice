@@ -1504,6 +1504,11 @@ async function toggleCam() {
   if (!(await voice.startCam())) toast('📷 Camera permission was blocked. Allow it in your browser to turn it on.');
 }
 async function toggleShare() {
+  // On a freeq call the screen goes out as its own freeq broadcast.
+  if (!zoneAt(me.x, me.y)?.av && fqCall.joined) {
+    if (!(await fqCall.setScreen(!fqCall.screen))) toast('🖥️ Screen sharing isn\'t available in this browser.');
+    return;
+  }
   if (voice.screen) return voice.stopScreen();
   await ensureVoice();
   if (!(await voice.startScreen())) toast('🖥️ Screen sharing was cancelled or blocked.');
@@ -1529,7 +1534,11 @@ const fqCall = createFreeqCall({
   send: (m) => net.send(m), stage, toast,
   onChange: () => {
     const z = me && zoneAt(me.x, me.y);
-    if (!z?.av) { camBtn.hidden = !fqCall.joined; shareBtn.hidden = true; camBtn.classList.toggle('on', fqCall.cam); }
+    if (!z?.av) {
+      camBtn.hidden = shareBtn.hidden = !fqCall.joined;
+      camBtn.classList.toggle('on', fqCall.cam);
+      shareBtn.classList.toggle('on', fqCall.screen);
+    }
     updateStage();
   },
 });
@@ -1902,7 +1911,7 @@ function zoneChanged(z, freeqOnly = false) {
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
   // Camera and screen share belong to A/V rooms; they stop at the door.
   camBtn.hidden = shareBtn.hidden = !z?.av;
-  if (!z?.av && fqCall.joined) camBtn.hidden = false;
+  if (!z?.av && fqCall.joined) camBtn.hidden = shareBtn.hidden = false;
   if (!z?.av && voice.cam) voice.stopCam();
   if (!z?.av && voice.screen && !atDesk()) voice.stopScreen();
   if (z?.av && !avHinted) { avHinted = true; toast(`🎥 ${esc(z.name)} is an A/V room: turn on your camera or share your screen with everyone in here.`, [['Camera', toggleCam], ['Share screen', toggleShare]], 7000); }

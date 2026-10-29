@@ -215,7 +215,10 @@ freeq's media server at `wss://irc.freeq.at/av/moq` (MoQ, Media over QUIC,
 here over WebSocket), with the same `<moq-publish>` / `<moq-watch>` builds
 freeq's web app uses (`public/vendor/moq/`). Who's on the call comes from
 `GET /api/v1/sessions/{id}` and shows as tiles at the top left. The camera
-button turns your camera on in the call; screen share stays an A/V-room thing.
+button turns your camera on in the call, and **Share screen** publishes your
+screen as a second broadcast, `{session}/{nick}~{instance}/screen` (video
+only, H.264), the same way freeq's app does, so freeq's clients see it too.
+Someone's screen shows up as a large tile once their broadcast goes live.
 
 The office never depends on it: guests, rooms freeq isn't bridging right now,
 and any join that fails use the office's own WebRTC voice (with TURN when
