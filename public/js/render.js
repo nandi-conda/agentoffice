@@ -1042,9 +1042,12 @@ export function createRenderer(canvas) {
   let promptAt = null;
   function placePrompt(st) {
     promptAt = null;
-    const f = st.target, size = st.promptSize;
+    let f = st.promptTarget, size = st.promptSize;
     if (!f || !size?.w) return;
-    const top = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - (f.type === 'jukebox' ? 0.6 : 0.1));
+    // Sitting at a desk, the prompt (use the computer) belongs on the monitor, not the chair.
+    if (f.desk) f = FURNITURE.find((d) => d.id === f.desk && d.type === 'desk') || f;
+    const lift = f.type === 'jukebox' ? 0.6 : f.type === 'desk' ? 0.75 : 0.1;
+    const top = toScreen(f.x + f.w / 2, f.y + f.h - (HEIGHTS[f.type] ?? 0.5) - lift);
     const x = Math.max(6, Math.min(vw - size.w - 6, top.x - size.w / 2));
     const y = Math.max(6, Math.min(vh - size.h - 6, top.y - size.h - 10));
     placed.push({ x, y, w: size.w, h: size.h + 8 });

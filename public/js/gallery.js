@@ -114,6 +114,6 @@ export function openGallery(modal, { me, items, request, toast, walkTo }) {
     });
     if (r.error) { err(r.error); e.target.disabled = false; e.target.textContent = 'Place it next to me'; return; }
     modal.close();
-    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is on the floor next to you. Press E to try it.`);
+    toast(`${esc(r.object.emoji)} <b>${esc(r.object.name)}</b> is on the floor next to you.`);
   });
 }

@@ -1204,7 +1204,6 @@ function interact(f) {
       const c = desks[seat.desk];
       if (!c) openClaim(seat.desk);
       else if (c.owner === ownerKey()) net.send({ t: 'desk', action: 'claim', desk: seat.desk, goal: c.goal });
-      if (c) toast(`💻 ${coarse ? 'Tap' : 'Press <kbd>E</kbd>'} to use the computer.`, [['Use it', openStation]], 5000);
     }
     return;
   }
@@ -1241,7 +1240,6 @@ function openClaim(deskId) {
     net.send({ t: 'desk', action: 'claim', desk: deskId, goal: goal.value });
     if (goal.value !== me.note) { me.note = goal.value; net.send({ t: 'status', note: goal.value }); setStatusUI(); }
     modal.close();
-    toast(`💻 ${coarse ? 'Tap' : 'Press <kbd>E</kbd>'} to use the computer.`, [['Use it', openStation]], 5000);
   };
   modal.body.querySelector('.claim').addEventListener('click', claim);
   goal.addEventListener('keydown', (e) => { if (e.key === 'Enter') claim(); });
@@ -2001,7 +1999,7 @@ function loop(t) {
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
       target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, place, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
-      promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null,
+      promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null, promptTarget: label ? target : null,
     });
     // The prompt rides on the object it's about; without a spot it waits at the bottom of the map.
     const at = label && R.promptAt;
