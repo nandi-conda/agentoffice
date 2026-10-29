@@ -32,6 +32,7 @@ const MAX_PEOPLE = 12; // freeq people drawn per area
 const REFRESH_MS = 5 * 60 * 1000;
 const IDLE_CLOSE_MS = 2 * 60 * 1000; // listener hangs up this long after the office empties
 const USER_IDLE_MS = 30 * 60 * 1000;
+const MAX_GUESTS = 16; // guest connections open at once
 const SIGN_IN_MS = 20 * 1000; // give up on a listener sign-in freeq doesn't finish
 // After a restart or a dropped listener, people stay drawn this long while
 // freeq is asked who's really still there; then whoever wasn't confirmed goes.
@@ -222,11 +223,12 @@ export class IrcClient {
         if (sub === 'LS') {
           // Multi-line LS has "*" before the list; act on the last one.
           if (m.params[2] === '*') return;
-          const want = ['sasl', 'message-tags', 'account-tag', 'extended-join', 'server-time'].filter((c) => new RegExp(`(^| )${c}(=| |$)`).test(last));
-          if (!want.includes('sasl')) return this.finish('freeq offered no SASL');
-          return this.send(`CAP REQ :${want.join(' ')}`);
+          // No `respond` means a guest: freeq lets those in without SASL.
+          const want = [...(this.respond ? ['sasl'] : []), 'message-tags', 'account-tag', 'extended-join', 'server-time'].filter((c) => new RegExp(`(^| )${c}(=| |$)`).test(last));
+          if (this.respond && !want.includes('sasl')) return this.finish('freeq offered no SASL');
+          return this.send(want.length ? `CAP REQ :${want.join(' ')}` : 'CAP END');
         }
-        if (sub === 'ACK' && /(^| )sasl( |$)/.test(last)) return this.send('AUTHENTICATE ATPROTO-CHALLENGE');
+        if (sub === 'ACK') return this.send(this.respond && /(^| )sasl( |$)/.test(last) ? 'AUTHENTICATE ATPROTO-CHALLENGE' : 'CAP END');
         if (sub === 'NAK') return this.finish(`freeq refused capabilities: ${last}`);
         return;
       }
@@ -927,7 +929,11 @@ export class FreeqBridge {
   async relay(p, zoneId, text, reply = null) {
     const b = this.bindings.get(zoneId);
     if (!b) return null;
-    if (p.kind === 'human' ? !p.did : p.kind !== 'agent') return `Only signed-in people and agents can talk on freeq; this stayed in the office.`;
+    if (p.kind !== 'human' && p.kind !== 'agent') return null;
+    if (this.isGuest(p)) {
+      const no = await this.guestsBarred(b.channel, this.keyOf(p));
+      if (no) return `${no}; this stayed in the office.`;
+    }
     try {
       const u = await this.userConnection(p);
       u.used = Date.now();
@@ -947,8 +953,27 @@ export class FreeqBridge {
     for (const q of this.office.peers.values()) if (q.kind !== 'freeq' && this.keyOf(q) === key) this.office.sendTo(q, { t: 'freeq-note', text, ok });
   }
 
-  // Whose freeq connection a peer uses: their DID, or agent:<name> for agents without one.
-  keyOf(p) { return p.did || `agent:${p.name}`; }
+  // Whose freeq connection a peer uses: their DID, agent:<name> for agents
+  // without one, guest:<peer id> for people who haven't signed in.
+  keyOf(p) { return p.did || (p.kind === 'agent' ? `agent:${p.name}` : `guest:${p.id}`); }
+
+  // ---- guests on freeq --------------------------------------------------------
+  //
+  // People who haven't signed in talk on freeq the way freeq's own guests do:
+  // a connection of their own with no SASL, under the name they gave. freeq
+  // only lets guests into channels without an access policy (its JOIN answers
+  // 477 otherwise) and the server can refuse guests altogether; both come back
+  // to the speaker as a note.
+
+  isGuest(p) { return p.kind === 'human' && !p.did; }
+
+  // Why guests can't talk in a channel, or null when they can.
+  async guestsBarred(channel, key) {
+    if (await this.policyFor(channel)) return `${channel} has an access policy on freeq, so only signed-in people can talk there`;
+    const guests = [...this.users.keys()].filter((k) => k.startsWith('guest:')).length;
+    if (!this.users.has(key) && guests >= MAX_GUESTS) return `Too many guests are talking on freeq right now; sign in to talk there`;
+    return null;
+  }
 
   // An agent that signed in with a bearer token (MCP Authorization header or
   // roost_sign_in) talks on freeq as its own DID with it (method pds-session).
@@ -968,6 +993,7 @@ export class FreeqBridge {
   // with their token, else a did:key of their own derived from the office's
   // key and their identity (so it's the same one every time).
   async responderFor(p, key) {
+    if (this.isGuest(p)) return { respond: null, as: null };
     if (p.kind === 'human') {
       if (!this.auth?.freeqCredentials) throw new Error('sign-in tokens are not available');
       const creds = (nonce) => this.auth.freeqCredentials(p.did, nonce);
@@ -1025,7 +1051,8 @@ export class FreeqBridge {
     try {
       const who = await u.ready;
       this.dedupe();
-      this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== as ? ` (freeq says you're ${who.did}, not ${as})` : as !== p.did ? ` (${as})` : ''}.`, true);
+      if (!as) this.notify(did, `Talking on freeq as ${who.nick}, a guest; sign in to talk as yourself.`, true);
+      else this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== as ? ` (freeq says you're ${who.did}, not ${as})` : as !== p.did ? ` (${as})` : ''}.`, true);
     } catch (e) {
       this.users.delete(did);
       irc.close('sign-in failed');

@@ -384,8 +384,15 @@ When you're signed in, what you say in a channel's room goes to the channel
 **as you**: the server opens an IRC connection for you and signs in with
 SASL `ATPROTO-CHALLENGE`, method `pds-oauth`, i.e. the access token from your
 office sign-in plus a DPoP proof for your PDS's `getSession`, which freeq
-checks with your PDS. Guests can listen but stay local. If you
-signed in before this existed, sign out and in again.
+checks with your PDS. If you signed in before this existed, sign out and in
+again.
+
+Guests (people who haven't signed in) talk on freeq the way freeq's own
+guests do: the server opens a connection for them without SASL, under the
+name they walked in with. freeq only lets guests into channels that have no
+access policy, so in a policy-gated room (#freeq, for one) a guest's chat
+stays in the office and they're told to sign in. At most 16 guest
+connections are open at once.
 
 Agents talk on freeq too. One that signed in with a bearer token (an MCP
 `Authorization: Bearer rmcp_…` header, or `roost_sign_in`) does so as its own

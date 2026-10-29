@@ -45,8 +45,9 @@ function fakeFreeq({ verify }) {
         const m = parseLine(line);
         if (m.command === 'CAP' && m.params[0] === 'LS') return out(':irc.freeq.at CAP * LS :sasl=ATPROTO-CHALLENGE message-tags account-tag extended-join');
         if (m.command === 'CAP' && m.params[0] === 'REQ') return out(`:irc.freeq.at CAP * ACK :${m.params[1]}`);
-        if (m.command === 'CAP' && m.params[0] === 'END') return out(`:irc.freeq.at 001 ${c.nick} :Welcome`);
-        if (m.command === 'NICK') { c.nick = m.params[0]; return; }
+        // Registration finishes once both CAP END and NICK are in.
+        if (m.command === 'CAP' && m.params[0] === 'END') { c.capEnd = true; return c.nick && out(`:irc.freeq.at 001 ${c.nick} :Welcome`); }
+        if (m.command === 'NICK') { const first = !c.nick; c.nick = m.params[0]; return first && c.capEnd && out(`:irc.freeq.at 001 ${c.nick} :Welcome`); }
         if (m.command === 'AUTHENTICATE' && m.params[0] === 'ATPROTO-CHALLENGE') {
           challenge = enc.encode(JSON.stringify({ session_id: 's1', nonce: 'n' + Math.random(), timestamp: 1 }));
           return out(`AUTHENTICATE ${b64url(challenge)}`);
@@ -285,14 +286,14 @@ test('populated channels get their own rooms off the hallway, and talk flows bot
   for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('odd one')); i++) await tick();
   assert.ok(!bobGot.find((l) => l.includes('odd one')).includes('draft/reply'));
 
-  // Guests stay local and are told why.
-  const gsaid = [];
-  const guest = office.open({ readyState: 1, send: (s) => gsaid.push(JSON.parse(s)) });
+  // Guests talk there too (#general has no access policy), as freeq guests.
+  const guest = office.open({ readyState: 1, send: () => {} });
   await office.handle(guest, { t: 'hello', name: 'Gus' });
   stand(guest, 'ch-general');
   await office.handle(guest, { t: 'chat', text: 'can anyone hear me' });
-  await tick();
-  assert.ok(gsaid.some((m) => m.t === 'freeq-note' && /signed-in/.test(m.text)));
+  for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('can anyone hear me')); i++) await tick();
+  assert.ok(bobGot.some((l) => /account=null.*:Gus!u@h PRIVMSG #general :can anyone hear me/.test(l)));
+  office.leave(guest);
 
   // Everyone leaves: the person's connection hangs up.
   office.leave(me);
@@ -734,5 +735,52 @@ test('with nobody on the call, joining starts one; guests can\'t join', async ()
   // Last one out ends it.
   await office.handle(me, { t: 'fq-call', op: 'leave' });
   assert.equal(server.sessions.size, 0);
+  bridge.stop();
+});
+
+test('guests talk on freeq as freeq guests where the channel has no access policy', async () => {
+  const server = fakeFreeq({ verify: async () => true });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const list = server.fetch([{ name: '#general', members: 3 }, { name: '#gated', members: 3 }]);
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async (url) => /\/policy\/%23gated$/.test(String(url))
+      ? new Response(JSON.stringify({ policy: { version: 1, requirements: { type: 'OPEN' } } }))
+      : /\/policy\//.test(String(url)) ? new Response('no policy', { status: 404 }) : list(url),
+  });
+  const bob = server.outsider('bob', 'did:plc:bob');
+  bob.join('#general'); bob.join('#gated');
+  const bobGot = [];
+  [...server.conns].find((c) => c.nick === 'bob').out = (l) => bobGot.push(l);
+  const said = [];
+  const guest = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) });
+  await office.handle(guest, { t: 'hello', name: 'Gus' });
+  await bridge.start();
+  await tick();
+  const until = async (f) => { for (let i = 0; i < 100 && !f(); i++) await tick(); return f(); };
+
+  stand(guest, 'ch-general');
+  await office.handle(guest, { t: 'chat', text: 'hi from a guest' });
+  assert.ok(await until(() => bobGot.some((l) => /account=null.*:Gus!u@h PRIVMSG #general :hi from a guest/.test(l))));
+  // No SASL on a guest's connection.
+  const conn = [...server.conns].find((c) => c.nick === 'Gus');
+  assert.equal(conn.account, null);
+  assert.ok(said.some((m) => m.t === 'freeq-note' && m.ok && /as Gus, a guest/.test(m.text)));
+  // Their own line doesn't come back as someone else.
+  assert.ok(![...office.peers.values()].some((q) => q.kind === 'freeq' && q.name === 'Gus'));
+
+  // A channel with an access policy: freeq wouldn't let a guest in, so it stays here.
+  said.length = 0;
+  stand(guest, 'ch-gated');
+  await office.handle(guest, { t: 'chat', text: 'can I talk here' });
+  assert.ok(await until(() => said.some((m) => m.t === 'freeq-note')));
+  assert.match(said.find((m) => m.t === 'freeq-note').text, /#gated has an access policy.*stayed in the office/);
+  assert.ok(!bobGot.some((l) => l.includes('can I talk here')));
+
+  office.leave(guest);
+  assert.ok(![...bridge.users.keys()].some((k) => k.startsWith('guest:')));
   bridge.stop();
 });
