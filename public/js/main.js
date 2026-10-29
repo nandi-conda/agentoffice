@@ -13,7 +13,7 @@ import { createWorkstation, registerApp } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
-import { label as itemLabel, placeTiles, holdsKey } from './items.js';
+import { label as itemLabel, placeTiles, holdsKey, GIVE_RANGE } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, restrictedAt, doorTiles, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 import { fmtHour, fmtClock, localize } from './time.js';
 import { can, rank, roleBadge, ROLES } from './roles.js';
@@ -1316,7 +1316,9 @@ function openProfile(p) {
           <button class="btn act-walk">Walk over</button>
           <button class="btn ghost act-follow">${follow === p.id ? 'Stop following' : 'Follow'}</button>
           <button class="btn ghost act-mention">@ Mention</button>
-        </div>` : ''}
+          ${p.kind !== 'freeq' ? '<button class="btn ghost act-give" aria-expanded="false">🎁 Give item</button>' : ''}
+        </div>
+        <div class="give-pick" hidden></div>` : ''}
         ${p !== me && p.kind !== 'freeq' && can(me.role, 'people.kick') && (me.role === 'owner' || rank(p.role) < rank(me.role)) ? `<div class="row mod-row">
           <button class="btn ghost act-mute">${p.muted > serverNow() ? '🔊 Unmute' : '🔇 Mute 10 min'}</button>
           <button class="btn ghost act-lobby">🛡️ To lobby</button>
@@ -1339,6 +1341,21 @@ function openProfile(p) {
   modal.body.querySelector('.act-mute')?.addEventListener('click', () => (p.muted > serverNow() ? modAct('unmute') : modAct('mute', { minutes: 10 })));
   modal.body.querySelector('.act-lobby')?.addEventListener('click', () => modAct('move', { place: 'lobby' }));
   modal.body.querySelector('.act-kick')?.addEventListener('click', () => { if (confirm(`Send ${p.name} out of the office?`)) modAct('kick', { reason: prompt(`Why? ${p.name} sees this (optional)`) || undefined }); });
+  const give = modal.body.querySelector('.act-give'), pick = modal.body.querySelector('.give-pick');
+  give?.addEventListener('click', () => {
+    pick.hidden = !pick.hidden;
+    give.setAttribute('aria-expanded', String(!pick.hidden));
+    if (pick.hidden) return;
+    pick.innerHTML = items.length
+      ? `<span class="muted small">Give ${esc(p.name)}</span>${items.map((s) => `<button class="btn ghost give-item" data-id="${esc(s.id)}"><span aria-hidden="true">${esc(s.emoji)}</span> ${esc(s.name)}${s.qty > 1 ? ` <span class="muted">×${s.qty}</span>` : ''}</button>`).join('')}`
+      : '<span class="muted small">You\'re not carrying anything. Grab a coffee in the Kitchen or a snack from the vending machine first.</span>';
+    pick.querySelectorAll('.give-item').forEach((b) => b.addEventListener('click', () => {
+      modal.close();
+      // Close enough already: hand it over. Otherwise walk up and give on arrival.
+      if (Math.hypot(p.x - me.x, p.y - me.y) <= GIVE_RANGE) giveTo(p.id, b.dataset.id);
+      else walkTo(p.x, p.y, { giveTo: p.id, item: b.dataset.id });
+    }));
+  });
   modal.body.querySelector('.act-mention')?.addEventListener('click', () => {
     modal.close();
     chatIn.value = `@${(p.handle || p.name).replace(/\s+/g, '')} `;
@@ -1375,8 +1392,19 @@ function promptFor(f) {
   return null;
 }
 
+// Hand a stack to someone (the profile's Give item). The server checks the
+// range too; this just explains it when they wandered off meanwhile.
+function giveTo(to, id) {
+  const p = peers.get(to);
+  if (!p) return toast('They left the office.', [], 3000);
+  if (!items.some((s) => s.id === id)) return;
+  if (Math.hypot(p.x - me.x, p.y - me.y) > GIVE_RANGE) return toast(`${esc(p.name)} walked off. Catch up and try again.`, [], 3000);
+  net.send({ t: 'inv', op: 'give', id, to });
+}
+
 function interact(f) {
   if (!f) return;
+  if (f.giveTo) return giveTo(f.giveTo, f.item);
   if (f.floorItem) return net.send({ t: 'inv', op: 'pickup', id: f.floorItem });
   if (f.desk) {
     // The desk computer works from the chair spot: step onto it first.

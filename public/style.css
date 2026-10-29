@@ -315,6 +315,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .profile .bio { white-space: pre-line; overflow-wrap: anywhere; }
 .profile .bio.art { white-space: pre; overflow-wrap: normal; overflow-x: auto; font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 11px; line-height: 1.15; color: var(--ink); }
 .profile > div { min-width: 0; }
+.profile .give-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.profile .give-pick > .muted { align-self: center; flex-basis: 100%; }
 .profile .stat b { display: block; font-size: 14px; }
 
 .help-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }
