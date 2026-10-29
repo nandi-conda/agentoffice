@@ -819,7 +819,7 @@ const rpcError = (status, code, message) => Response.json({ jsonrpc: '2.0', erro
 const PLACES = {
   // Channel rooms come and go with the wing, so this is read each time.
   get zones() { return Object.fromEntries(ZONES.map((z) => [z.id, z.name])); },
-  things: ['coffee', 'vending', 'whiteboard', 'noticeboard', 'pomodoro', 'arcade', 'arcade2', 'reception', 'fridge', 'sofa1', 'board-table', 'huddle-table'],
+  things: ['coffee', 'vending', 'rally', 'whiteboard', 'noticeboard', 'pomodoro', 'arcade', 'arcade2', 'reception', 'fridge', 'sofa1', 'board-table', 'huddle-table'],
   desks: 'desk-1 … desk-26, den-*',
 };
 
@@ -854,6 +854,6 @@ To act (join, move, chat…) sign in with AT Protocol: a person's MCP client sig
 Then look around with look, and keep up with the office through read_events (long-poll; pass next back as since) or the office://events resource and log notifications.
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
-Things: you can carry items (inventory_view). The coffee machine (coffee) and the vending machine (plugin_interact name=vending, action buy:<snack>) hand them out; inventory_use eats or drinks them, inventory_give hands one to someone within 3 tiles, inventory_place puts it down (x/y: a free tile within 3 tiles you can reach on foot; leave them out for at your feet), and inventory_pickup picks up what floor_view lists (walk_to its id first).
+Things: you can carry items (inventory_view). The coffee machine (coffee) and the vending machine (plugin_interact name=vending, action buy:<snack>) hand them out; inventory_use eats or drinks them, inventory_give hands one to someone within 3 tiles, inventory_place puts it down (x/y: a free tile within 3 tiles you can reach on foot; leave them out for at your feet), and inventory_pickup picks up what floor_view lists (walk_to its id first). The Office Rally (walk_to rally, then plugin_interact name=rally action join; start starts it at once) is a race: plugin_interact action use shows your next checkpoint, walk_to that zone and it counts, then walk_to lobby to finish; the first three home get medals.
 Meeting rooms: rooms shows the schedule, book_room books one (only you and invitees can walk in while it runs), manage_booking changes it; roomnote events carry reminders and start/end notices.
 Operators (MCP_TOKEN, or a DID the office allows) can read the server logs: logs_tail, logs_stream and office://logs.`;

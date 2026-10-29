@@ -25,7 +25,7 @@ const FLOORS = {
 const HEIGHTS = {
   desk: 0.5, chair: 0.32, stool: 0.3, table: 0.5, roundtable: 0.5, sofa: 0.45, counter: 0.7,
   coffee: 0.95, fridge: 1.45, bookshelf: 1.5, arcade: 1.35, plant: 0.4, whiteboard: 1.25,
-  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
+  reception: 0.8, pomodoro: 1.5, sign: 0.9, jukebox: 1.3, vending: 1.6, eightball: 0.95, kiosk: 1.35, rally: 1.5, upload: 0.95, screen: 1.2, panel: 0.5, board: 1.3, coffeetable: 0.3, beanbag: 0.35, rug: 0,
 };
 
 export function createRenderer(canvas) {
@@ -241,6 +241,7 @@ export function createRenderer(canvas) {
       case 'vending': return drawVending(f, st);
       case 'eightball': return drawEightBall(f, st);
       case 'kiosk': return drawKiosk(f, st);
+      case 'rally': return drawRally(f, st);
       case 'upload': return drawUpload(f, st);
       case 'whiteboard': return drawWhiteboard(f, st);
       case 'board': return drawNoticeboard(f, st);
@@ -606,6 +607,27 @@ export function createRenderer(canvas) {
     for (const ex of [0.36, 0.64]) ctx.fillRect(S(x + ex - 0.04), S(fy + 0.2), S(0.08), S(blink ? 0.02 : 0.1));
     ctx.beginPath(); ctx.arc(S(x + 0.5), S(fy + 0.36), S(0.1), 0.1 * Math.PI, 0.9 * Math.PI); ctx.lineWidth = Math.max(1, S(0.03)); ctx.strokeStyle = '#0f172a'; ctx.stroke();
     st.lights.push({ x: x + 0.5, y: y + 0.9, r: 1.2, c: 'rgba(34,211,238,0.35)' });
+  }
+
+  // The Office Rally flag: a chequered flag on a pole that waves faster
+  // (and glows) while a race is gathering or on.
+  function drawRally(f, st) {
+    const { x, y } = f;
+    const hgt = HEIGHTS.rally;
+    const glow = objGlow(f, st, '#f59e0b');
+    const live = !!st.objects?.[f.id]?.display?.label;
+    ellipse(x + 0.5, y + 0.9, 0.28, 0.1, '#57534e');
+    ctx.fillStyle = '#78716c'; ctx.fillRect(S(x + 0.27), S(y + 0.9 - hgt), S(0.06), S(hgt));
+    const top = y + 0.9 - hgt + 0.04;
+    const t = st.time / (live ? 140 : 420);
+    // 4 x 3 chequers, each column bent by the wave.
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) {
+      const dy = 0.04 * Math.sin(t + c * 0.9);
+      ctx.fillStyle = (c + r) % 2 ? '#111827' : '#f8fafc';
+      ctx.fillRect(S(x + 0.33 + c * 0.13), S(top + r * 0.12 + dy), S(0.13) + 0.5, S(0.12) + 0.5);
+    }
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(S(x + 0.3), S(top - 0.04), S(0.06), 0, 7); ctx.fill();
+    if (live) st.lights.push({ x: x + 0.5, y: y + 0.6, r: 1.4, c: 'rgba(245,158,11,0.35)' });
   }
 
   // An uploaded object (gallery.js): a plinth with its emoji floating over it.

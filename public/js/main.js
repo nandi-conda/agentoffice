@@ -381,7 +381,8 @@ function onMessage(m) {
     case 'galleryres': galleryWait.get(m.rid)?.(m.result || {}); galleryWait.delete(m.rid); break;
     case 'objui': {
       if (m.toast) toast(esc(m.toast));
-      if (modal.obj?.id !== m.id) break;
+      // No ui at all: a nudge from an object you're not using (the rally saw you arrive).
+      if (modal.obj?.id !== m.id || !('ui' in m)) break;
       if (m.ui) modal.obj.show(m.ui); else if (m.toast && !modal.body.querySelector('button')) modal.close(); else modal.obj.idle();
       break;
     }

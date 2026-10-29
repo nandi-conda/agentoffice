@@ -4,7 +4,7 @@ An interactive object (jukebox, vending machine, 8-ball, kiosk…) whose behavio
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 4: `kiosk`, `vending`, `jukebox`, `eightball`
+- 5: `kiosk`, `rally`, `vending`, `jukebox`, `eightball`
 
 ## `view()`
 
@@ -27,3 +27,7 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 | &nbsp;&nbsp;&nbsp;`req.input` *(optional)* | `string \| null` | Typed text |
 
 Returns `object | null`
+
+## Events
+
+- subscribes `zone:<id>`: enter / exit, for the zones its plugin asked to watch (answer `watch`): calls the plugin with action `enter:<zone>` / `exit:<zone>` as that person

@@ -145,6 +145,7 @@ export class Gallery extends Entity {
 
 export class UploadedObject extends PluginObject {
   static rpc = [];
+  static events = {}; // uploads can't watch zones
   static doc = 'An object someone uploaded (gallery:main lists them). Its plugin runs in the sandbox: a Dynamic Worker on Cloudflare, a worker thread on Node. Same contract and panel as the built-in plugin objects.';
   static api = {
     view: PluginObject.api.view,

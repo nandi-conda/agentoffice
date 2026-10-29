@@ -24,15 +24,21 @@ export class PluginObject extends Entity {
       doc: 'Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.',
       who: true,
       params: { req: obj({ action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
-      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, via }: what the plugin answered (give: items it handed you, take: things of yours it used up); null when called again within 400 ms' },
+      returns: { type: ['object', 'null'], description: '{ ui, say, toast, display, give, take, watch, via }: what the plugin answered (give: items it handed you, take: things of yours it used up, watch: the zones it now follows); null when called again within 400 ms' },
       mutates: true,
       near: 3,
     },
   };
 
+  static events = { subscribes: { 'zone:<id>': 'enter / exit, for the zones its plugin asked to watch (answer `watch`): calls the plugin with action `enter:<zone>` / `exit:<zone>` as that person' } };
+
   constructor(host) {
     super(host);
     this.lastUse = new Map(); // actor id -> time, against button mashing
+    // One plugin call at a time: a Durable Object lets other calls in while
+    // this one waits on the plugin, and two turns at once would each start
+    // from the same state and the second would undo the first.
+    this.queue = Promise.resolve();
   }
 
   get object() { return PLUGIN_OBJECTS.find((f) => f.id === this.name); }
@@ -61,7 +67,32 @@ export class PluginObject extends Entity {
     await this.run(SYSTEM, 'tick', null);
   }
 
-  async run(who, action, input) {
+  // Someone walked into or out of a zone the plugin asked to watch: call it
+  // as that person with action `enter:<zone>` / `exit:<zone>`. It can answer
+  // with a toast for them, say something, change its display, or hand them
+  // things, but no panel opens.
+  async onEvent(topic, ev) {
+    const zone = topic.startsWith('zone:') ? topic.slice(5) : null;
+    if (!this.object || !zone || !(this.state.watch || []).includes(zone)) return;
+    if (!['enter', 'exit'].includes(ev?.type) || !ev.who?.id || ev.who.kind === 'freeq') return;
+    await this.run(ev.who, `${ev.type}:${zone}`, null, { type: ev.type, zone });
+  }
+
+  // The zones it hears about: subscribe to the new ones, drop the rest.
+  async watch(zones) {
+    const was = this.state.watch || [];
+    for (const z of zones.filter((z) => !was.includes(z))) await this.subscribe(`zone:${z}`);
+    for (const z of was.filter((z) => !zones.includes(z))) await this.unsubscribe(`zone:${z}`);
+    this.state.watch = zones;
+  }
+
+  run(who, action, input, event = null) {
+    const turn = this.queue.then(() => this.turn(who, action, input, event));
+    this.queue = turn.catch(() => {});
+    return turn;
+  }
+
+  async turn(who, action, input, event) {
     const f = this.object;
     const spot = { x: f.x + f.w / 2, y: f.y + f.h + 0.5 };
     const zone = zoneAt(spot.x, spot.y)?.id || null;
@@ -76,21 +107,24 @@ export class PluginObject extends Entity {
 
     let { result, state, via } = await this.plugins.interact({
       object: await this.pluginObject(f, zone),
-      actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory,
+      actor: who, action, input, state: this.state.data ?? null, nearby, now: this.now(), inventory, event,
     });
-    // Objects people uploaded can hand things out but never take anyone's things.
-    if (f.plugin === 'upload' && result.take?.length) result = { ...result, take: [] };
+    // Objects people uploaded can hand things out but never take anyone's
+    // things, and don't get to follow people around the office.
+    if (f.plugin === 'upload' && (result.take?.length || result.watch)) result = { ...result, take: [], watch: null };
     if ((result.give?.length || result.take?.length) && who.kind !== 'system') {
       const r = await this.world.invApply(who.id, { give: result.give, take: result.take, from: f.name }).catch((e) => ({ error: e.message }));
       // It didn't go through (hands full, or they don't have what it wanted):
       // nothing happened, so the object forgets this turn too.
-      if (r.error) { state = this.state.data ?? null; result = { ...result, say: null, display: null, wakeAt: null, toast: `${f.name}: ${r.error}` }; }
+      if (r.error) { state = this.state.data ?? null; result = { ...result, say: null, display: null, wakeAt: null, watch: null, toast: `${f.name}: ${r.error}` }; }
     }
     this.state.data = state;
     const reached = via !== this.state.via;
     this.state.via = via;
     const effects = [];
-    if (who !== SYSTEM) effects.push({ op: 'send', to: who.id, msg: { t: 'objui', id: f.id, ui: result.ui, toast: result.toast, via } });
+    // A zone event only toasts (no `ui` key: the client leaves any open panel be).
+    if (event) { if (result.toast) effects.push({ op: 'send', to: who.id, msg: { t: 'objui', id: f.id, toast: result.toast, via } }); }
+    else if (who !== SYSTEM) effects.push({ op: 'send', to: who.id, msg: { t: 'objui', id: f.id, ui: result.ui, toast: result.toast, via } });
     if (result.say) effects.push({ op: 'broadcast', msg: { t: 'obj', id: f.id, say: result.say, x: spot.x, y: spot.y } });
     const display = result.display && JSON.stringify(result.display) !== JSON.stringify(this.state.display ?? null) ? result.display : null;
     if (display) this.state.display = display;
@@ -98,6 +132,7 @@ export class PluginObject extends Entity {
       this.state.wakeAt = result.wakeAt;
       await this.setAlarm(Math.max(result.wakeAt, this.now() + 1000));
     }
+    if (result.watch) await this.watch(result.watch);
     await this.save();
     if (effects.length) await this.emit(...effects);
     if (display || reached) await this.mirror(this.view());

@@ -17,7 +17,7 @@ import { readManifest } from '../public/js/manifest.js';
 // Plugin Workers import cloudflare:workers, which only exists on Workers; a
 // stand-in base class is all it takes to read their static descriptions.
 registerHooks({
-  resolve: (spec, ctx, next) => (spec === 'cloudflare:workers' ? { url: 'data:text/javascript,export class WorkerEntrypoint {}', shortCircuit: true } : next(spec, ctx)),
+  resolve: (spec, ctx, next) => (spec === 'cloudflare:workers' ? { url: 'data:text/javascript,export class WorkerEntrypoint {} export class DurableObject {}', shortCircuit: true } : next(spec, ctx)),
 });
 
 // Each [[services]] binding: the plugin Worker it points at (found by name

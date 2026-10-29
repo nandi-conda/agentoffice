@@ -65,6 +65,12 @@ binding = "PLUGIN_KIOSK"
 service = "agentoffice-objects"
 entrypoint = "Kiosk"
 
+# Office Rally (plugins/rally): its own Worker, with its own Durable Object.
+[[services]]
+binding = "PLUGIN_RALLY"
+service = "agentoffice-rally"
+entrypoint = "Rally"
+
 # Uploaded objects (docs/uploads.md, server/sandbox.js): each plugin people
 # upload runs in its own Dynamic Worker, with no network. Needs the Workers
 # Paid plan: on the Free plan `wrangler deploy` refuses this binding (`just

@@ -17,6 +17,8 @@
 
 import { log } from './logs.js';
 import { OBJECTS } from '../plugins/objects/src/objects.js';
+import { rally } from '../plugins/rally/src/rally.js';
+import { ZONES } from '../public/js/map.js';
 import { cleanItem } from '../public/js/items.js';
 
 export const TIMEOUT_MS = 5000;
@@ -24,6 +26,9 @@ export const MAX_STATE = 32 * 1024;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
+export const MAX_WATCH = 12;
+// Every object the office can run without its plugin Worker.
+export const BUILTINS = { ...OBJECTS, rally };
 
 export const bindingName = (plugin) => `PLUGIN_${String(plugin).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 
@@ -35,7 +40,7 @@ export function cleanRequest(m) {
 }
 
 export class PluginHost {
-  constructor({ env = {}, builtins = OBJECTS, sandbox = null, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
+  constructor({ env = {}, builtins = BUILTINS, sandbox = null, timeoutMs = TIMEOUT_MS, now = () => Date.now() } = {}) {
     this.env = env;
     this.sandbox = sandbox; // runs uploaded objects: { langs, via, run(upload, req) }
     this.builtins = builtins;
@@ -60,11 +65,13 @@ export class PluginHost {
   // inventory: what the actor carries (plugins see it, and change it only by
   // answering with give/take).
   // Returns { result, state, via } where state is what the object should keep.
-  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [] }) {
+  // event: { type: 'enter' | 'exit', zone } when the call is a zone the
+  // object watches (answer `watch`), not someone using it.
+  async interact({ object, actor, action = 'use', input = null, state = null, nearby = [], now = this.now(), inventory = [], event = null }) {
     const req = {
       object: { id: object.id, kind: object.plugin, name: object.name || object.plugin, zone: object.zone || null },
       actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind },
-      action, input, state, nearby: nearby.slice(0, 20), now,
+      action, input, state, nearby: nearby.slice(0, 20), now, event,
       inventory: inventory.slice(0, 40).map(({ id, kind, name, emoji, qty, data }) => ({ id, kind, name, emoji, qty, ...(data !== undefined ? { data } : {}) })),
     };
     const binding = object.upload ? null : this.env[bindingName(object.plugin)];
@@ -147,6 +154,9 @@ export function sanitize(r) {
   }
   // Ask to be called again (action 'tick') at this time, e.g. when a song ends.
   out.wakeAt = Number.isFinite(r.wakeAt) ? r.wakeAt : null;
+  // Zones to hear about: the office calls back with `enter:<zone>` and
+  // `exit:<zone>` as people walk in and out. [] stops; leave it out to keep.
+  out.watch = Array.isArray(r.watch) ? [...new Set(r.watch.filter((z) => ZONES.some((x) => x.id === z)))].slice(0, MAX_WATCH) : null;
   const u = r.ui;
   if (u && typeof u === 'object') {
     out.ui = {

@@ -29,6 +29,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
 | [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
 | [plugin: Help kiosk](plugin-kiosk.md) | Answers questions about the office, with Workers AI when bound and a canned help desk otherwise. |
+| [plugin: Office Rally](plugin-rally.md) | A checkpoint race around the office. |
 | [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
 
 ## Bindings
@@ -46,6 +47,7 @@ From `wrangler.toml`.
 | `PLUGIN_VENDING` | service | `agentoffice-objects` → `Vending` |
 | `PLUGIN_EIGHTBALL` | service | `agentoffice-objects` → `EightBall` |
 | `PLUGIN_KIOSK` | service | `agentoffice-objects` → `Kiosk` |
+| `PLUGIN_RALLY` | service | `agentoffice-rally` → `Rally` |
 
 ## Roles
 

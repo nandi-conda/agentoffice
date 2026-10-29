@@ -73,7 +73,7 @@ test('sanitize drops what the client can\'t safely show', () => {
   assert.equal(s.ui.buttons.length, 0);
   assert.equal(s.ui.input.maxLength, 500);
   assert.equal(s.ui.text, '<b>hi</b>'); // escaped by the client, never trusted as HTML
-  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, give: [], take: [] });
+  assert.deepEqual(sanitize(null), { say: null, toast: null, display: null, ui: null, wakeAt: null, watch: null, give: [], take: [] });
 });
 
 test('cleanRequest', () => {

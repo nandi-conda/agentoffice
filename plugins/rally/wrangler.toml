@@ -1,0 +1,18 @@
+# Office Rally: a checkpoint race, and the example of a plugin that keeps its
+# state in its own Durable Object. Deploy with `just plugins-deploy rally`
+# (or `just deploy`, which deploys plugins first). Like every plugin it has
+# no route: the office reaches it only through its PLUGIN_RALLY binding.
+name = "agentoffice-rally"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+# One RallyRoom per rally object on the map, holding racers, rounds and the
+# all-time board (src/rally.js).
+[[durable_objects.bindings]]
+name = "RALLY"
+class_name = "RallyRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RallyRoom"]

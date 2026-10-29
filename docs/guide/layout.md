@@ -20,6 +20,7 @@ server/plugins.js       plugin objects: service binding calls, answer clean-up, 
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
 plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
+plugins/rally/          example plugin Worker with its own Durable Object: the Office Rally checkpoint race
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map
 plugins/wasm-guestbook/ example uploadable WASM plugin (Rust); built copy in public/plugins/
