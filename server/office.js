@@ -331,6 +331,7 @@ export class Office {
       summary: () => this.summary(),
       inventoryOf: (id) => { const p = this.peers.get(id); return p ? this.inventory(p) : []; },
       invApply: (id, change) => { const p = this.peers.get(id); return p?.ready ? this.invApply(p, change) : { error: 'they left' }; },
+      walk: (key, target) => this.walk(key, target),
     };
   }
 
@@ -481,7 +482,7 @@ export class Office {
     if (p.kind !== 'freeq') { this.freeq?.leave(p); this.freeq?.presence(); }
     if (!p.ready || p.kind === 'freeq') return;
     const key = this.actorKey(p);
-    if (key) this.bg(this.ref(`actor:${key}`).depart());
+    if (key) this.bg(this.ref(`actor:${key}`).depart(this.spotOf(p)));
     clearTimeout(p.stationTimer); p.station = null;
     const zone = zoneAt(p.x, p.y);
     if (zone) this.publish(`zone:${zone.id}`, { type: 'exit', who: this.who(p) });
@@ -650,10 +651,13 @@ export class Office {
     p.note = clip(m.note ?? arrival?.note ?? '', 80);
     // A guest's things last for the visit (a reconnect keeps them); everyone else's are on their actor.
     if (!key) p.items ||= [];
-    // Arrive at the door, but not on top of whoever else is standing there.
+    // Back where they were last time (signed-in people and agents), else
+    // at the door; either way not on top of whoever else is standing there.
     if (p.x === SPAWN.x && p.y === SPAWN.y) {
-      const at = openSpot(SPAWN.x, SPAWN.y, [...this.peers.values()].filter((q) => q.ready && q !== p));
+      const back = this.canStand(arrival?.at, p) ? arrival.at : SPAWN;
+      const at = openSpot(back.x, back.y, [...this.peers.values()].filter((q) => q.ready && q !== p));
       p.x = at.x; p.y = at.y;
+      if (back !== SPAWN) p.dir = (+back.dir || 0) | 0;
     }
     p.ready = true;
     p.shownRole = this.roleOf(p);
@@ -713,6 +717,7 @@ export class Office {
     }
     p.x = x; p.y = y; p.dir = num(m.dir, 0, 3, 0) | 0; p.moving = !!m.moving;
     if (p.seat && m.moving) p.seat = null;
+    if (!p.moving) this.keepSpot(p);
     this.broadcast({ t: 'move', id: p.id, x, y, dir: p.dir, moving: p.moving, seat: p.seat }, p);
     // Areas are topics: rooms (and anything else) can react to people coming and going.
     if (to !== from) {
@@ -1195,6 +1200,7 @@ export class Office {
     const from = zoneAt(q.x, q.y);
     const at = openSpot((zone.x0 + zone.x1 + 1) / 2, (zone.y0 + zone.y1 + 1) / 2, [...this.peers.values()].filter((x) => x.ready && x !== q));
     Object.assign(q, { x: at.x, y: at.y, seat: null, moving: false, video: false, screen: false });
+    q.spotSaved = 0; this.keepSpot(q);
     this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: zone.id, moved: true, text: `${p.name} moved you to ${zone.name}` });
     this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
     this.broadcast({ t: 'peer', id: q.id, video: false, screen: false });
@@ -1204,6 +1210,77 @@ export class Office {
       this.publish(`zone:${zone.id}`, { type: 'enter', who });
     }
     return { ok: true, zone: zone.id };
+  }
+
+  // ---- where people stand, kept on their actor ------------------------------
+  spotOf(p) { return { x: +p.x.toFixed(2), y: +p.y.toFixed(2), dir: p.dir | 0, zone: zoneAt(p.x, p.y)?.id || null }; }
+
+  // When someone stops (at most every 2 s), their actor keeps the spot, so a
+  // refresh or a new sign-in puts them back there.
+  keepSpot(p) {
+    const key = p.kind !== 'freeq' && this.actorKey(p);
+    if (!key || this.now() - (p.spotSaved || 0) < 2000) return;
+    p.spotSaved = this.now();
+    this.bg(this.ref(`actor:${key}`).place(this.spotOf(p)));
+  }
+
+  // Whether p may stand at a kept spot now: still on the map, not in a wall,
+  // its area still there, and no booking or channel door keeping them out.
+  canStand(at, p) {
+    if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) return false;
+    if (at.x < 0 || at.y < 0 || at.x >= map.W || at.y >= map.H || isBlocked(Math.floor(at.x), Math.floor(at.y))) return false;
+    const zone = zoneAt(at.x, at.y);
+    if ((zone?.id || null) !== (at.zone ?? zone?.id ?? null)) return false;
+    if (restrictedAt(this.bookings, at.x, at.y, p, this.now())) return false;
+    if (zone?.channel && !this.door(zone.id, p).ok) return false;
+    return true;
+  }
+
+  // Where a move target lands: { x, y } or { place } (zone, #channel, seat,
+  // desk, furniture or person), on a free tile.
+  spotFor(target, q) {
+    const others = [...this.peers.values()].filter((x) => x.ready && x !== q);
+    const s = String(target.place ?? '').trim().toLowerCase();
+    if (!s) {
+      const x = +target.x, y = +target.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= map.W || y >= map.H) return null;
+      return openSpot(x, y, others, 0.6);
+    }
+    const zone = map.ZONES.find((z) => z.id === s || z.name.toLowerCase() === s || (z.channel && z.channel.toLowerCase() === `#${s.replace(/^#/, '')}`));
+    if (zone) return openSpot((zone.x0 + zone.x1 + 1) / 2, (zone.y0 + zone.y1 + 1) / 2, others);
+    const desk = DESKS.find((d) => d.id === s), seat = SEATS.find((d) => d.id === s) || desk?.seat;
+    if (seat) return openSpot(seat.x, seat.y, others, 0.6);
+    const f = FURNITURE.find((d) => d.id === s);
+    if (f) return openSpot(f.x + f.w / 2, f.y + f.h + 0.5, others);
+    const who = this.findPeer(target.place);
+    if (who && who !== q) return openSpot(who.x, who.y, others);
+    return null;
+  }
+
+  // Move someone by their actor key (Actor.moveTo). In the office their
+  // client walks them there along a path (or they appear there, teleport);
+  // away, the spot is returned for their actor to keep.
+  walk(key, target = {}) {
+    const here = [...this.peers.values()].filter((q) => q.ready && q.kind !== 'freeq' && this.ownerKey(q) === key);
+    const at = this.spotFor(target, here[0] || null);
+    if (!at) return { error: `don't know where ${clip(target.place ?? `${target.x},${target.y}`, 60)} is` };
+    const zone = zoneAt(at.x, at.y)?.id || null;
+    const text = target.text ? clip(target.text, 200) : null;
+    for (const q of here) {
+      if (target.teleport) {
+        const from = zoneAt(q.x, q.y);
+        Object.assign(q, { x: at.x, y: at.y, seat: null, moving: false });
+        this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: zone, moved: true, text });
+        this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+        if (from?.id !== zone) {
+          const who = this.who(q);
+          if (from) this.publish(`zone:${from.id}`, { type: 'exit', who });
+          if (zone) this.publish(`zone:${zone}`, { type: 'enter', who });
+        }
+        q.spotSaved = 0; this.keepSpot(q);
+      } else this.sendTo(q, { t: 'walk', x: at.x, y: at.y, text });
+    }
+    return { online: here.length > 0, x: at.x, y: at.y, zone };
   }
 
   // The admin panel: { t: 'mod', op, ref?, to?, reason?, minutes?, place?, id?, role? },

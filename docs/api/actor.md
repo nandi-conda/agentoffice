@@ -32,11 +32,59 @@ Returns `object | null`
 
 Walking in: returns the character, last status and note, and the notes kept while they were away (and empties the inbox).
 
-## `depart()`
+## `depart(at?)`
 
 `mutates` · `internal (entity to entity)`
 
-Walking out.
+Walking out, leaving from `at`.
+
+| Param | Type | |
+| --- | --- | --- |
+| `at` *(optional)* | `{ x, y, dir?, zone? }` | Where they stand |
+| &nbsp;&nbsp;&nbsp;`at.x` | `number` | X in tiles |
+| &nbsp;&nbsp;&nbsp;`at.y` | `number` | Y in tiles |
+| &nbsp;&nbsp;&nbsp;`at.dir` *(optional)* | `integer 0–3` | Facing: 0 down, 1 left, 2 right, 3 up |
+| &nbsp;&nbsp;&nbsp;`at.zone` *(optional)* | `string \| null` | Area id |
+
+## `where()`
+
+`read-only` · `internal (entity to entity)`
+
+Where they were last (kept while they are away, so a refresh or a new sign-in puts them back there).
+
+Returns `object | null`
+
+## `place(at)`
+
+`mutates` · `internal (entity to entity)`
+
+The World keeps where they stand (when they stop, and as they leave).
+
+| Param | Type | |
+| --- | --- | --- |
+| `at` | `{ x, y, dir?, zone? }` | Where they stand |
+| &nbsp;&nbsp;&nbsp;`at.x` | `number` | X in tiles |
+| &nbsp;&nbsp;&nbsp;`at.y` | `number` | Y in tiles |
+| &nbsp;&nbsp;&nbsp;`at.dir` *(optional)* | `integer 0–3` | Facing: 0 down, 1 left, 2 right, 3 up |
+| &nbsp;&nbsp;&nbsp;`at.zone` *(optional)* | `string \| null` | Area id |
+
+## `moveTo(who, target)`
+
+`mutates` · `moderators may for anyone (people.move)` · `internal (entity to entity)`
+
+Move them: in the office they walk (or, with teleport, appear) at the place; away, it is where they come back. Anyone may move themselves; moderators may move anyone (people.move); entities pass who=null.
+
+| Param | Type | |
+| --- | --- | --- |
+| `who` | `object \| null` | Who asks (null: the system or another entity) |
+| `target` | `{ x?, y?, place?, teleport?, text? }` | Where to: x/y or place |
+| &nbsp;&nbsp;&nbsp;`target.x` *(optional)* | `number` | X in tiles |
+| &nbsp;&nbsp;&nbsp;`target.y` *(optional)* | `number` | Y in tiles |
+| &nbsp;&nbsp;&nbsp;`target.place` *(optional)* | `string ≤ 253` | A zone id or name, #channel, seat or desk id, furniture id, or a person |
+| &nbsp;&nbsp;&nbsp;`target.teleport` *(optional)* | `boolean` | Appear there instead of walking |
+| &nbsp;&nbsp;&nbsp;`target.text` *(optional)* | `string ≤ 200` | Shown to them |
+
+Returns `{ ok?, online?, x?, y?, zone?, error? }`
 
 ## `remember(last)`
 

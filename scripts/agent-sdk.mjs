@@ -81,6 +81,8 @@ export class AgentClient extends EventEmitter {
     if (m.t === 'welcome' || m.t === 'wing') { this.wing = (m.t === 'wing' ? m.rooms : m.wing) || []; applyWing(this.wing); }
     // A booked room turned us away (or showed us out): stop walking, stand where the server says.
     if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y, seat: null }); }
+    // Something in the office (a room, a plugin, a moderator) walks us somewhere.
+    if (m.t === 'walk' && this.me) this.walkTo(m.x, m.y).catch(() => {});
     const wait = m.ref !== undefined && this.pending.get(m.ref);
     if (wait && (m.t === 'booked' || m.t === 'chan' || m.t === 'error')) {
       this.pending.delete(m.ref);

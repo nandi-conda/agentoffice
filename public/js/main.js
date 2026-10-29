@@ -466,10 +466,19 @@ function onMessage(m) {
       if (performance.now() - (onMessage.bounced || 0) > 4000) {
         onMessage.bounced = performance.now();
         // A channel room's door: the sign says how to get in.
-        if (m.moved) toast(`🛡️ ${esc(localize(m.text))}`);
+        if (m.moved) { if (m.text) toast(`🛡️ ${esc(localize(m.text))}`); }
         else if (m.door) toast(esc(localize(m.text)), [['Read the sign', () => openSign(m.room)]], 8000);
         else toast(esc(localize(m.text)), [['Knock', () => knock(m.room)]], 8000);
       }
+      break;
+    }
+    // Something in the office (a room, a plugin, a moderator) walks you somewhere.
+    case 'walk': {
+      follow = null;
+      walkTo(m.x, m.y);
+      if (!path) net.send({ t: 'move', x: m.x, y: m.y, dir: me.dir, moving: false, teleport: true });
+      if (!path) { me.x = me.rx = m.x; me.y = me.ry = m.y; }
+      if (m.text) toast(esc(localize(m.text)));
       break;
     }
     case 'toast': toast(esc(localize(m.text))); if (m.ws) { chime('break'); station.poke(); } break;

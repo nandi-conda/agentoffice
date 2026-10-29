@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
 import { SEATS } from '../public/js/map.js';
+import * as map from '../public/js/map.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -163,4 +164,41 @@ test('people arriving together spread out instead of stacking on the spawn', asy
   for (let i = 0; i < spots.length; i++)
     for (let j = i + 1; j < spots.length; j++)
       assert.ok(Math.hypot(spots[i].x - spots[j].x, spots[i].y - spots[j].y) >= 1.2, `${i} and ${j} overlap`);
+});
+
+const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
+
+test('agents and signed-in people come back where they stood', async () => {
+  const o = new Office();
+  const a = await join(o, 'bot', { kind: 'agent' });
+  await place(o, a, 20.5, 7.5);
+  a.ws.emit('close'); await settle();
+  const b = await join(o, 'bot', { kind: 'agent' });
+  await settle();
+  const you = b.ws.last('welcome').you;
+  assert.deepEqual([you.x, you.y], [20.5, 7.5]);
+  // Guests start at the door every time.
+  const g = await join(o, 'guest1');
+  await place(o, g, 20.5, 9.5);
+  g.ws.emit('close'); await settle();
+  const g2 = await join(o, 'guest1');
+  assert.notDeepEqual([g2.ws.last('welcome').you.x, g2.ws.last('welcome').you.y], [20.5, 9.5]);
+});
+
+test('logic moves people through their actor: walking if in, kept if away', async () => {
+  const o = new Office();
+  const a = await join(o, 'bot', { kind: 'agent' });
+  const r = await o.ref('actor:agent:bot').moveTo(null, { place: 'kitchen', text: 'lunch' });
+  assert.equal(r.online, true);
+  const w = a.ws.last('walk');
+  assert.equal(w.text, 'lunch');
+  assert.equal(r.zone, 'kitchen');
+  a.ws.emit('close'); await settle();
+  const r2 = await o.ref('actor:agent:bot').moveTo(null, { place: 'lounge' });
+  assert.equal(r2.online, false);
+  const back = await join(o, 'bot', { kind: 'agent' });
+  assert.equal(back.ws.last('welcome').you && map.zoneAt(back.ws.last('welcome').you.x, back.ws.last('welcome').you.y)?.id, 'lounge');
+  // Other people need people.move.
+  const denied = await o.ref('actor:agent:bot').moveTo({ key: 'did:plc:someone', role: 'member' }, { place: 'lobby' });
+  assert.match(denied.error, /moderators/);
 });

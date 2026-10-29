@@ -83,13 +83,24 @@ export class Topic extends Entity {
 // agents without one. Guests are passers-by and don't get one.
 // Holds the rpg.actor character, the status they had last, notes that came
 // while they were away, and (for DIDs) their AT Protocol OAuth session.
+const AT = obj({ x: numS('X in tiles'), y: numS('Y in tiles'), dir: opt(int('Facing: 0 down, 1 left, 2 right, 3 up', 0, 3)), zone: opt({ type: ['string', 'null'], description: 'Area id' }) }, 'Where they stand');
+const TARGET = obj({ x: opt(numS('X in tiles')), y: opt(numS('Y in tiles')), place: opt(str('A zone id or name, #channel, seat or desk id, furniture id, or a person', 253)), teleport: opt(bool('Appear there instead of walking')), text: opt(str('Shown to them', 200)) }, 'Where to: x/y or place');
+
 export class Actor extends Entity {
   static doc = 'One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. Holds the rpg.actor character, the status they had last, notes that came while they were away, what they carry (their inventory), and (for DIDs) their AT Protocol OAuth session. Guests get none: what a guest carries lives on their connection in the World and goes when they do.';
   static api = {
     view: { doc: 'Whether they are in and when they were last seen.', returns: obj({ online: bool('In the office now'), lastSeen: { type: ['integer', 'null'], description: 'ms since epoch' } }), internal: true },
     profile: { doc: 'Their rpg.actor character (cached 10 minutes; the last good one if the PDS is down).', params: { opts: opt(obj({ fresh: opt(bool('Skip the cache')) }, 'Options')) }, returns: { type: ['object', 'null'], description: '{ handle, sprite, stats, displayName, description }, null without a DID' }, internal: true },
     arrive: { doc: 'Walking in: returns the character, last status and note, and the notes kept while they were away (and empties the inbox).', mutates: true, internal: true },
-    depart: { doc: 'Walking out.', mutates: true, internal: true },
+    depart: { doc: 'Walking out, leaving from `at`.', params: { at: opt(AT) }, mutates: true, internal: true },
+    where: { doc: 'Where they were last (kept while they are away, so a refresh or a new sign-in puts them back there).', returns: { type: ['object', 'null'], description: '{ x, y, dir, zone, at }' }, internal: true },
+    place: { doc: 'The World keeps where they stand (when they stop, and as they leave).', params: { at: AT }, mutates: true, internal: true },
+    moveTo: {
+      doc: 'Move them: in the office they walk (or, with teleport, appear) at the place; away, it is where they come back. Anyone may move themselves; moderators may move anyone (people.move); entities pass who=null.',
+      params: { who: { type: ['object', 'null'], description: 'Who asks (null: the system or another entity)' }, target: TARGET },
+      returns: obj({ ok: opt(bool('Moved')), online: opt(bool('They were in, so they are walking there')), x: opt(numS('X')), y: opt(numS('Y')), zone: opt({ type: ['string', 'null'], description: 'Area' }), error: opt(str('Why not')) }),
+      mutates: true, internal: true, cap: 'people.move',
+    },
     remember: { doc: 'Keep their status and note for next time.', params: { last: obj({ status: opt(str('Status')), note: opt(str('Working-on note', 80)) }) }, mutates: true, internal: true },
     sessionGet: { doc: 'The AT Protocol OAuth session, unless older than ttlMs.', params: { ttlMs: opt(int('Max age in ms', 0)) }, internal: true },
     sessionSet: { doc: 'Store the OAuth session.', params: { session: { type: 'object', description: 'Tokens + DPoP key' } }, mutates: true, internal: true },
@@ -135,13 +146,34 @@ export class Actor extends Entity {
     this.state.online = (this.state.online || 0) + 1;
     this.state.lastSeen = this.now();
     await this.save();
-    return { profile, error, status: this.state.status || null, note: this.state.note ?? null, inbox, items: this.state.items || [] };
+    return { profile, error, status: this.state.status || null, note: this.state.note ?? null, inbox, items: this.state.items || [], at: this.state.at || null };
   }
 
-  async depart() {
+  async depart(at = null) {
+    if (at) this.keepAt(at);
     this.state.online = Math.max(0, (this.state.online || 0) - 1);
     this.state.lastSeen = this.now();
     await this.save();
+  }
+
+  where() { return this.state.at || null; }
+
+  keepAt(at) {
+    const x = +at?.x, y = +at?.y;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.state.at = { x, y, dir: (+at.dir || 0) | 0, zone: at.zone || null, at: this.now() };
+  }
+
+  async place(at) { this.keepAt(at); await this.save(); }
+
+  // Server-side logic moves people through here: a room pulling invitees
+  // in, a plugin, a moderator. The World walks them if they're in.
+  async moveTo(who, target) {
+    if (who && who.key !== this.name && !can(who.role, 'people.move')) return { error: 'only moderators can move other people' };
+    const r = await this.world.walk(this.name, target || {});
+    if (r.error) return r;
+    if (!r.online) { this.keepAt(r); await this.save(); }
+    return { ok: true, ...r };
   }
 
   async remember({ status, note }) {
