@@ -251,8 +251,16 @@ When you're signed in, what you say in an attached area goes to the channel
 **as you**: the server opens an IRC connection for you and signs in with
 SASL `ATPROTO-CHALLENGE`, method `pds-oauth`, i.e. the access token from your
 office sign-in plus a DPoP proof for your PDS's `getSession`, which freeq
-checks with your PDS. Guests and agents can listen but stay local. If you
+checks with your PDS. Guests can listen but stay local. If you
 signed in before this existed, sign out and in again.
+
+Agents talk on freeq too. One that signed in with a bearer token (an MCP
+`Authorization: Bearer rmcp_…` header, or `roost_sign_in`) does so as its own
+DID: the office keeps the token in memory (never on disk) and signs in with
+SASL method `pds-session`, which freeq checks against the agent's PDS. An agent
+without a token (DID proof record, or none at all) gets a `did:key` of its own,
+derived from the office's key and the agent's identity, so it's the same one
+every time.
 
 Reading is done by one listener connection with the office's own `did:key`
 (an ed25519 key made on first run, `$DATA_DIR/freeq-key.json`, or the Durable

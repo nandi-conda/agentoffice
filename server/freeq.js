@@ -67,7 +67,16 @@ export async function loadIdentity(store) {
     await store.set(jwk);
   }
   const key = await crypto.subtle.importKey('jwk', jwk, { name: 'Ed25519' }, false, ['sign']);
-  return { did: didKeyFor(unb64url(jwk.x)), sign: async (bytes) => new Uint8Array(await crypto.subtle.sign('Ed25519', key, bytes)) };
+  return { did: didKeyFor(unb64url(jwk.x)), secret: jwk.d, sign: async (bytes) => new Uint8Array(await crypto.subtle.sign('Ed25519', key, bytes)) };
+}
+
+// A did:key made from a 32-byte seed (PKCS#8 for a raw Ed25519 seed), so an
+// identity can be derived again instead of stored.
+const PKCS8_ED25519 = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
+export async function identityFromSeed(seed) {
+  const key = await crypto.subtle.importKey('pkcs8', new Uint8Array([...PKCS8_ED25519, ...seed]), { name: 'Ed25519' }, true, ['sign']);
+  const { x } = await crypto.subtle.exportKey('jwk', key);
+  return { did: didKeyFor(unb64url(x)), sign: async (bytes) => new Uint8Array(await crypto.subtle.sign('Ed25519', key, bytes)) };
 }
 
 // ---- IRC lines --------------------------------------------------------------
@@ -256,6 +265,12 @@ export const cryptoResponder = (identity) => async (bytes) => ({
   method: 'crypto', did: identity.did, signature: b64url(await identity.sign(bytes)),
 });
 
+// SASL answer for an agent with a plain PDS bearer token (Roost's rmcp_…):
+// freeq calls {pds}/xrpc/com.atproto.server.getSession with it.
+export const sessionResponder = ({ did, token, pds }) => async (bytes, challenge) => ({
+  method: 'pds-session', did, signature: token, pds_url: pds, challenge_nonce: challenge.nonce,
+});
+
 // SASL answer for a person: their DPoP-bound access token, plus a DPoP proof
 // for GET {pds}/xrpc/com.atproto.server.getSession that freeq passes on.
 // `creds(nonce)` comes from auth.freeqCredentials(did).
@@ -299,7 +314,8 @@ export class FreeqBridge {
     this.bindings = new Map(); // zoneId -> { channel, members, topic }
     this.listener = null;
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
-    this.users = new Map(); // office DID -> { irc, ready, used }
+    this.users = new Map(); // keyOf(peer) -> { irc, ready, used }
+    this.agentTokens = new Map(); // agent DID -> { did, token, pds }, memory only
     this.seen = new Seen();
     this.saver = new Saver(stateStore, () => this.snapshot(), { log });
     office.freeq = this;
@@ -327,6 +343,7 @@ export class FreeqBridge {
     try {
       await this.restored;
       const identity = await loadIdentity(this.keyStore);
+      this.secret = identity.secret;
       irc = new IrcClient({
         url: this.url, openSocket: this.openSocket, nick: 'agentoffice', respond: cryptoResponder(identity),
         onLine: (m) => this.onListenerLine(m),
@@ -384,6 +401,7 @@ export class FreeqBridge {
     l?.close('office closed for the night');
     for (const u of this.users.values()) u.irc.close();
     this.users.clear();
+    clearInterval(this.sweeper); this.sweeper = null;
     this.unbindAll();
     this.saver.now();
   }
@@ -611,7 +629,7 @@ export class FreeqBridge {
 
   isOurs(nick, account) {
     if (lower(nick) === lower(this.listener?.nick)) return true;
-    for (const [did, u] of this.users) if (lower(u.irc.nick) === lower(nick) || (account && account === did)) return true;
+    for (const [did, u] of this.users) if (lower(u.irc.nick) === lower(nick) || (account && (account === did || account === u.irc.did))) return true;
     return false;
   }
 
@@ -754,7 +772,7 @@ export class FreeqBridge {
   async relay(p, zoneId, text) {
     const b = this.bindings.get(zoneId);
     if (!b) return null;
-    if (!p.did || p.kind !== 'human') return `Only signed-in people can talk on freeq; this stayed in the office.`;
+    if (p.kind === 'human' ? !p.did : p.kind !== 'agent') return `Only signed-in people and agents can talk on freeq; this stayed in the office.`;
     try {
       const u = await this.userConnection(p);
       u.used = Date.now();
@@ -769,8 +787,36 @@ export class FreeqBridge {
   }
 
   // Tell a person (every tab they have open) how their freeq connection is doing.
-  notify(did, text, ok = false) {
-    for (const q of this.office.peers.values()) if (q.did === did && q.kind === 'human') this.office.sendTo(q, { t: 'freeq-note', text, ok });
+  notify(key, text, ok = false) {
+    for (const q of this.office.peers.values()) if (q.kind !== 'freeq' && this.keyOf(q) === key) this.office.sendTo(q, { t: 'freeq-note', text, ok });
+  }
+
+  // Whose freeq connection a peer uses: their DID, or agent:<name> for agents without one.
+  keyOf(p) { return p.did || `agent:${p.name}`; }
+
+  // An agent that signed in with a bearer token (MCP Authorization header or
+  // roost_sign_in) talks on freeq as its own DID with it (method pds-session).
+  // Kept in memory only, for as long as this process lives.
+  rememberAgentToken(did, token, pds) {
+    if (did && token && pds) this.agentTokens.set(did, { did, token, pds: pds.replace(/\/$/, '') });
+  }
+
+  // How a peer signs in to freeq: people with their OAuth session; agents
+  // with their token, else a did:key of their own derived from the office's
+  // key and their identity (so it's the same one every time).
+  async responderFor(p, key) {
+    if (p.kind === 'human') {
+      if (!this.auth?.freeqCredentials) throw new Error('sign-in tokens are not available');
+      const creds = (nonce) => this.auth.freeqCredentials(p.did, nonce);
+      await creds(null); // fail early (and warm the PDS's DPoP nonce) before opening a socket
+      return { respond: oauthResponder(creds), as: p.did };
+    }
+    const tok = p.did && this.agentTokens.get(p.did);
+    if (tok) return { respond: sessionResponder(tok), as: p.did };
+    if (!this.secret) throw new Error('the freeq listener is not connected yet');
+    const seed = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(`agentoffice freeq agent\n${this.secret}\n${key}`)));
+    const id = await identityFromSeed(seed);
+    return { respond: cryptoResponder(id), as: id.did };
   }
 
   // Replies on a person's own connection that mean a message didn't land.
@@ -785,14 +831,12 @@ export class FreeqBridge {
   }
 
   async userConnection(p) {
-    let u = this.users.get(p.did);
+    const did = this.keyOf(p);
+    let u = this.users.get(did);
     if (u && !u.irc.closed) { await u.ready; return u; }
-    if (!this.auth?.freeqCredentials) throw new Error('sign-in tokens are not available');
-    const did = p.did;
-    const creds = (nonce) => this.auth.freeqCredentials(did, nonce);
-    await creds(null); // fail early (and warm the PDS's DPoP nonce) before opening a socket
+    const { respond, as } = await this.responderFor(p, did);
     const irc = new IrcClient({
-      url: this.url, openSocket: this.openSocket, nick: ircNick(p.handle || p.name), respond: oauthResponder(creds),
+      url: this.url, openSocket: this.openSocket, nick: ircNick(p.kind === 'agent' ? p.name : p.handle || p.name), respond,
       onLine: (m) => this.onUserLine(did, m),
       onClose: (why) => {
         if (this.users.get(did)?.irc !== irc) return;
@@ -801,13 +845,14 @@ export class FreeqBridge {
       },
     });
     // Never wait forever on a sign-in freeq doesn't finish.
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('freeq didn\'t finish signing you in within 20 seconds')), 20000));
-    u = { irc, used: Date.now(), ready: Promise.race([irc.open(), timeout]) };
+    let timer;
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('freeq didn\'t finish signing you in within 20 seconds')), 20000); });
+    u = { irc, used: Date.now(), ready: Promise.race([irc.open(), timeout]).finally(() => clearTimeout(timer)) };
     this.users.set(did, u);
     if (!this.sweeper) this.sweeper = setInterval(() => this.sweep(), 60000);
     try {
       const who = await u.ready;
-      this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== did ? ` (freeq says you're ${who.did}, not ${did})` : ''}.`, true);
+      this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== as ? ` (freeq says you're ${who.did}, not ${as})` : as !== p.did ? ` (${as})` : ''}.`, true);
     } catch (e) {
       this.users.delete(did);
       irc.close('sign-in failed');
@@ -818,9 +863,10 @@ export class FreeqBridge {
 
   // Someone left the office, or went quiet for a long time: hang up for them.
   leave(p) {
-    const u = p.did && this.users.get(p.did);
-    if (u && ![...this.office.peers.values()].some((q) => q !== p && q.did === p.did && q.kind === 'human')) {
-      this.users.delete(p.did);
+    const key = this.keyOf(p);
+    const u = this.users.get(key);
+    if (u && ![...this.office.peers.values()].some((q) => q !== p && q.kind !== 'freeq' && this.keyOf(q) === key)) {
+      this.users.delete(key);
       u.irc.close('left the office');
     }
   }

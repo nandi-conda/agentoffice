@@ -312,6 +312,56 @@ test('a failed freeq sign-in or a refused message tells the speaker why', async 
   bridge.stop();
 });
 
+test('agents talk on freeq too: as their DID with a token, else as a did:key of their own', async () => {
+  const replies = [];
+  const server = fakeFreeq({ verify: async (r) => { replies.push(r); return true; } });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async () => new Response(JSON.stringify([{ name: '#general', members: 3 }])),
+  });
+  const bob = server.outsider('bob', 'did:plc:bob');
+  bob.join('#general');
+  const bobGot = [];
+  [...server.conns].find((c) => c.nick === 'bob').out = (l) => bobGot.push(l);
+  await bridge.start();
+  await tick();
+
+  const agent = async (name, did) => {
+    const said = [];
+    const p = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did });
+    await office.handle(p, { t: 'hello', name, kind: 'agent' });
+    p.x = 36; p.y = 25; // Lounge = #general
+    return { p, said };
+  };
+  bridge.rememberAgentToken('did:plc:bodhi', 'rmcp_secret', 'https://roost.latha.org/');
+  const bodhi = await agent('Bodhi', 'did:plc:bodhi');
+  await office.handle(bodhi.p, { t: 'chat', text: 'hello from bodhi' });
+  for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('hello from bodhi')); i++) await tick();
+  const r = replies.find((x) => x.did === 'did:plc:bodhi');
+  assert.deepEqual({ method: r.method, signature: r.signature, pds_url: r.pds_url }, { method: 'pds-session', signature: 'rmcp_secret', pds_url: 'https://roost.latha.org' });
+  assert.ok(r.challenge_nonce);
+  assert.ok(bobGot.some((l) => /account=did:plc:bodhi[; ].*PRIVMSG #general :hello from bodhi/.test(l)));
+  assert.ok(bodhi.said.some((m) => m.t === 'freeq-note' && m.ok));
+
+  // No token: a did:key derived for this agent, the same one next time.
+  const rex = await agent('Rex', null);
+  await office.handle(rex.p, { t: 'chat', text: 'rex here' });
+  for (let i = 0; i < 20 && !bobGot.some((l) => l.includes('rex here')); i++) await tick();
+  const rr = replies.filter((x) => x.method === 'crypto' && x.did !== replies[0].did);
+  assert.equal(rr.length, 1);
+  assert.match(rr[0].did, /^did:key:z6Mk/);
+  assert.ok(bobGot.some((l) => l.includes(`account=${rr[0].did}`) && l.includes('rex here')));
+  office.leave(rex.p);
+  assert.ok(!bridge.users.has('agent:Rex'));
+  const again = await bridge.responderFor({ kind: 'agent', name: 'Rex', did: null }, 'agent:Rex');
+  assert.equal(again.as, rr[0].did);
+  bridge.stop();
+});
+
 test('fixed area mapping and nick cleanup', () => {
   assert.deepEqual([...parseRooms('lounge=#general, open=dev, nowhere=#x')], [['lounge', '#general'], ['open', '#dev']]);
   assert.equal(ircNick('alice.bsky.social'), 'alice');

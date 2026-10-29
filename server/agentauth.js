@@ -74,7 +74,7 @@ export class AgentAuth {
     this.nonces.delete(nonce);
     const grant = token(18);
     this.grants.set(grant, { did, handle, expiresAt: this.now() + TTL });
-    return { did, handle, grant };
+    return { did, handle, pds, grant };
   }
 
   // One-time: a grant signs in exactly one connection.

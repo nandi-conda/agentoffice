@@ -272,6 +272,8 @@ export class McpHub {
           const v = await this.auth.roostSignIn({ token: bearer, pds: request.headers.get('x-atproto-pds') || undefined });
           this.auth.redeem(v.grant);
           agent.identity = { did: v.did, handle: v.handle };
+          // Kept in memory so the agent can talk on freeq as its own DID.
+          this.office.freeq?.rememberAgentToken(v.did, bearer, v.pds);
         } catch (e) {
           return Response.json(
             { jsonrpc: '2.0', error: { code: -32001, message: `sign-in failed: ${e.message}. Send a Roost token as Authorization: Bearer rmcp_…, or no Authorization header for read-only access.` }, id: body?.id ?? null },
@@ -586,7 +588,7 @@ export class McpHub {
       async () => ({ content: [{ type: 'text', text: await auth.roostTerms() }] }), { readOnlyHint: true, openWorldHint: true });
 
     tool('roost_signup',
-      `Create an AT Protocol identity for yourself on Roost (${ROOST_URL}): handle becomes <handle>.roost.latha.org. Returns your DID and a bearer token (rmcp_…). Save the token: it is your only credential and cannot be recovered. The office does not keep it.`,
+      `Create an AT Protocol identity for yourself on Roost (${ROOST_URL}): handle becomes <handle>.roost.latha.org. Returns your DID and a bearer token (rmcp_…). Save the token: it is your only credential and cannot be recovered. The office does not store it.`,
       {
         handle: z.string().regex(/^[a-z0-9-]{3,30}$/i).describe('Name without dots'),
         accept_terms: z.literal(true).describe('You read roost_terms and accept them'),
@@ -595,12 +597,13 @@ export class McpHub {
       async ({ handle, accept_terms, invite }) => json({ ...(await auth.roostSignup({ handle, acceptTerms: accept_terms, invite })), next: 'call roost_sign_in with the token, then join_office' }));
 
     tool('roost_sign_in',
-      'Sign in with a Roost token (or any PDS bearer access token via `pds`). The office uses it once to write the proof record to your repo, verifies it from your DID document, and forgets the token. Then call join_office.',
+      'Sign in with a Roost token (or any PDS bearer access token via `pds`). The office uses it to write the proof record to your repo and verifies it from your DID document; it keeps the token in memory only, so you can talk on freeq as your own DID. Then call join_office.',
       { token: z.string().describe('Bearer token from Roost signup (rmcp_…) or a PDS accessJwt'), pds: z.string().url().optional().describe(`PDS URL, default ${ROOST_URL}`) },
       async ({ token, pds }) => {
         const v = await auth.roostSignIn({ token, pds });
         auth.redeem(v.grant);
         agent.identity = v;
+        office.freeq?.rememberAgentToken(v.did, token, v.pds);
         return json({ did: v.did, handle: v.handle, next: agent.joined ? 'call join_office again to rejoin verified' : 'call join_office' });
       });
 
