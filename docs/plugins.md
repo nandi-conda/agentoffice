@@ -160,6 +160,21 @@ kiosk's Workers AI (`[ai]` in `plugins/objects/wrangler.toml`; delete that
 block if your account doesn't have Workers AI and the kiosk answers from its
 canned help desk).
 
+## Editing the kiosk
+
+The kiosk's personality and knowledge are at the bottom of
+`plugins/objects/src/objects.js`: `KIOSK_PERSONA` is the system prompt and
+`KIOSK_HELP` is the list of facts it's given (and what it answers from when the
+AI is unavailable, matched by keyword). Edit them, then
+`just plugins-deploy objects`; the office doesn't need redeploying. The office's
+built-in copy of the kiosk only updates with `just deploy`.
+
+If it answers "I'm running in offline mode", the panel says why underneath
+(only the asker sees that line): no Workers AI binding, or every model in
+`KIOSK_MODELS` failed. `just plugins-tail` shows the full errors. Workers AI
+retires models from time to time; put a current one first in `KIOSK_MODELS`,
+or set `KIOSK_MODEL` under `[vars]` in `plugins/objects/wrangler.toml`.
+
 ## Local development
 
 - `just cf-dev`: the office alone. Plugin objects use their built-ins.

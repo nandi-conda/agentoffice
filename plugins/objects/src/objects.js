@@ -128,16 +128,43 @@ export async function eightball({ actor, action, input, state }) {
 }
 
 // ---- kiosk (agent-backed) ---------------------------------------------------------
-// With a Workers AI binding (env.AI) the kiosk answers with a model; without one
-// it falls back to a canned help desk, so it never just breaks.
-export const KIOSK_MODEL = '@cf/meta/llama-3.1-8b-instruct';
-const KIOSK_HELP = {
+// With a Workers AI binding (env.AI) the kiosk answers with a model; without one,
+// or when the model call fails, it answers from KIOSK_HELP, so it never just breaks.
+//
+// To change what it knows or how it talks, edit KIOSK_PERSONA and KIOSK_HELP
+// below, then `just plugins-deploy objects`. To try another model without a
+// code change, set KIOSK_MODEL under [vars] in plugins/objects/wrangler.toml.
+// Workers AI retires models now and then (llama-3.1-8b-instruct went on
+// 2026-05-30), which is why there's a list: the first that answers wins.
+export const KIOSK_MODELS = ['@cf/meta/llama-3.1-8b-instruct-fast', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'];
+export const KIOSK_PERSONA = 'You are the friendly help kiosk in a virtual coworking office. Answer in at most two short sentences. If you don\'t know, say so and suggest asking someone nearby.';
+export const KIOSK_HELP = {
+  rooms: 'The office has the Deep Work Den, Phone Booths, Lobby, Open Office, Boardroom, Huddle Room, Kitchen and Lounge.',
   book: 'Walk up to a meeting room door and press E to book it, or use the Rooms button.',
   desk: 'Sit at any free desk in the Open Office and claim it. Your name stays on it between visits.',
   coffee: 'The coffee machine is in the Kitchen. Grab a mug and people nearby will know you\'re up for a chat.',
   focus: 'The Deep Work Den has a shared pomodoro timer. Chat there only reaches people right next to you.',
   arcade: 'Byte Snake lives in the Lounge, top right. High scores go on the board.',
+  snack: 'The vending machine in the Kitchen has free snacks while stock lasts.',
+  music: 'The jukebox in the Lounge plays whatever people queue on it.',
 };
+
+// Workers AI models answer in one of two shapes.
+const replyText = (out) => String(out?.response ?? out?.choices?.[0]?.message?.content ?? '').trim();
+
+async function askModel(env, messages) {
+  const models = env.KIOSK_MODEL ? [env.KIOSK_MODEL, ...KIOSK_MODELS] : KIOSK_MODELS;
+  const errors = [];
+  for (const model of models) {
+    try {
+      const text = replyText(await env.AI.run(model, { messages, max_tokens: 200 }));
+      if (text) return { text, model };
+      errors.push(`${model}: empty answer`);
+    } catch (e) { errors.push(`${model}: ${e?.message || e}`); }
+  }
+  console.error('kiosk AI failed:', errors.join(' | '));
+  return { error: errors.join('; ') };
+}
 
 export async function kiosk({ object, actor, action, input, state, nearby }, env = {}) {
   const st = { questions: 0, ...state };
@@ -146,24 +173,21 @@ export async function kiosk({ object, actor, action, input, state, nearby }, env
   const q = String(input || '').trim().slice(0, 300);
   if (!q) return { state: st, ui: ui('Type a question first.') };
   st.questions++;
-  let answer = null;
+  let answer = null, why = env.AI ? null : 'no Workers AI binding';
   if (env.AI) {
-    try {
-      const out = await env.AI.run(KIOSK_MODEL, {
-        max_tokens: 200,
-        messages: [
-          { role: 'system', content: `You are the friendly help kiosk in a virtual office (rooms: Deep Work Den, Phone Booths, Lobby, Open Office, Boardroom, Huddle Room, Kitchen, Lounge). You stand in the ${object?.zone || 'office'}. People near you: ${(nearby || []).map((p) => p.name).join(', ') || 'nobody'}. Facts: ${Object.values(KIOSK_HELP).join(' ')} Answer in at most two short sentences.` },
-          { role: 'user', content: q },
-        ],
-      });
-      answer = String(out?.response || '').trim() || null;
-    } catch (e) { console.error('kiosk AI', e?.message); }
+    const r = await askModel(env, [
+      { role: 'system', content: `${KIOSK_PERSONA} You stand in the ${object?.zone || 'office'}. People near you: ${(nearby || []).map((p) => p.name).join(', ') || 'nobody'}. Facts: ${Object.values(KIOSK_HELP).join(' ')}` },
+      { role: 'user', content: q },
+    ]);
+    answer = r.text || null;
+    if (r.error) why = `Workers AI failed: ${r.error}`;
   }
   if (!answer) {
     const key = Object.keys(KIOSK_HELP).find((k) => q.toLowerCase().includes(k));
-    answer = key ? KIOSK_HELP[key] : 'I\'m running in offline mode, so I only know the basics: try asking about booking, desks, coffee, focus or the arcade.';
+    answer = key ? KIOSK_HELP[key] : 'I\'m running in offline mode, so I only know the basics: try asking about rooms, booking, desks, coffee, focus, snacks, music or the arcade.';
   }
-  return { state: st, say: `🤖 ${answer}`, ui: ui(`**You:** ${q}\n\n**Kiosk:** ${answer}`) };
+  // Only the asker sees why it's offline; everyone nearby hears the answer.
+  return { state: st, say: `🤖 ${answer}`, ui: ui(`**You:** ${q}\n\n**Kiosk:** ${answer}${why ? `\n\n(offline: ${why.slice(0, 300)})` : ''}`) };
 }
 
 export const OBJECTS = { jukebox, vending, eightball, kiosk };

@@ -196,3 +196,19 @@ test('a runtime-provided plugin host (the service binding) is used over the buil
   assert.deepEqual((await rt.ref('plugin:jukebox').inspect()).state.data, { remote: true });
   rt.stop();
 });
+
+test('kiosk skips a retired model, reads both answer shapes, and says why it is offline', async () => {
+  const req = { object: { zone: 'lobby' }, actor, action: 'ask', input: 'what is this place?', state: null, nearby: [] };
+  const tried = [];
+  const AI = { run: async (model) => { tried.push(model); if (tried.length === 1) throw new Error('model deprecated'); return { choices: [{ message: { content: 'An office, friend.' } }] }; } };
+  let r = await kiosk(req, { AI });
+  assert.equal(r.say, '🤖 An office, friend.');
+  assert.equal(tried.length, 2);
+  r = await kiosk(req, { AI: { run: async () => { throw new Error('No such model'); } } });
+  assert.match(r.ui.text, /offline: Workers AI failed: .*No such model/);
+  assert.doesNotMatch(r.say, /No such model/);
+  r = await kiosk(req, {});
+  assert.match(r.ui.text, /offline: no Workers AI binding/);
+  r = await kiosk(req, { KIOSK_MODEL: '@cf/x/y', AI: { run: async (m) => ({ response: m }) } });
+  assert.equal(r.say, '🤖 @cf/x/y');
+});

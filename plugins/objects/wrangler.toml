@@ -11,3 +11,8 @@ workers_dev = false
 # help desk, so you can delete this block if your account has no Workers AI.
 [ai]
 binding = "AI"
+
+# Optional: try a different Workers AI model first (the kiosk falls back to
+# its built-in list in objects.js if this one fails).
+# [vars]
+# KIOSK_MODEL = "@cf/google/gemma-4-26b-a4b-it"
