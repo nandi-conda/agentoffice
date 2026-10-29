@@ -1132,8 +1132,8 @@ function openNewRoom() {
   });
 }
 
-const accessFields = (access, rules) => `
-  <fieldset class="access-pick"><legend>Who can walk in</legend>
+const accessFields = (access, rules, legend = 'Who can walk in') => `
+  <fieldset class="access-pick"><legend>${legend}</legend>
     <label><input type="radio" name="access" value="open" ${access === 'open' ? 'checked' : ''}> 🚪 Anyone</label>
     <label><input type="radio" name="access" value="rules" ${access === 'rules' ? 'checked' : ''}> 📜 People who accept the rules</label>
     <label><input type="radio" name="access" value="invite" ${access === 'invite' ? 'checked' : ''}> 🔒 Invite only (knock, someone inside lets you in)</label>
@@ -1172,7 +1172,7 @@ function openSign(roomId) {
       ${p?.rules ? `<h3>Rules</h3><div class="rules">${esc(p.rules)}</div>` : ''}
       ${roles ? `<h3>Roles</h3><ul class="small">${roles}</ul>` : ''}
       <div class="row">${check?.ok && !inside ? '<button class="btn primary go">Walk in</button>' : ''}${closable ? '<button class="btn ghost danger close-room" title="As a moderator: archived once empty, and stays closed">🛡️ Close room</button>' : ''}</div>
-      ${mine ? `<form class="access-form"><h3>Who can walk in (you opened it)</h3>${accessFields(p?.require?.type === 'INVITE' ? 'invite' : p?.rules ? 'rules' : 'open', p?.rules)}<div class="row"><button class="btn">Save</button></div></form>` : ''}`, 'sign-modal');
+      ${mine ? `<form class="access-form">${accessFields(p?.require?.type === 'INVITE' ? 'invite' : p?.rules ? 'rules' : 'open', p?.rules, 'Who can walk in (you opened it)')}<div class="row"><button class="btn">Save</button></div></form>` : ''}`, 'sign-modal');
     const body = modal.body;
     body.querySelector('.accept')?.addEventListener('click', (e) => net.send({ t: 'chan', op: 'accept', room: roomId, hash: e.target.dataset.hash }));
     body.querySelector('.knock')?.addEventListener('click', () => net.send({ t: 'chan', op: 'knock', room: roomId }));

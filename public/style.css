@@ -142,9 +142,12 @@ input, select, textarea { font: inherit; color: inherit; }
 .needs li { padding: 10px 12px; border-radius: 10px; background: #f5f2ec; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .needs .btn { padding: 6px 12px; font-size: 13px; margin-left: auto; text-decoration: none; }
 .rules { white-space: pre-wrap; max-height: 30vh; overflow: auto; padding: 10px 12px; border-left: 3px solid #a78bfa; background: #faf8ff; border-radius: 8px; font-size: 13.5px; line-height: 1.45; }
-.access-pick { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 12px 0 0; display: grid; gap: 6px; }
+.access-pick { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 10px; margin: 12px 0 0; display: grid; gap: 8px; min-width: 0; }
 .access-pick legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
-.access-pick label { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.access-pick label { display: flex; gap: 8px; align-items: flex-start; justify-content: flex-start; text-align: left; font-size: 14px; line-height: 1.35; cursor: pointer; }
+.access-pick label input[type=radio] { margin-top: 2px; width: 16px; height: 16px; }
+.access-form { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.access-form .access-pick { margin-top: 0; }
 .rules-text { display: grid; gap: 4px; margin-top: 10px; }
 .rules-text[hidden] { display: none; }
 .rules-text textarea, .new-room-form input[name=name] { font: inherit; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
@@ -269,6 +272,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .modal > .close { position: sticky; top: -12px; float: right; z-index: 2; width: 32px; height: 32px; margin: -12px -12px 6px 10px; display: grid; place-items: center; border: 0; border-radius: 8px; background: var(--card); font-size: 24px; line-height: 1; cursor: pointer; color: var(--muted); }
 .modal > .close:hover { color: var(--ink); background: var(--line); }
 .modal input, .modal textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: #fff; }
+/* Ticks and dots keep their own size: the text-field rule above would stretch them across the row. */
+.modal input:is([type=checkbox], [type=radio]) { width: auto; padding: 0; margin: 0; border: 0; flex: none; }
 .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
 .wb-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
@@ -331,7 +336,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .book-form .wide { grid-column: 1 / -1; }
 .book-form .checks { grid-column: 1 / -1; display: flex; gap: 16px; flex-wrap: wrap; font-weight: 400; }
 .book-form .checks label { display: flex; gap: 6px; align-items: center; font-weight: 400; }
-.book-form .checks input { width: auto; }
 .book-form select { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: #fff; }
 .book-form .btn { align-self: end; }
 .my-bookings { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
@@ -549,7 +553,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .ws-todos { list-style: none; margin: 0; padding: 0; }
 .ws-todos li { display: flex; align-items: center; border-bottom: 1px solid var(--line); padding: 6px 2px; }
 .ws-todos label { flex: 1; display: flex; gap: 8px; align-items: center; cursor: pointer; }
-.ws-todos input { width: 18px; height: 18px; }
+.ws-todos input[type=checkbox] { width: 18px; height: 18px; }
 .ws-todos li.done span { text-decoration: line-through; color: var(--muted); }
 /* terminal */
 .ws-win:has(.ws-term) .ws-body { padding: 0; background: #0b1220; }
