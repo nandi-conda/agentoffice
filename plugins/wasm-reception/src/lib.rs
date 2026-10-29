@@ -29,6 +29,7 @@ impl Plugin for Reception {
         .prompt("Ring the bell")
         .emoji("🛎️")
         .glow("#fbbf24")
+        .look(Look::Bell)
         .actions(&[Action::new("ring", "Ring the bell on the desk (what pressing E does)")]);
 
     fn on_use(&mut self, req: &Request) -> Response { self.ring(req) }

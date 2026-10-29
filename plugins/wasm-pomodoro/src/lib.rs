@@ -67,6 +67,7 @@ impl Plugin for Pomodoro {
         .prompt("Use the focus timer")
         .emoji("🍅")
         .glow("#ef4444")
+        .look(Look::Pomodoro)
         .actions(&[
             Action::new("start", "Start focusing: 25 minutes, then a 5 minute break, and round again"),
             Action::new("start:<focus>:<break>", "Start with your own lengths in minutes (focus 1–90, break 1–30), e.g. start:50:10"),

@@ -412,6 +412,7 @@ impl Plugin for Rooms {
         .prompt("Check the room's schedule")
         .emoji("📅")
         .glow("#a78bfa")
+        .look(Look::DoorPanel)
         .permissions(&[Permission::Notify]);
 
     fn on_use(&mut self, req: &Request) -> Response {

@@ -306,6 +306,8 @@ export function createRenderer(canvas) {
   function drawPanel(f, st) {
     const { state } = roomStatus(st.bookings || [], f.zone, st.serverNow());
     const cx = f.x + 0.5, top = f.y + 0.68 - 1.15;
+    // An uploaded one stands on a post of its own instead of hanging by a door.
+    if (f.uploaded) { ctx.fillStyle = '#475569'; ctx.fillRect(S(cx - 0.03), S(top + 0.3), S(0.06), S(f.y + 0.9 - top - 0.3)); ellipse(cx, f.y + 0.9, 0.18, 0.06, '#475569'); }
     ctx.fillStyle = '#1f2937'; roundRect(ctx, S(cx - 0.2), S(top), S(0.4), S(0.32), S(0.05)); ctx.fill();
     ctx.fillStyle = STATE_COLOR[state]; roundRect(ctx, S(cx - 0.16), S(top + 0.04), S(0.32), S(0.24), S(0.03)); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -730,7 +732,8 @@ export function createRenderer(canvas) {
     const bx = x, by = y + h - hgt - 0.1, bw = w, bh = hgt - 0.35;
     ctx.fillStyle = '#cbd5e1'; roundRect(ctx, S(bx - 0.05), S(by - 0.05), S(bw + 0.1), S(bh + 0.1), S(0.05)); ctx.fill();
     ctx.fillStyle = '#ffffff'; ctx.fillRect(S(bx), S(by), S(bw), S(bh));
-    if (st.wbCanvas) ctx.drawImage(st.wbCanvas, S(bx), S(by), S(bw), S(bh));
+    const wb = f.uploaded ? st.boards?.get(f.id)?.canvas : st.wbCanvas;
+    if (wb) ctx.drawImage(wb, S(bx), S(by), S(bw), S(bh));
     ctx.fillStyle = '#94a3b8'; ctx.fillRect(S(bx), S(by + bh), S(bw), S(0.06));
     for (const [i, c] of [['0', '#ef4444'], ['1', '#2563eb'], ['2', '#16a34a']]) {
       ctx.fillStyle = c; ctx.fillRect(S(bx + 0.4 + i * 0.25), S(by + bh - 0.02), S(0.18), S(0.05));
@@ -744,8 +747,11 @@ export function createRenderer(canvas) {
     const bx = x - 0.1, by = y + h - hgt - 0.05, bw = w + 0.2, bh = hgt - 0.45;
     ctx.fillStyle = '#7c5a3a'; roundRect(ctx, S(bx - 0.05), S(by - 0.05), S(bw + 0.1), S(bh + 0.1), S(0.05)); ctx.fill();
     ctx.fillStyle = '#c8a97e'; ctx.fillRect(S(bx), S(by), S(bw), S(bh));
-    st.notes.slice(0, 8).forEach((n, i) => {
-      const nx = bx + 0.1 + (i % 4) * 0.52, ny = by + 0.08 + Math.floor(i / 4) * 0.38;
+    // An uploaded board shows its own notes (display.data), a narrower one fewer.
+    const notes = f.uploaded ? st.objects?.[f.id]?.display?.data?.notes || [] : st.notes;
+    const cols = Math.max(1, Math.floor((bw - 0.1) / 0.52));
+    notes.slice(0, cols * 2).forEach((n, i) => {
+      const nx = bx + 0.1 + (i % cols) * 0.52, ny = by + 0.08 + Math.floor(i / cols) * 0.38;
       ctx.save(); ctx.translate(S(nx + 0.2), S(ny + 0.15)); ctx.rotate(((i * 37) % 7 - 3) * 0.03);
       ctx.fillStyle = n.color; ctx.fillRect(-S(0.18), -S(0.14), S(0.36), S(0.3));
       ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, -S(0.1), S(0.03), 0, 7); ctx.fill();
@@ -754,6 +760,7 @@ export function createRenderer(canvas) {
   }
 
   function drawReception(f, st) {
+    if (f.uploaded) return drawBell(f, st);
     const { x, y, w, h } = f;
     const hgt = HEIGHTS.reception;
     box(x, y, w, h, hgt, '#f5f0e8', '#3d5a80', 0.2);
@@ -770,9 +777,19 @@ export function createRenderer(canvas) {
     ellipse(x + 3.8, y - hgt + 0.72, 0.1, 0.1, '#fbbf24');
   }
 
+  // An uploaded reception plugin: a desk bell on a little stand.
+  function drawBell(f, st) {
+    const { x, y } = f;
+    box(x + 0.2, y + 0.4, 0.6, 0.5, 0.6, '#f5f0e8', '#3d5a80', 0.08);
+    const top = y + 0.9 - 0.6;
+    ellipse(x + 0.5, top - 0.02, 0.2, 0.08, '#d97706');
+    ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(S(x + 0.5), S(top - 0.04), S(0.15), Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#d97706'; ctx.beginPath(); ctx.arc(S(x + 0.5), S(top - 0.2), S(0.03), 0, 7); ctx.fill();
+  }
+
   function drawPomodoro(f, st) {
     const { x, y, w, h } = f;
-    const p = st.pomo[f.zone] || { phase: 'idle' };
+    const p = (f.uploaded ? { phase: 'idle', ...st.objects?.[f.id]?.display?.data } : st.pomo[f.zone]) || { phase: 'idle' };
     const cx = x + w / 2, cy = y + h - 1.0, r = 0.62;
     ctx.fillStyle = '#57534e'; ctx.fillRect(S(cx - 0.05), S(cy), S(0.1), S(1.0));
     ellipse(cx, y + h - 0.05, 0.4, 0.12, 'rgba(0,0,0,0.15)');

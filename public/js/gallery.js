@@ -6,7 +6,7 @@
 // exactly like the office's own (render.js, objects.js).
 
 import { FURNITURE } from './map.js';
-import { readManifest, LOOKS, CARRIED, lookOf } from './manifest.js';
+import { readManifest, LOOKS, CARRIED, SURFACES, lookOf } from './manifest.js';
 import { PERMISSIONS, LEVELS, levelOf, levelRole, uploadError } from './permissions.js';
 import { can } from './roles.js';
 
@@ -23,9 +23,9 @@ export function syncGallery(items = []) {
   for (let i = FURNITURE.length - 1; i >= 0; i--) if (FURNITURE[i].uploaded) FURNITURE.splice(i, 1);
   for (const it of items) {
     if (it.carried || !Number.isFinite(it.x)) continue;
+    const type = lookOf(it.look === 'sprite' && !it.sprite ? null : it.look);
     FURNITURE.push({
-      ...it, type: lookOf(it.look === 'sprite' && !it.sprite ? null : it.look),
-      w: 1, h: 1, solid: false, interact: 'plugin', plugin: 'upload', uploaded: true,
+      ...it, type, w: 1, h: 1, solid: false, interact: SURFACES[type] || 'plugin', plugin: 'upload', uploaded: true,
     });
   }
 }

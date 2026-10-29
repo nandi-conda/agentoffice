@@ -722,7 +722,7 @@ export class Office {
       case 'pomo': return this.pomodoro(p, m);
       case 'wb': return this.whiteboard(p, m);
       case 'note': return this.noticeboard(p, m);
-      case 'coffee': return this.coffee(p);
+      case 'coffee': return this.coffee(p, m);
       case 'score': return this.score(p, m);
       case 'use': return this.use(p, m);
       case 'gallery': return this.galleryOp(p, m);
@@ -817,7 +817,7 @@ export class Office {
       peers: [...this.peers.values()].filter((q) => q.ready && q !== p).map((q) => this.publicPeer(q)),
       desks: this.desks, strokes: this.strokes, notes: this.notes, pomo: this.pomoState(),
       scores: this.scores.slice(0, 10), counters: this.counters, shouts: this.shouts.slice(-20),
-      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(), wing: this.wing,
+      bookings: this.bookings, freeq: this.freeq?.state() || {}, objects: this.objects(), feeds: this.feeds(), wing: this.wing,
       gallery: this.gallery,
       floor: this.floor, items, keeps: !!this.actorKey(p),
     };
@@ -1010,17 +1010,36 @@ export class Office {
   // The whiteboard is a WASM plugin object too (plugins/wasm-whiteboard):
   // a stroke is its `stroke` action with the stroke as data, and goes on its
   // feed. perform, not interact: strokes come faster than its cooldown.
+  // The boardroom's whiteboard, or (with `id`) an uploaded one: same strokes, its own board.
   async whiteboard(p, m) {
     const req = m.op === 'clear' ? { action: 'clear' } : m.op === 'stroke' ? { action: 'stroke', data: { points: m.points, color: m.color, size: m.size } } : null;
-    if (req) await this.ref('plugin:whiteboard').perform(this.who(p), cleanRequest(req));
+    if (!req) return;
+    if (m.id != null) {
+      const f = this.uploadOf(m, 'whiteboard');
+      return f && this.ref(`uobj:${f.id}`).perform(this.who(p), cleanRequest(req));
+    }
+    await this.ref('plugin:whiteboard').perform(this.who(p), cleanRequest(req));
   }
 
+  // The lobby's notice board, or (with `board`) an uploaded one.
   async noticeboard(p, m) {
     const req = m.op === 'add' ? { action: 'add', input: m.text } : m.op === 'remove' && /^[\w-]{1,16}$/.test(m.id || '') ? { action: `remove:${m.id}` } : null;
-    if (req) await this.ref('plugin:noticeboard').interact(this.who(p), cleanRequest(req));
+    if (!req) return;
+    if (m.board != null) {
+      const f = this.uploadOf(m, 'board');
+      return f && this.ref(`uobj:${f.id}`).interact(this.who(p), cleanRequest(req));
+    }
+    await this.ref('plugin:noticeboard').interact(this.who(p), cleanRequest(req));
   }
 
-  async coffee(p) {
+  // The kitchen's machine, or (with `id`) an uploaded one you're standing at.
+  async coffee(p, m = {}) {
+    if (m.id != null) {
+      const f = this.uploadOf(m, 'coffee');
+      if (!f || distTo(f, p) > 3) return;
+      this.holdCup(p);
+      return this.ref(`uobj:${f.id}`).interact(this.who(p), { action: 'pour' });
+    }
     this.holdCup(p);
     // Standing at the machine, you also walk off with the cup itself.
     const machine = FURNITURE.find((f) => f.id === 'coffee');
@@ -1054,6 +1073,21 @@ export class Office {
     for (const f of PLUGIN_OBJECTS) { const v = this.mirror.get(`plugin:${f.id}`); if (v?.display) out[f.id] = v.display; }
     for (const f of this.gallery) { const v = this.mirror.get(`uobj:${f.id}`); if (v?.display) out[f.id] = v.display; }
     return out;
+  }
+
+  // The feeds of uploaded objects that keep one (an uploaded whiteboard's strokes).
+  feeds() {
+    const out = {};
+    for (const f of this.gallery) { const v = this.mirror.get(`uobj:${f.id}`); if (v?.feed?.length) out[f.id] = v.feed; }
+    return out;
+  }
+
+  // An uploaded object of one of the office's own kinds (look), standing in a
+  // room, that a message from the browser names: its entity, or null.
+  // (No id: the office's own one.)
+  uploadOf(m, look) {
+    const f = typeof m.id === 'string' || typeof m.board === 'string' ? this.uploaded(m.board ?? m.id) : null;
+    return f && f.look === look ? f : null;
   }
 
   // Objects people uploaded (gallery:main), as map objects.

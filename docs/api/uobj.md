@@ -28,6 +28,16 @@ Use the object. `action` is "use" to open it, or an action id from the panel it 
 
 Returns `object | null`
 
+## `perform(who, req)`
+
+`mutates` · `caller filled in by the World` · `internal (entity to entity)`
+
+A protocol message the World turns into an action (the whiteboard's `wb` strokes): like interact, without the cooldown between uses.
+
+| Param | Type | |
+| --- | --- | --- |
+| `req` | `object` | { action, input, data } |
+
 ## `act(who, action, input?, event?)`
 
 `mutates` · `internal (entity to entity)`
@@ -61,7 +71,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
 | &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, sprite, item |
 | &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |
@@ -98,7 +108,7 @@ Where it is now (from gallery:main, when it's picked up or put down).
 | &nbsp;&nbsp;&nbsp;`item.doc` | `string ≤ 280` | What it does |
 | &nbsp;&nbsp;&nbsp;`item.emoji` | `string ≤ 8` | Its emoji (on its screen, and as an item) |
 | &nbsp;&nbsp;&nbsp;`item.glow` | `string ≤ 9` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, sprite, item |
+| &nbsp;&nbsp;&nbsp;`item.look` | `string ≤ 200` | How it's drawn: kiosk, arcade, jukebox, vending, eightball, coffee, rally, whiteboard, board, pomodoro, reception, panel, sprite, item |
 | &nbsp;&nbsp;&nbsp;`item.sprite` *(optional)* | `object` | Look sprite: its own pixel art from the manifest, { rows: ["..bb..", …], palette: { b: "#rrggbb" } }, ≤ 16 × 24 |
 | &nbsp;&nbsp;&nbsp;`item.lang` | `string ≤ 200` | wasm or js |
 | &nbsp;&nbsp;&nbsp;`item.size` | `number ≥ 0` | Code size in bytes |

@@ -22,6 +22,20 @@ pub enum Look {
     Coffee,
     /// A chequered flag on a pole.
     Flag,
+    /// A whiteboard on a stand: the office's drawing editor opens on it and
+    /// draws your feed's strokes (`append` `{ points, color, size }`, needs
+    /// `Permission::Feed`), like the boardroom's.
+    Whiteboard,
+    /// A cork board: shows the `notes` in your `display.data`
+    /// (`[{ id, text, color, by, ts, owner }]`) and opens the notice board panel.
+    NoticeBoard,
+    /// A tomato clock: draws the pomodoro state in your `display.data`
+    /// (`{ phase, endsAt, round, focusMin, breakMin }`).
+    Pomodoro,
+    /// A desk bell.
+    Bell,
+    /// A room's door panel: lit with the booking state of the room it stands in.
+    DoorPanel,
     /// Your own pixel art: set by [`Manifest::sprite`].
     Sprite,
     /// Not put on the map when uploaded: it starts as one item, named and
@@ -40,6 +54,11 @@ impl Look {
             Look::EightBall => "eightball",
             Look::Coffee => "coffee",
             Look::Flag => "rally",
+            Look::Whiteboard => "whiteboard",
+            Look::NoticeBoard => "board",
+            Look::Pomodoro => "pomodoro",
+            Look::Bell => "reception",
+            Look::DoorPanel => "panel",
             Look::Sprite => "sprite",
             Look::Item => "item",
         }

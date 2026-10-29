@@ -431,3 +431,33 @@ test('a World waking on a stale saved mirror pulls the gallery again, so an uplo
   for (const id of ids) assert.ok(err.includes(id), err);
   rt.stop();
 });
+
+test('an uploaded whiteboard, notice board or coffee machine is the real thing, with its own memory', async () => {
+  const { o, rt } = office(['did:plc:ada']);
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada'), bob = await join(o, 'bob');
+  const put = async (rid, file) => {
+    ada.msg({ t: 'gallery', op: 'upload', rid, req: { lang: 'wasm', code: plugin(file) } });
+    await until(() => ada.last('galleryres')?.rid === rid || ada.sent.some((m) => m.t === 'galleryres' && m.rid === rid));
+    return ada.sent.find((m) => m.t === 'galleryres' && m.rid === rid).result.object;
+  };
+  const wb = await put(1, 'whiteboard.wasm'), nb = await put(2, 'noticeboard.wasm'), cm = await put(3, 'coffee.wasm');
+  assert.deepEqual([wb.look, nb.look, cm.look], ['whiteboard', 'board', 'coffee']);
+
+  // Strokes go on its own feed: the drawer's other browsers and everyone else get them, the boardroom's stays clean.
+  ada.msg({ t: 'wb', op: 'stroke', id: wb.id, points: [[0.1, 0.1], [0.5, 0.5]], color: '#ef4444', size: 6 });
+  await until(() => bob.sent.some((m) => m.t === 'obj' && m.id === wb.id && m.feed?.push));
+  assert.equal(o.strokes.length, 0);
+  assert.equal((await join(o, 'cy')).last('welcome').feeds[wb.id].length, 1);
+
+  ada.msg({ t: 'note', op: 'add', text: 'standup moved', board: nb.id });
+  await until(() => bob.sent.some((m) => m.t === 'obj' && m.id === nb.id && m.display?.data?.notes?.length));
+  assert.equal(o.notes.length, 0, 'the lobby board is untouched');
+
+  ada.msg({ t: 'move', x: cm.x + 0.5, y: cm.y + 1.4, dir: 0, moving: false, teleport: true });
+  await settle();
+  ada.msg({ t: 'coffee', id: cm.id });
+  await until(() => (ada.last('inv')?.items || []).some((i) => i.kind === 'coffee'));
+  assert.equal(o.counters.coffees, 0, 'its cups are its own');
+  rt.stop();
+});

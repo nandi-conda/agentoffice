@@ -82,6 +82,7 @@ impl Plugin for Whiteboard {
         .prompt("Open the whiteboard")
         .emoji("🖍️")
         .glow("#2563eb")
+        .look(Look::Whiteboard)
         .permissions(&[Permission::Feed])
         .actions(&[
             Action::new("stroke", "Draw a stroke: data { points: [[x, y], …] (2–400, 0..1 across the board, origin top-left), color: \"#rrggbb\", size: 1–40 }"),

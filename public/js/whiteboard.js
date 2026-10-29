@@ -2,6 +2,7 @@
 // and the tiny board drawn in the boardroom share one source of truth.
 
 export const WB_W = 1200, WB_H = 640;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function createBoard() {
   const canvas = document.createElement('canvas');
@@ -32,13 +33,13 @@ export function createBoard() {
   };
 }
 
-export function openEditor(modal, board, send) {
+export function openEditor(modal, board, send, { title = 'Boardroom whiteboard', where = 'It\'s also drawn on the wall in the boardroom.' } = {}) {
   const colors = ['#1f2937', '#ef4444', '#2563eb', '#16a34a', '#f59e0b', '#a855f7', '#ffffff'];
   let color = colors[0], size = 4;
   modal.open(`
     <div class="wb">
       <div class="wb-head">
-        <h2>Boardroom whiteboard</h2>
+        <h2>${esc(title)}</h2>
         <div class="wb-tools">
           ${colors.map((c) => `<button class="swatch" data-c="${c}" style="background:${c}" aria-label="colour ${c}"></button>`).join('')}
           <select class="wb-size"><option value="3">Fine</option><option value="6" selected>Marker</option><option value="16">Chunky</option><option value="40">Eraser-size</option></select>
@@ -46,7 +47,7 @@ export function openEditor(modal, board, send) {
         </div>
       </div>
       <canvas class="wb-canvas" width="${WB_W}" height="${WB_H}"></canvas>
-      <p class="muted small">Everyone in the office sees this board live. It's also drawn on the wall in the boardroom.</p>
+      <p class="muted small">Everyone in the office sees this board live. ${esc(where)}</p>
     </div>`, 'wide');
   const el = modal.body;
   const cv = el.querySelector('.wb-canvas');

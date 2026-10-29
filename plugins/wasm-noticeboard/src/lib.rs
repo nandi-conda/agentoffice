@@ -50,6 +50,7 @@ impl Plugin for Board {
         .prompt("Read the notice board")
         .emoji("📌")
         .glow("#fde68a")
+        .look(Look::NoticeBoard)
         .actions(&[
             Action::new("add", "Pin a note").input("The note (≤ 200 characters)"),
             Action::new("remove:<id>", "Take down a note of yours (moderators: anyone's)"),

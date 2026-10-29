@@ -243,6 +243,8 @@ export class UploadedObject extends PluginObject {
   static api = {
     view: PluginObject.api.view,
     interact: { ...PluginObject.api.interact, doc: `${PluginObject.api.interact.doc} The name is the object id (u-…) from gallery_view, whose \`api\` lists the actions the object declares.` },
+    // An uploaded whiteboard's strokes, as fast as the boardroom's.
+    perform: PluginObject.api.perform,
     // The office's own calls: a carried skeleton key's `open:<room>` as its carrier reaches a door.
     act: { ...PluginObject.api.act, doc: 'The office\'s own call into the object, without the use cooldown or the walk up: a carried Skeleton Key gets `open:<room>` this way as its carrier reaches a booked door.' },
     install: { doc: 'Store the code and manifest of a new upload (from gallery:main).', params: { item: ITEM, code: str('Base64 code', B64_MAX) }, mutates: true, internal: true },

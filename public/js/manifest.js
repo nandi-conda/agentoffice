@@ -16,12 +16,16 @@ const MAX_ACTIONS = 24;
 // starts in its uploader's inventory. (Old uploads said `plinth`: a kiosk now.)
 export const LOOKS = {
   kiosk: 'Screen kiosk with its emoji', arcade: 'Arcade cabinet', jukebox: 'Jukebox', vending: 'Vending machine',
-  eightball: 'Crystal ball', coffee: 'Coffee machine', rally: 'Chequered flag', sprite: 'Its own drawing', item: 'An item in my inventory',
+  eightball: 'Crystal ball', coffee: 'Coffee machine', rally: 'Chequered flag', whiteboard: 'Whiteboard', board: 'Notice board',
+  pomodoro: 'Focus timer', reception: 'Desk bell', panel: 'Door panel', sprite: 'Its own drawing', item: 'An item in my inventory',
 };
 export const DEFAULT_LOOK = 'kiosk';
 export const CARRIED = 'item';
 export const lookOf = (look) => (LOOKS[look] ? look : DEFAULT_LOOK);
 export const SPRITE_W = 16, SPRITE_H = 24;
+// Looks whose object opens one of the browser's own surfaces instead of a
+// plain panel (main.js interact), for the office's objects and uploads alike.
+export const SURFACES = { whiteboard: 'whiteboard', board: 'noticeboard', coffee: 'coffee' };
 
 const clip = (s, n) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n) : '');
 

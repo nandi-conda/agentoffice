@@ -40,6 +40,13 @@ let items = [], floor = [], keeps = false; // what you carry, what's lying aroun
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 const board = createBoard();
+// Every whiteboard's strokes by object id: the boardroom's, and uploaded ones
+// (each keeps its own feed).
+const boards = new Map([['whiteboard', board]]);
+const boardFor = (id) => { if (!boards.has(id)) boards.set(id, createBoard()); return boards.get(id); };
+// What an uploaded object of a built-in kind shows (its display.data), where
+// the office's own read the World's shared state.
+const dataOf = (f) => objects[f.id]?.display?.data || null;
 let path = null, walkTarget = null, follow = null;
 let autoStatus = null; // status set automatically (and which one), so we can undo it
 let lastCoffee = 0;
@@ -315,6 +322,7 @@ function onMessage(m) {
       items = m.items || []; floor = m.floor || []; keeps = !!m.keeps; invChanged();
       refreshChannels();
       board.set(m.strokes);
+      for (const [id, strokes] of Object.entries(m.feeds || {})) boardFor(id).set(strokes || []);
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
       roleChanged();
@@ -375,6 +383,13 @@ function onMessage(m) {
     case 'obj': {
       const o = (objects[m.id] ||= {});
       if ('display' in m) o.display = m.display;
+      // An uploaded whiteboard's strokes.
+      if (m.feed) {
+        const b = boardFor(m.id);
+        if (m.feed.clear) b.clear(); else if (m.feed.push) b.add(m.feed.push);
+        if (modal.wb?.id === m.id) modal.wb.repaint();
+      }
+      if ('display' in m && modal.notesOpen === m.id) openNotes(FURNITURE.find((x) => x.id === m.id));
       if (m.say) {
         o.bubble = { text: m.say, at: performance.now() };
         const f = FURNITURE.find((x) => x.id === m.id);
@@ -426,7 +441,7 @@ function onMessage(m) {
       else if (m.op === 'access' && modal.sign) modal.sign();
       break;
     }
-    case 'notes': notes = m.notes; if (modal.notesOpen) openNotes(); break;
+    case 'notes': notes = m.notes; if (modal.notesOpen === 'noticeboard') openNotes(); break;
     case 'pomo': {
       if (m.now) serverOffset = m.now - Date.now();
       const before = pomo.focus?.phase;
@@ -440,7 +455,7 @@ function onMessage(m) {
       break;
     }
     case 'counters': counters = m.counters; break;
-    case 'wb': if (m.op === 'clear') board.clear(); else if (m.op === 'set') board.set(m.strokes || []); else board.add(m.stroke); modal.wb?.repaint(); break;
+    case 'wb': if (m.op === 'clear') board.clear(); else if (m.op === 'set') board.set(m.strokes || []); else board.add(m.stroke); if (modal.wb?.id === 'whiteboard') modal.wb.repaint(); break;
     case 'wave': {
       const p = peers.get(m.from);
       chime();
@@ -1387,7 +1402,7 @@ function promptFor(f) {
     case 'coffee': return 'Grab a coffee';
     case 'noticeboard': return 'Read the notice board';
     case 'plugin':
-      if (f.plugin === 'pomodoro') return pomo[f.zone]?.phase && pomo[f.zone].phase !== 'idle' ? 'Check the focus timer' : 'Start a focus session';
+      if (f.type === 'pomodoro') { const ph = (f.uploaded ? dataOf(f) : pomo[f.zone])?.phase; return ph && ph !== 'idle' ? 'Check the focus timer' : 'Start a focus session'; }
       return f.prompt || `Use the ${f.name}`;
     case 'sign': {
       const r = wing.find((x) => x.id === f.zone);
@@ -1425,13 +1440,20 @@ function interact(f) {
     return openStation();
   }
   switch (f.interact) {
-    case 'whiteboard': modal.wb = openEditor(modal, board, (m) => net.send(m)); modal.onclose = () => (modal.wb = null); break;
+    case 'whiteboard': {
+      // The boardroom's, or an uploaded one with a board of its own.
+      const id = f.uploaded ? f.id : 'whiteboard';
+      modal.wb = openEditor(modal, boardFor(id), (m) => net.send(f.uploaded ? { ...m, id } : m), { title: f.uploaded ? f.name : 'Boardroom whiteboard', where: f.uploaded ? 'It\'s drawn on the board where it stands.' : 'It\'s also drawn on the wall in the boardroom.' });
+      modal.wb.id = id;
+      modal.onclose = () => (modal.wb = null);
+      break;
+    }
     case 'coffee':
       // The machine (a plugin) pours and says so; the mug and status are ours.
-      net.send({ t: 'coffee' }); lastCoffee = performance.now(); me.cup = true;
+      net.send({ t: 'coffee', ...(f.uploaded ? { id: f.id } : {}) }); lastCoffee = performance.now(); me.cup = true;
       if (me.status === 'available') { autoStatus = 'coffee'; setStatus('coffee'); }
       break;
-    case 'noticeboard': openNotes(); break;
+    case 'noticeboard': openNotes(f); break;
     case 'room': openRoom(f.zone); break;
     case 'sign': openSign(f.zone); break;
     case 'plugin': {
@@ -1463,22 +1485,25 @@ function openClaim(deskId) {
   modal.body.querySelector('.skip').addEventListener('click', () => openStation());
 }
 
-function openNotes() {
-  const wasOpen = modal.notesOpen;
+// The notice board's panel: the lobby's, or an uploaded board's own notes.
+function openNotes(f = null) {
+  const up = f?.uploaded ? f : null, id = up ? up.id : 'noticeboard';
+  const list = up ? dataOf(up)?.notes || [] : notes;
+  const wasOpen = modal.notesOpen === id;
   const draft = wasOpen ? modal.body.querySelector('.note-text')?.value : '';
   modal.open(`
-    <h2>Notice board</h2>
+    <h2>${esc(up ? up.name : 'Notice board')}</h2>
     <p class="small muted">Leave a note for the office: wins, asks, lunch plans. Notes stay up between visits.</p>
     <div class="row"><input class="note-text" maxlength="200" placeholder="Pin a note…"><button class="btn primary pin">Pin</button></div>
-    <div class="notes">${notes.map((n) => `<div class="note" style="background:${n.color}">${esc(n.text)}<small>${esc(n.by)} · ${new Date(n.ts).toLocaleDateString()}</small>${n.owner === ownerKey() || can(me.role, 'notes.remove') ? `<button data-id="${n.id}" title="Remove">✕</button>` : ''}</div>`).join('') || '<p class="muted">Nothing pinned yet.</p>'}</div>`);
-  modal.notesOpen = true;
+    <div class="notes">${list.map((n) => `<div class="note" style="background:${n.color}">${esc(n.text)}<small>${esc(n.by)} · ${new Date(n.ts).toLocaleDateString()}</small>${n.owner === ownerKey() || can(me.role, 'notes.remove') ? `<button data-id="${n.id}" title="Remove">✕</button>` : ''}</div>`).join('') || '<p class="muted">Nothing pinned yet.</p>'}</div>`);
+  modal.notesOpen = id;
   modal.onclose = () => (modal.notesOpen = false);
   const input = modal.body.querySelector('.note-text');
   input.value = draft || '';
-  const pin = () => { if (input.value.trim()) { net.send({ t: 'note', op: 'add', text: input.value }); input.value = ''; } };
+  const pin = () => { if (input.value.trim()) { net.send({ t: 'note', op: 'add', text: input.value, ...(up ? { board: id } : {}) }); input.value = ''; } };
   modal.body.querySelector('.pin').addEventListener('click', pin);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') pin(); });
-  modal.body.querySelectorAll('.note button').forEach((b) => b.addEventListener('click', () => net.send({ t: 'note', op: 'remove', id: b.dataset.id })));
+  modal.body.querySelectorAll('.note button').forEach((b) => b.addEventListener('click', () => net.send({ t: 'note', op: 'remove', id: b.dataset.id, ...(up ? { board: id } : {}) })));
   if (!wasOpen) input.focus();
 }
 
@@ -2431,7 +2456,7 @@ function loop(t) {
 
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
-      desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
+      desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas, boards,
       target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, place, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
       hover, promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null, promptTarget: label ? target : null,
     });

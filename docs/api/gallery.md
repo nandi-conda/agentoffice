@@ -30,7 +30,7 @@ Upload a plugin and place it on the map next to you (or, when its look is `item`
 | &nbsp;&nbsp;&nbsp;`req.doc` *(optional)* | `string ≤ 280` | What it does, for the docs and the MCP tool list |
 | &nbsp;&nbsp;&nbsp;`req.emoji` *(optional)* | `string ≤ 8` | An emoji to show on it |
 | &nbsp;&nbsp;&nbsp;`req.glow` *(optional)* | `string ≤ 9 /^#[0-9a-fA-F]{3,8}$/` | Accent colour #rrggbb |
-| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"kiosk" \| "arcade" \| "jukebox" \| "vending" \| "eightball" \| "coffee" \| "rally" \| "sprite" \| "item"` | How it's drawn (default: the manifest's look, else kiosk): kiosk (screen kiosk with its emoji), arcade (arcade cabinet), jukebox (jukebox), vending (vending machine), eightball (crystal ball), coffee (coffee machine), rally (chequered flag), sprite (its own drawing), item (an item in my inventory). sprite needs a manifest with one; item starts in your inventory |
+| &nbsp;&nbsp;&nbsp;`req.look` *(optional)* | `"kiosk" \| "arcade" \| "jukebox" \| "vending" \| "eightball" \| "coffee" \| "rally" \| "whiteboard" \| "board" \| "pomodoro" \| "reception" \| "panel" \| "sprite" \| "item"` | How it's drawn (default: the manifest's look, else kiosk): kiosk (screen kiosk with its emoji), arcade (arcade cabinet), jukebox (jukebox), vending (vending machine), eightball (crystal ball), coffee (coffee machine), rally (chequered flag), whiteboard (whiteboard), board (notice board), pomodoro (focus timer), reception (desk bell), panel (door panel), sprite (its own drawing), item (an item in my inventory). sprite needs a manifest with one; item starts in your inventory |
 
 Returns `object`
 
