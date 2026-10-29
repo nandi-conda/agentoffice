@@ -208,15 +208,14 @@ input, select, textarea { font: inherit; color: inherit; }
 .tb:hover, .tb[aria-expanded="true"] { background: #efebe5; }
 .tb.mic { background: #efebe5; }
 .tb.mic.on { background: #22c55e; color: #fff; }
-.tb.mic.muted { background: #ef4444; color: #fff; }
+.tb.mute.muted { background: #ef4444; color: #fff; }
 .mic-wrap { display: flex; align-items: center; gap: 1px; }
 .tb.mic { position: relative; overflow: hidden; }
 .tb.mic svg { position: relative; z-index: 1; }
 /* Live input level: a fill rising from the bottom of the mic button. */
 .tb.mic .lvl { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.38); transform: scaleY(0); transform-origin: bottom; transition: transform 60ms linear; pointer-events: none; }
-.tb.mic:not(.on):not(.muted) .lvl { display: none; }
-.tb.mic.muted .lvl { background: rgba(255, 255, 255, 0.3); }
-.tb.mic.nudge { animation: nudge 0.9s ease-in-out infinite; }
+.tb.mic:not(.on) .lvl { display: none; }
+.tb.mute.nudge { animation: nudge 0.9s ease-in-out infinite; }
 @keyframes nudge { 50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.35); } }
 .tb.mic-more { min-width: 18px; width: 18px; padding: 0; border-radius: 7px; color: var(--muted); }
 .mic-hint { position: absolute; bottom: calc(100% + 10px); left: 0; white-space: nowrap; background: #ef4444; color: #fff; font: 600 12px Inter, system-ui; padding: 5px 9px; border-radius: 8px; box-shadow: var(--shadow); pointer-events: none; animation: pop 0.15s ease-out; }

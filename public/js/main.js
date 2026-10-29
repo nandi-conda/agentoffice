@@ -831,17 +831,30 @@ function setStatusUI() {
 
 const micBtn = $('.mic');
 micBtn.addEventListener('click', toggleMic);
-// Grey = off, green = live, red = muted (mic still open). Click cycles off → live → muted → off.
-const MIC_TIPS = {
-  '': 'Mic off. Click to talk to people near you (M)',
-  on: 'Mic live: people near you can hear you. Click to mute (M)',
-  muted: 'Mic muted: nobody can hear you. Click to turn the mic off (M)',
-};
-function setMicState(state) {
-  micBtn.className = state ? `tb mic ${state}` : 'tb mic';
-  micBtn.title = MIC_TIPS[state];
+// The mic button turns voice on and off (grey/green); the mute button next to
+// it only shows while voice is on, and goes red while you're muted.
+const muteBtn = $('.mute');
+muteBtn.addEventListener('click', toggleMute);
+function setMicState(on) {
+  if (!on && voice.muted) voice.setMuted(false);
+  micBtn.className = on ? 'tb mic on' : 'tb mic';
+  micBtn.title = on ? 'Mic on: people near you can hear you. Click to turn it off (M)' : 'Mic off. Click to talk to people near you (M)';
+  micBtn.setAttribute('aria-pressed', String(!!on));
+  muteBtn.hidden = !on;
+  syncMute();
 }
-setMicState('');
+function syncMute() {
+  muteBtn.classList.toggle('muted', voice.muted);
+  muteBtn.setAttribute('aria-pressed', String(voice.muted));
+  muteBtn.title = voice.muted ? 'Muted: nobody can hear you. Click to unmute (Shift+M)' : 'Mute (Shift+M)';
+  muteBtn.setAttribute('aria-label', voice.muted ? 'Unmute' : 'Mute');
+}
+function toggleMute() {
+  if (!voice.on || voice.listening) return;
+  voice.setMuted(!voice.muted);
+  syncMute();
+}
+setMicState(false);
 async function toggleMic() {
   if (me?.muted > serverNow() && (!voice.on || voice.listening)) return toast(`🔇 A moderator muted you until ${esc(fmtTime(me.muted))}`);
   if (!voice.on || voice.listening) {
@@ -849,16 +862,13 @@ async function toggleMic() {
     if (!ok) return toast('🎙️ Microphone permission was blocked. Allow it in your browser to talk.');
     net.send({ t: 'audio', on: true });
     me.audio = true;
-    setMicState('on');
+    setMicState(true);
     toast('🎙️ Voice on. People near you (or in the same room) can hear you.');
-  } else if (!voice.muted) {
-    voice.setMuted(true);
-    setMicState('muted');
   } else {
     voice.disable();
     net.send({ t: 'audio', on: false });
     me.audio = false;
-    setMicState('');
+    setMicState(false);
   }
   micPopSync();
 }
@@ -904,7 +914,7 @@ function paintMeter(t, mutedTalking) {
   if (mutedTalking !== hintOn) {
     hintOn = mutedTalking;
     micHint.hidden = !hintOn;
-    micBtn.classList.toggle('nudge', hintOn);
+    muteBtn.classList.toggle('nudge', hintOn);
   }
 }
 
@@ -1029,7 +1039,8 @@ function openHelp() {
       <kbd>E</kbd><span>Interact: claim a desk, desk computer, whiteboard, coffee, pomodoro, arcade, jukebox, vending machine, 8-ball, help kiosk</span>
       <kbd>Enter</kbd><span>Chat with people who can hear you</span>
       <kbd>1-9</kbd><span>Emotes. With an rpg.actor sprite these swap in your own emote sheets</span>
-      <kbd>M</kbd><span>Proximity voice: on → muted → off</span>
+      <kbd>M</kbd><span>Proximity voice on / off</span>
+      <kbd>Shift+M</kbd><span>Mute / unmute</span>
       <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
       <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
@@ -1659,7 +1670,7 @@ function roleChanged() {
     voice.disable();
     net.send({ t: 'audio', on: false });
     me.audio = false;
-    setMicState('');
+    setMicState(false);
     micPopSync();
   }
 }
@@ -1689,7 +1700,7 @@ async function ensureVoice() {
   if (!(await voice.enable({ silent: true }))) return false;
   net.send({ t: 'audio', on: true });
   me.audio = true;
-  setMicState('on');
+  setMicState(true);
   micPopSync();
   return true;
 }
@@ -1884,7 +1895,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'i') openInv();
   else if (key === 'Enter') { focusChat(); e.preventDefault(); }
   else if (key === '\\') setSide(hud.classList.contains('side-closed'));
-  else if (key === 'm') toggleMic();
+  else if (key === 'm') e.shiftKey ? toggleMute() : toggleMic();
   else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
   else if (key === 'u') showGallery();
