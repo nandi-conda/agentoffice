@@ -62,7 +62,7 @@ test('the old single-object state moves into the entities on first start', async
   assert.equal(o.desks['desk-3'].goal, 'parser');
   // The notice board, coffee machine and pomodoro are WASM plugins now: they
   // take over what their old entities were seeded with as soon as they wake.
-  await until(() => o.notes.length && o.counters.pomodoros);
+  await until(() => o.notes.length && o.counters.pomodoros && o.counters.coffees);
   assert.equal(o.notes[0].text, 'hi');
   assert.equal(o.strokes.length, 1);
   assert.equal(o.scores[0].score, 50);

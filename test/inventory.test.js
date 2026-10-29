@@ -64,8 +64,8 @@ test('coffee comes with a cup you carry; drinking it uses it up for everyone to 
   a.ws.msg({ t: 'coffee' });
   // The machine is a WASM plugin: it pours, counts and says so.
   const cup = await until(() => a.items().find((s) => s.kind === 'coffee'));
-  assert.match(a.ws.last('objui').toast, /Fresh coffee/);
-  assert.equal(o.counters.coffees, 1);
+  assert.match((await until(() => a.ws.last('objui'))).toast, /Fresh coffee/);
+  await until(() => o.counters.coffees === 1);
   assert.equal(cup.from, 'Coffee machine');
   a.ws.msg({ t: 'inv', op: 'use', id: cup.id }); await settle();
   assert.equal(a.items().length, 0);
