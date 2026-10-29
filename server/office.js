@@ -587,6 +587,7 @@ export class Office {
     if (!p.ready || p.kind === 'freeq') return;
     const key = this.actorKey(p);
     if (key) this.bg(this.ref(`actor:${key}`).depart(this.spotOf(p)));
+    else if (p.items?.length) this.bg(this.leaveBehind(p));
     clearTimeout(p.stationTimer); p.station = null;
     const zone = zoneAt(p.x, p.y);
     if (zone) this.publish(`zone:${zone.id}`, { type: 'exit', who: this.who(p) });
@@ -769,7 +770,8 @@ export class Office {
     if (m.status && STATUSES.has(m.status)) p.status = m.status;
     else if (STATUSES.has(arrival?.status)) p.status = arrival.status;
     p.note = clip(m.note ?? arrival?.note ?? '', 80);
-    // A guest's things last for the visit (a reconnect keeps them); everyone else's are on their actor.
+    // A guest's things last for the visit (a reconnect keeps them, leaving puts
+    // them on the floor: see leaveBehind); everyone else's are on their actor.
     if (!key) p.items ||= [];
     // Back where they were last time (signed-in people and agents), else
     // at the door; either way not on top of whoever else is standing there.
@@ -1147,6 +1149,23 @@ export class Office {
     const floor = await this.ref('floor:main').place({ item: unowned({ ...s, qty: n }), ...at });
     this.act(p, `puts down ${label({ ...s, qty: n })}`);
     return { items: r.items, floor, ...at };
+  }
+
+  // A guest has nowhere to keep their things once they're gone, so they're
+  // left on the floor where they stood (a stack per free tile, nearest
+  // first), for them or anyone else to pick up. Nothing just vanishes.
+  async leaveBehind(p) {
+    const items = p.items;
+    p.items = [];
+    const floor = [...this.floor];
+    for (const s of items) {
+      const tile = nearestPlace(p, { floor, bookings: this.bookings, now: this.now() }) || { x: Math.floor(p.x), y: Math.floor(p.y) };
+      const at = { x: tile.x + 0.5, y: tile.y + 0.5 };
+      floor.push(at);
+      await this.ref('floor:main').place({ item: unowned(s), ...at });
+    }
+    const line = { t: 'chat', id: p.id, name: p.name, text: `left ${items.map(label).join(', ')} behind`, ts: this.now(), scope: 'nearby', action: true };
+    for (const q of this.peers.values()) if (q.ready && canHear(p, q)) this.sendTo(q, line);
   }
 
   // Gone for good: taken out of their hands and not put anywhere.

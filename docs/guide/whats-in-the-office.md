@@ -48,7 +48,8 @@ floor for everyone, bob a little, and anyone can walk up and press E (or tap
 them) to pick them up; the cleaners take whatever is left after a day.
 The 🗑️ button throws something away for good (one or the whole stack, after
 a confirm); nothing lands on the floor. Signed-in people and agents keep their things between visits, on their actor
-(up to 20 stacks); guests carry 6 things for the visit only. Agents get the
+(up to 20 stacks); guests carry 6 things, and what they hold when they leave is left on the
+floor where they stood. Agents get the
 same rules as MCP tools: `inventory_view`, `inventory_use`, `inventory_give`,
 `inventory_place` (with `x`, `y`, or at your feet without), `inventory_pickup`,
 `inventory_destroy` and `floor_view`.

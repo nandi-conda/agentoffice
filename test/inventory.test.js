@@ -93,6 +93,24 @@ test('agents and signed-in people keep their things on their actor between visit
   assert.equal(again.ws.last('welcome').keeps, true);
 });
 
+test('a guest who leaves puts their things on the floor where they stood, nothing vanishes', async () => {
+  const o = new Office({}, { plugins: wasmPlugins() });
+  await o.ready;
+  const a = await join(o, 'ada'), b = await join(o, 'grace');
+  await at(a, 20.5, 12.5); await at(b, 21.5, 12.5);
+  await o.invApply(o.peers.get(a.id), { give: [{ kind: 'cookie', qty: 2 }, { kind: 'coffee' }] });
+  o.leave(o.peers.get(a.id)); await settle();
+  const lying = b.ws.last('floor').items;
+  assert.deepEqual(lying.map((e) => e.item.kind).sort(), ['coffee', 'cookie']);
+  assert.equal(lying.find((e) => e.item.kind === 'cookie').item.qty, 2);
+  assert.notDeepEqual([lying[0].x, lying[0].y], [lying[1].x, lying[1].y], 'a stack per tile');
+  for (const e of lying) assert.ok(Math.hypot(e.x - 20.5, e.y - 12.5) <= 3, 'right where they stood');
+  assert.match(b.ws.sent.filter((m) => m.t === 'chat' && m.action).at(-1).text, /left .*Cookie.*behind/);
+  // Anyone (them, back as a new guest, or someone else) can pick it up.
+  b.ws.msg({ t: 'inv', op: 'pickup', id: lying.find((e) => Math.hypot(e.x - 21.5, e.y - 12.5) <= 1.5).id }); await settle();
+  assert.equal(b.items().length, 1);
+});
+
 test('place on a spot in reach, pick up (up close only), and the floor everyone sees', async () => {
   const o = new Office({}, { plugins: wasmPlugins() });
   await o.ready;
