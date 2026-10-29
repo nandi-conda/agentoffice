@@ -78,7 +78,7 @@ test('the Node sandbox runs uploads in a thread and gives up on endless loops', 
 test('the Dynamic Worker sandbox loads one isolate per version, cut off from the network', async () => {
   const calls = [];
   const loader = {
-    get(id, cb) { calls.push({ id, code: cb() }); return { getEntrypoint: () => ({ interact: async (req) => ({ say: `ran ${req.action}` }) }) }; },
+    get(id, cb) { calls.push({ id, code: cb() }); return { getEntrypoint: () => ({ interact: async (req) => ({ answer: { say: `ran ${req.action}` }, logs: 'hello' }) }) }; },
   };
   const sb = new DynamicSandbox(loader);
   const r = await sb.run({ id: 'u-1', version: 'abc', lang: 'wasm', code: b64 }, { action: 'use' });
@@ -91,6 +91,12 @@ test('the Dynamic Worker sandbox loads one isolate per version, cut off from the
   assert.equal(code.modules['plugin.wasm'].wasm.byteLength, GUESTBOOK.length);
   assert.equal(code.modules['main.js'], WRAPPERS.wasm);
   assert.match(WRAPPERS.wasm, /async function runWasm/);
+  // The Dynamic Worker gets only main.js and the upload, so main.js imports nothing else.
+  for (const w of Object.values(WRAPPERS)) {
+    const imports = [...w.matchAll(/^import .* from '([^']+)'/gm)].map((m) => m[1]);
+    assert.deepEqual(imports.filter((m) => m !== 'cloudflare:workers' && !/^\.\/plugin\./.test(m)), []);
+  }
+  assert.doesNotMatch(runWasm.toString(), /\blog\(/);
 });
 
 test('placing next to someone avoids walls, furniture and other uploads', () => {

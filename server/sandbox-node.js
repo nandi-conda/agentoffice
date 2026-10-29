@@ -5,13 +5,14 @@
 // Cloudflare sandbox: node:vm isn't a security boundary.
 
 import { Worker } from 'node:worker_threads';
-import { runWasm, fromBase64 } from './sandbox.js';
+import { runWasm, fromBase64, logLines } from './sandbox.js';
 
 const SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
 const runWasm = ${runWasm.toString()};
-runWasm(workerData.bytes, workerData.req).then(
-  (ok) => parentPort.postMessage({ ok }),
+let logs = null;
+runWasm(workerData.bytes, workerData.req, (l) => { logs = l; }).then(
+  (ok) => parentPort.postMessage({ ok, logs }),
   (e) => parentPort.postMessage({ error: String(e && e.message || e) }),
 );
 `;
@@ -36,7 +37,7 @@ export class NodeSandbox {
       const w = new Worker(SOURCE, { eval: true, workerData: { bytes, req }, resourceLimits: { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 } });
       const done = (f, v) => { clearTimeout(t); w.terminate(); f(v); };
       const t = setTimeout(() => done(reject, new Error(`no answer within ${this.timeoutMs} ms`)), this.timeoutMs);
-      w.once('message', (m) => (m.error ? done(reject, new Error(m.error)) : done(resolve, m.ok)));
+      w.once('message', (m) => { if (m.error) return done(reject, new Error(m.error)); logLines(upload, m.logs); done(resolve, m.ok); });
       w.once('error', (e) => done(reject, e));
       w.once('exit', (code) => done(reject, new Error(`the plugin stopped (exit ${code})`)));
     });

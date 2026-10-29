@@ -22,6 +22,7 @@
 // Runtime-neutral: no node:* here (see sandbox-node.js for the Node side).
 
 import { readManifest } from '../public/js/manifest.js';
+import { log } from './logs.js';
 
 export const MAX_WASM = 512 * 1024;
 export const MAX_JS = 128 * 1024;
@@ -31,9 +32,11 @@ export const CPU_MS = 50;
 export const LANGS = ['wasm', 'js'];
 export const IMPORTS = ['office.log', 'env.abort'];
 
-// Runs one call of a WASM plugin. Self-contained (no outer references),
-// because its source is shipped into the sandbox with toString().
-export async function runWasm(module, req) {
+// Runs one call of a WASM plugin. Self-contained (no outer references, not
+// even imports), because its source is shipped into the sandbox with
+// toString(). What the plugin logs goes to onLog(text), and the sandbox hands
+// it back to the office to log there (logLines).
+export async function runWasm(module, req, onLog = null) {
   if (!(module instanceof WebAssembly.Module)) module = await WebAssembly.compile(module);
   let mem = null;
   const logs = [];
@@ -62,7 +65,7 @@ export async function runWasm(module, req) {
   if (outLen > 64 * 1024) throw new Error(`the plugin answered ${outLen} bytes (64 KB at most)`);
   if (outPtr + outLen > mem.buffer.byteLength) throw new Error('the plugin answered outside its memory');
   const answer = outLen ? JSON.parse(text(outPtr, outLen)) : {};
-  if (logs.length) log('info', `upload:${req.object?.id}`, logs.join(' | '));
+  if (logs.length && onLog) onLog(logs.join(' | '));
   return answer;
 }
 
@@ -156,18 +159,26 @@ export function checkUpload(lang, bytes) {
   return { size: bytes.length, exports: w.exports.map((e) => e.name), manifest: readManifest(bytes) };
 }
 
+// What an upload logged during a call (office.log), into the server logs.
+export function logLines(upload, logs) {
+  if (logs) log('info', `upload:${upload.id}`, String(logs).slice(0, 10000));
+}
+
 // ---- Cloudflare: one Dynamic Worker per upload -------------------------------
 
 // The main module of each Dynamic Worker: an entrypoint whose interact() runs
 // the uploaded module. The upload itself is plugin.wasm or plugin.js.
 export const WRAPPERS = {
   wasm: `import { WorkerEntrypoint } from 'cloudflare:workers';
-import { log } from './logs.js';
 import plugin from './plugin.wasm';
 const __name = (f) => f; // esbuild's keepNames helper, which runWasm's source may call
 const runWasm = ${runWasm.toString()};
 export default class extends WorkerEntrypoint {
-  interact(req) { return runWasm(plugin, req); }
+  async interact(req) {
+    let logs = null;
+    const answer = await runWasm(plugin, req, (l) => { logs = l; });
+    return { answer, logs };
+  }
 }
 `,
   js: `import { WorkerEntrypoint } from 'cloudflare:workers';
@@ -178,7 +189,7 @@ const fn = typeof plugin.interact === 'function' ? plugin.interact
 export default class extends WorkerEntrypoint {
   async interact(req) {
     if (!fn) throw new Error('the plugin must export a function called interact');
-    return fn(req);
+    return { answer: await fn(req), logs: null };
   }
 }
 `,
@@ -198,7 +209,9 @@ export class DynamicSandbox {
   // isolate warm by id, so the code is only decoded when it starts cold.
   async run(upload, req) {
     const worker = this.loader.get(`${upload.id}@${upload.version}`, () => this.workerCode(upload));
-    return worker.getEntrypoint().interact(req);
+    const { answer, logs } = await worker.getEntrypoint().interact(req);
+    logLines(upload, logs);
+    return answer;
   }
 
   workerCode({ lang, code }) {
