@@ -50,15 +50,20 @@ are in `gallery:main`.
 ### Turning it on on Cloudflare
 
 Dynamic Workers need the **Workers Paid** plan ($5/month per account). The
-binding is in `wrangler.toml`, commented out; uncomment it and `just deploy`:
+binding is on in `wrangler.toml`, so `just deploy` turns uploads on:
 
 ```toml
 [[worker_loaders]]
 binding = "LOADER"
 ```
 
-Without it the office still works; the upload panel says this office can't
-run uploads, and `GET /api/office` shows uploads as `offline`. Each upload is
+On the Free plan Cloudflare refuses the binding and the deploy fails;
+`just deploy` (scripts/deploy.sh) spots that and says what to check: the plan
+under **Workers & Pages → Plans** in the Cloudflare dashboard, and that
+wrangler is logged in to the account you think (`wrangler whoami`). To deploy
+on Free anyway, comment those two lines out. The office still works without
+them; the upload panel says this office can't run uploads, and
+`GET /api/office` shows uploads as `offline`. Each upload is
 one Dynamic Worker, kept warm by its id and code hash (`u-…@<sha>`). The
 Paid plan includes 1,000 of them a month; past that it's $0.002 per Dynamic
 Worker per day (waived during the beta), plus the usual CPU time.

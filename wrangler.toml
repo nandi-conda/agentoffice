@@ -67,10 +67,11 @@ entrypoint = "Kiosk"
 
 # Uploaded objects (docs/uploads.md, server/sandbox.js): each plugin people
 # upload runs in its own Dynamic Worker, with no network. Needs the Workers
-# Paid plan. Without this binding the office refuses uploads and says why.
-# Uncomment to turn uploads on:
-# [[worker_loaders]]
-# binding = "LOADER"
+# Paid plan: on the Free plan `wrangler deploy` refuses this binding (`just
+# deploy` says so). To run without uploads, comment these two lines out; the
+# office then refuses uploads and says why.
+[[worker_loaders]]
+binding = "LOADER"
 
 # Server roles to start with (comma-separated DIDs): owners run the office,
 # admins grant roles and moderate (README "Roles and moderation"). Without

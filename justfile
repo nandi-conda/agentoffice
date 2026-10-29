@@ -75,7 +75,7 @@ cf-dev-plugins: _deps
 
 # Deploy to Cloudflare Workers, plugins first so the office's service bindings resolve (needs `just cf-login`, or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
 deploy *args: docs plugins-deploy
-    node_modules/.bin/wrangler deploy {{args}}
+    scripts/deploy.sh {{args}}
 
 # Deploy the plugin Workers in plugins/ (all of them, or one: `just plugins-deploy objects`)
 plugins-deploy name="*": _deps

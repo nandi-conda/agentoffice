@@ -92,7 +92,7 @@ export class Gallery extends Entity {
     if (!who?.did) return { error: 'sign in with your AT Protocol handle to upload objects' };
     const sandbox = this.services.plugins?.sandbox;
     const lang = req.lang === 'js' ? 'js' : 'wasm';
-    if (!sandbox) return { error: 'this office can\'t run uploaded plugins yet: it needs the Worker Loader binding (docs/uploads.md)' };
+    if (!sandbox) return { error: 'this office can\'t run uploaded plugins: it was deployed without the Worker Loader binding (LOADER in wrangler.toml), which needs the Workers Paid plan (docs/uploads.md)' };
     if (!sandbox.langs.includes(lang)) return { error: `this office runs ${sandbox.langs.join(' and ')} uploads, not ${lang}` };
     if (this.items.filter((i) => i.owner.did === who.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: remove one first` };
     if (this.items.length >= MAX_OBJECTS) return { error: 'the office is full of uploaded objects right now' };
