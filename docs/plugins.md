@@ -14,16 +14,18 @@ people [upload](uploads.md). The office ships eight:
 | 🏁 Office Rally | Lobby, by the sofa | `plugins/wasm-rally` | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. Watches zones. See [the rally](uploads.md#a-bigger-example-the-office-rally). |
 | ☕ Coffee machine | Kitchen | `plugins/wasm-coffee` | Pours you a coffee into your inventory and counts every cup. The office adds the mug in your hand and the coffee-chat nudge. |
 | 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
+| 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | The Byte Snake leaderboard both cabinets share: the top 20, best first. The game runs in your browser; a finished game's score becomes its `score:<points>` action. |
 | 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
 
-The coffee machine, notice board and pomodoro draw themselves in the
-browser (the cup count on the reception desk, sticky notes, the tomato clock
-and the den's countdown), from what they put in `display.data`. They used to
-be core entities (`coffee:main`, `noticeboard:main`, `pomodoro:focus`); the
+The coffee machine, notice board, arcade and pomodoro draw themselves in the
+browser (the cup count on the reception desk, sticky notes, the high scores
+next to Byte Snake, the tomato clock and the den's countdown), from what they
+put in `display.data`. They used to be core entities (`coffee:main`,
+`noticeboard:main`, `arcade:main`, `pomodoro:focus`); the
 map object names the old one as `legacy`, and the first time the plugin
 object runs (the World wakes it when it starts) it takes over that entity's
 state, so nothing pinned or counted is lost. The old protocol messages
-(`coffee`, `note`, `pomo`) and their MCP tools still work: the World turns
+(`coffee`, `note`, `score`, `pomo`) and their MCP tools still work: the World turns
 them into the plugin's actions.
 
 Walk up to one and press **E** (or tap the prompt). A panel opens; what you

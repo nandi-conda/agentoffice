@@ -270,7 +270,7 @@ export class Office {
   // the notice board's notes, the coffee machine's count, the pomodoro.
   shown(id) { return this.mirror.get(`plugin:${id}`)?.display?.data || null; }
   get notes() { return this.shown('noticeboard')?.notes || []; }
-  get scores() { return this.mirror.get('arcade:main') || []; }
+  get scores() { return this.shown('arcade')?.scores || []; }
   get floor() { return this.mirror.get('floor:main') || []; }
   get counters() {
     const pomodoros = POMOS.reduce((n, f) => n + (this.shown(f.id)?.count || 0), 0);
@@ -427,13 +427,13 @@ export class Office {
       case 'desk': return this.broadcast({ t: 'desks', desks: this.desks });
       case 'room': return this.broadcast({ t: 'bookings', bookings: this.bookings });
       case 'whiteboard': return this.broadcast(push !== undefined ? { t: 'wb', op: 'stroke', stroke: push } : { t: 'wb', op: 'clear' }, this.peers.get(except) || null);
-      case 'arcade': return this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
       case 'plugin': {
         const { name } = parse(from);
         this.broadcast({ t: 'obj', id: name, display: value?.display || null });
         // The objects browsers draw themselves also have their own messages.
         if (name === 'noticeboard') this.broadcast({ t: 'notes', notes: this.notes });
         else if (name === 'coffee') this.broadcast({ t: 'counters', counters: this.counters });
+        else if (name === 'arcade') this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
         else if (POMOS.some((f) => f.id === name)) this.broadcastPomo();
         return;
       }
@@ -982,8 +982,12 @@ export class Office {
     }
   }
 
+  // A finished game of Byte Snake (played in the browser): the leaderboard
+  // is the arcade's WASM plugin.
   score(p, m) {
-    return this.ref('arcade:main').score(this.who(p), m.score);
+    const score = Math.floor(+m.score);
+    if (!(score >= 1 && score <= 10000)) return;
+    return this.ref('plugin:arcade').interact(this.who(p), { action: `score:${score}` });
   }
 
   // Using a plugin object (jukebox, vending machine…): its entity calls the

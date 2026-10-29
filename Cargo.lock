@@ -11,6 +11,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcade"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "coffee"
 version = "0.1.0"
 dependencies = [

@@ -45,7 +45,6 @@ nav:
       - "room (Room)": api/room.md
       - "desk (Desk)": api/desk.md
       - "whiteboard (Whiteboard)": api/whiteboard.md
-      - "arcade (Arcade)": api/arcade.md
       - "plugin (PluginObject)": api/plugin.md
       - "gallery (Gallery)": api/gallery.md
       - "uobj (UploadedObject)": api/uobj.md
@@ -55,6 +54,7 @@ nav:
       - "chan (ChannelRoom)": api/chan.md
       - "inventory (Office)": api/inventory.md
       - "mod (Office)": api/mod.md
+      - "wasm: Arcade cabinet": api/upload-arcade-cabinet.md
       - "wasm: Coffee machine": api/upload-coffee-machine.md
       - "wasm: Magic 8-ball": api/upload-magic-8-ball.md
       - "upload: Guestbook": api/upload-guestbook.md

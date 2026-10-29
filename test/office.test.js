@@ -249,3 +249,19 @@ test('joining a session that is still in picks up a sprite made since', async ()
   assert.deepEqual(watcher.ws.last('join').peer.actor.sprite, sprite);
   assert.deepEqual(first.ws.last('join').peer.actor.sprite, sprite, 'their own tabs see it too');
 });
+
+test('Byte Snake scores go on the arcade plugin\'s leaderboard, from anywhere', async () => {
+  const o = new Office({}, { plugins: wasmPlugins() });
+  const ada = await join(o, 'Ada'), grace = await join(o, 'Grace');
+  ada.ws.msg({ t: 'score', score: 120 });
+  await until(() => grace.ws.last('scores')?.scores.length === 1);
+  assert.deepEqual(grace.ws.last('scores').scores.map(({ name, score }) => [name, score]), [['Ada', 120]]);
+  assert.match(ada.ws.last('objui').toast, /best Byte Snake score/);
+  grace.ws.msg({ t: 'score', score: 99999 });
+  grace.ws.msg({ t: 'score', score: 80 });
+  await until(() => o.scores.length === 2);
+  assert.deepEqual(o.scores.map((s) => s.score), [120, 80]);
+  const late = await join(o, 'Linus');
+  assert.equal(late.ws.last('welcome').scores.length, 2);
+  o.runtime.stop();
+});

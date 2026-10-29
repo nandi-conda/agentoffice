@@ -12,7 +12,6 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [room (Room)](room.md) | A bookable meeting room. |
 | [desk (Desk)](desk.md) | A desk, claimed by one owner with a goal. |
 | [whiteboard (Whiteboard)](whiteboard.md) | The Boardroom whiteboard. |
-| [arcade (Arcade)](arcade.md) | The Byte Snake arcade cabinet and its top 20. |
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
@@ -22,6 +21,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |
 | [mod (Office)](mod.md) | Moderation and server roles. |
+| [wasm: Arcade cabinet](upload-arcade-cabinet.md) | Byte Snake and the office leaderboard: the top 20 scores, best first. |
 | [wasm: Coffee machine](upload-coffee-machine.md) | Pours you a coffee: the cup goes in your inventory. |
 | [wasm: Magic 8-ball](upload-magic-8-ball.md) | Ask a yes-or-no question and shake it. |
 | [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
@@ -81,7 +81,7 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 
 ## MCP tools
 
-55 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+53 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -97,8 +97,6 @@ Everyone has one server role (`public/js/roles.js`). Signed-in people are member
 | `whiteboard_view` | open | [whiteboard.view](whiteboard.md) |
 | `whiteboard_stroke` | signed in, in the office | [whiteboard.stroke](whiteboard.md) |
 | `whiteboard_clear` | signed in, in the office | [whiteboard.clear](whiteboard.md) |
-| `arcade_view` | open | [arcade.view](arcade.md) |
-| `arcade_score` | signed in, in the office | [arcade.score](arcade.md) |
 | `plugin_view` | open | [plugin.view](plugin.md) |
 | `plugin_interact` | signed in, in the office | [plugin.interact](plugin.md) |
 | `gallery_view` | open | [gallery.view](gallery.md) |

@@ -1,5 +1,5 @@
 // Interactive objects on the map (jukebox, vending machine, 8-ball, the
-// Office Rally, the coffee machine, notice board, pomodoro…): one entity per object, address `plugin:<object id>`.
+// Office Rally, the coffee machine, notice board, pomodoro, arcade…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
@@ -18,6 +18,7 @@ const ADOPT = {
   coffee: (v) => ({ count: v?.count || 0 }),
   noticeboard: (v) => ({ notes: Array.isArray(v) ? v : [] }),
   pomodoro: (v) => ({ ...(v?.state || {}), count: v?.count || 0 }),
+  arcade: (v) => ({ scores: Array.isArray(v) ? v : [] }),
 };
 let offline = null; // a host with no sandbox, when the runtime didn't pass one
 // Who a plugin sees on a wake-up call: the office, not a person.

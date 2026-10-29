@@ -343,9 +343,9 @@ export class Whiteboard extends Entity {
   }
 }
 
-// ---- retired: the notice board, coffee machine and pomodoro --------------
-// They're WASM plugins now (plugins/wasm-noticeboard, -coffee, -pomodoro;
-// entities plugin:noticeboard, plugin:coffee, plugin:pomodoro). These keep
+// ---- retired: the notice board, arcade, coffee machine and pomodoro ------
+// They're WASM plugins now (plugins/wasm-noticeboard, -arcade, -coffee,
+// -pomodoro; entities plugin:noticeboard, plugin:arcade, plugin:coffee, plugin:pomodoro). These keep
 // what the old entities saved so the plugin entities can take it over the
 // first time they run (`legacy` on the map object, PluginObject.adopt), and
 // take the very first offices' state (World.boot). Nothing else calls them.
@@ -357,25 +357,12 @@ export class NoticeBoard extends Entity {
   seed(notes) { if (Array.isArray(notes) && !this.state.notes) { this.state.notes = notes; return this.save(); } }
 }
 
-// ---- the arcade ------------------------------------------------------------------
 export class Arcade extends Entity {
-  static doc = 'The Byte Snake arcade cabinet and its top 20.';
-  static api = {
-    view: { doc: 'The leaderboard.', returns: arr(obj({ name: str('Player'), score: int('Score', 0), ts: int('ms since epoch', 0) }), 'Top scores') },
-    score: { doc: 'Submit a score.', who: true, params: { score: int('Score', 1, 10000) }, mutates: true },
-  };
+  static retired = true;
+  static doc = 'Retired: the arcade leaderboard is the plugin:arcade object now. Keeps the scores it had for it.';
+  static api = {};
   view() { return this.state.scores || []; }
   seed(scores) { if (Array.isArray(scores) && !this.state.scores) { this.state.scores = scores; return this.save(); } }
-
-  async score(who, score) {
-    score = num(score, 0, 10000, 0) | 0;
-    if (!score) return;
-    const scores = [...(this.state.scores || []), { name: who.name, score, ts: this.now() }];
-    scores.sort((a, b) => b.score - a.score);
-    this.state.scores = scores.slice(0, 20);
-    await this.save();
-    await this.mirror(this.state.scores);
-  }
 }
 
 export class CoffeeMachine extends Entity {
@@ -741,7 +728,7 @@ export const KINDS = {
 export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
-  'whiteboard:main', 'arcade:main', 'floor:main', 'wing:main', 'roles:main',
+  'whiteboard:main', 'floor:main', 'wing:main', 'roles:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];
