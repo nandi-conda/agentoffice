@@ -30,7 +30,8 @@ body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; ove
 a { color: var(--accent); }
 kbd { font: 600 11px Inter, system-ui; background: #1c1917; color: #fff; border-radius: 5px; padding: 2px 6px; }
 
-.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(10px); }
+/* No backdrop blur: re-blurring the map under every panel on each redraw kept the GPU busy. */
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
 .pill { background: var(--card); box-shadow: var(--shadow); border-radius: 999px; padding: 7px 14px; display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
 
 .btn { font: 600 14px Inter, system-ui; border: 0; border-radius: 10px; padding: 10px 16px; cursor: pointer; background: #e7e5e4; color: var(--ink); }
@@ -402,7 +403,6 @@ input, select, textarea { font: inherit; color: inherit; }
 
 /* ---- touch screens: finger-sized targets, no zoom-on-focus ---- */
 @media (pointer: coarse) {
-  .card { backdrop-filter: none; }
   .tb { height: 44px; min-width: 44px; }
   .chat-head { padding: 13px 12px 9px; }
   .people-head, .channels-head { min-height: 40px; }
