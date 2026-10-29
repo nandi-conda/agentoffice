@@ -378,6 +378,49 @@ test('agents talk on freeq too: as their DID with a token, else as a did:key of 
   bridge.stop();
 });
 
+test('you in another freeq client: one avatar (the office one), and what you type there reaches the office', async () => {
+  const server = fakeFreeq({ verify: async () => true });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    auth: { freeqCredentials: async (did) => ({ did, pds: 'https://pds.example', accessToken: 't', dpopProof: 'p' }) },
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async () => new Response(JSON.stringify([{ name: '#general', members: 3 }])),
+  });
+  server.outsider('bob', 'did:plc:bob').join('#general');
+  const said = [];
+  const me = office.open({ readyState: 1, send: (s) => said.push(JSON.parse(s)) }, { did: 'did:plc:alice' });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  await bridge.start();
+  await tick();
+  const zone = bridge.zoneFor('#general');
+  // Put Alice in the #general room.
+  const ghost = () => [...office.peers.values()].filter((p) => p.kind === 'freeq' && (p.did === 'did:plc:alice' || p.name === 'alice-web'));
+  const peerIn = [...office.peers.values()].find((p) => p.kind === 'freeq' && p.freeqZone === zone);
+  me.x = peerIn.x; me.y = peerIn.y;
+
+  // Alice's freeq web client: same DID, its own nick.
+  const web = server.outsider('alice-web', 'did:plc:alice');
+  web.join('#general');
+  await tick();
+  assert.equal(ghost().length, 0, 'no freeq avatar for someone who is in the office');
+
+  // What she types there shows up in the office...
+  web.say('#general', 'typed in the freeq app');
+  await tick();
+  assert.ok(said.some((m) => m.t === 'chat' && m.text === 'typed in the freeq app'));
+
+  // ...while what she says in the office isn't echoed back to her.
+  await office.handle(me, { t: 'chat', text: 'typed in the office' });
+  for (let i = 0; i < 20 && !bridge.users.get('did:plc:alice')?.irc.registered; i++) await tick();
+  await tick(); await tick();
+  assert.equal(said.filter((m) => m.t === 'chat' && m.text === 'typed in the office').length, 1);
+  assert.equal(ghost().length, 0);
+  bridge.stop();
+});
+
 test('fixed area mapping and nick cleanup', () => {
   assert.deepEqual([...parseRooms('lounge=#general, open=dev, nowhere=#x')], [['lounge', '#general'], ['open', '#dev']]);
   assert.equal(ircNick('alice.bsky.social'), 'alice');

@@ -324,6 +324,7 @@ export class FreeqBridge {
     this.listener = null;
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
     this.users = new Map(); // keyOf(peer) -> { irc, ready, used }
+    this.relayed = []; // { channel, text, at } lines our per-person connections sent, to skip their echo
     this.agentTokens = new Map(); // agent DID -> { did, token, pds }, memory only
     this.seen = new Seen();
     this.saver = new Saver(stateStore, () => this.snapshot(), { log });
@@ -336,6 +337,7 @@ export class FreeqBridge {
   // Call whenever office presence changes, and on any wake-up: it's how a
   // listener lost to a restart or a dropped connection comes back.
   presence() {
+    this.dedupe();
     const humans = [...this.office.peers.values()].some((p) => p.ready && p.kind !== 'freeq');
     if (humans) {
       clearTimeout(this.idleTimer); this.idleTimer = null;
@@ -694,6 +696,38 @@ export class FreeqBridge {
 
   // ---- freeq people in the office ------------------------------------------
 
+  // Did one of our per-person connections just send this line? (Consumes it.)
+  wasRelayed(channel, text) {
+    const now = Date.now();
+    this.relayed = this.relayed.filter((r) => now - r.at < 60000);
+    const i = this.relayed.findIndex((r) => r.channel === lower(channel) && r.text === oneLine(text));
+    if (i < 0) return false;
+    this.relayed.splice(i, 1);
+    return true;
+  }
+
+  inOffice(did) {
+    for (const q of this.office.peers.values()) if (q.kind !== 'freeq' && q.ready && q.did === did) return true;
+    return false;
+  }
+
+  // Take someone's freeq avatar away (they're here in person).
+  forget(nick) {
+    const f = this.people.get(lower(nick));
+    if (!f) return;
+    this.people.delete(lower(nick));
+    if (f.peer) this.office.removeRemote(f.peer);
+  }
+
+  // freeq avatars of people who are now in the office in person (or whose
+  // nick is one of our own connections) go away.
+  dedupe() {
+    const ours = new Set([...this.users.values()].map((u) => lower(u.irc.nick)));
+    for (const f of [...this.people.values()]) {
+      if (ours.has(lower(f.nick)) || (f.peer?.did && this.inOffice(f.peer.did))) this.forget(f.nick);
+    }
+  }
+
   isOurs(nick, account) {
     if (lower(nick) === lower(this.listener?.nick)) return true;
     for (const [did, u] of this.users) if (lower(u.irc.nick) === lower(nick) || (account && (account === did || account === u.irc.did))) return true;
@@ -707,6 +741,8 @@ export class FreeqBridge {
   person(channel, nick, account) {
     const zoneId = this.zoneFor(channel);
     if (!zoneId || !nick || this.isOurs(nick, account)) return null;
+    // Someone who's in the office already (any client, same DID) is drawn once: the office one.
+    if (account && this.inOffice(account)) { this.forget(nick); return null; }
     let f = this.people.get(lower(nick));
     if (!f) this.people.set(lower(nick), f = { nick, channels: new Map(), active: null, peer: null });
     const added = !f.channels.has(lower(channel));
@@ -814,7 +850,11 @@ export class FreeqBridge {
     // Remember it even when it's ours, so catch-up never replays it.
     if (!this.seen.hear(channel, ts, msgid)) return;
     this.saver.soon();
-    if (!nick || this.isOurs(nick, account)) return;
+    if (!nick || lower(nick) === lower(this.listener?.nick)) return;
+    // What our own per-person connections said is already in the office;
+    // skip exactly those lines. The same person typing in another freeq
+    // client (same DID, often the same nick) still comes through.
+    if (this.isOurs(nick, account) && this.wasRelayed(channel, text)) return;
     const zoneId = this.zoneFor(channel);
     if (!zoneId) return;
     const action = text.match(/^\u0001ACTION (.*)\u0001$/);
@@ -845,6 +885,7 @@ export class FreeqBridge {
       const u = await this.userConnection(p);
       u.used = Date.now();
       u.irc.join(b.channel);
+      this.relayed.push({ channel: lower(b.channel), text: oneLine(text), at: Date.now() });
       u.irc.say(b.channel, text);
       this.touch(b);
       return null;
@@ -920,6 +961,7 @@ export class FreeqBridge {
     if (!this.sweeper) this.sweeper = setInterval(() => this.sweep(), 60000);
     try {
       const who = await u.ready;
+      this.dedupe();
       this.notify(did, `Talking on freeq as ${who.nick}${who.did && who.did !== as ? ` (freeq says you're ${who.did}, not ${as})` : as !== p.did ? ` (${as})` : ''}.`, true);
     } catch (e) {
       this.users.delete(did);
