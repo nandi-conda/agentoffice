@@ -1,6 +1,6 @@
 # workstation (Workstation)
 
-The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be at a desk.
+The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on WASM plugins. Always your own: the World names it after the caller, and you must be at a desk.
 
 - address `workstation:<name>`
 - Durable Object binding `ACTOR` (class `ActorDO`)
@@ -159,7 +159,7 @@ Returns `{ out, open?, url? }`
 
 `mutates` · `caller filled in by the World` · `always the caller's own (the World picks the address)` · `caller must be at a desk` · MCP tool **`workstation_app`**
 
-Use an app that runs on a plugin Worker. `action` is "use" to open it or an action id from the panel it answered with; `input` is typed text.
+Use an app that runs on a WASM plugin. `action` is "use" to open it or an action id from the panel it answered with; `input` is typed text.
 
 | Param | Type | |
 | --- | --- | --- |

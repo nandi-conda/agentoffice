@@ -6,3 +6,4 @@ data/
 # built by `just docs`
 public/docs/
 target/
+wrangler.dev.toml

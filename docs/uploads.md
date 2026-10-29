@@ -61,9 +61,11 @@ On the Free plan Cloudflare refuses the binding and the deploy fails;
 `just deploy` (scripts/deploy.sh) spots that and says what to check: the plan
 under **Workers & Pages → Plans** in the Cloudflare dashboard, and that
 wrangler is logged in to the account you think (`wrangler whoami`). To deploy
-on Free anyway, comment those two lines out. The office still works without
-them; the upload panel says this office can't run uploads, and
-`GET /api/office` shows uploads as `offline`. Each upload is
+on Free anyway, comment those two lines out. The office still runs without
+them, but every interactive object is WASM run in this sandbox too
+([plugins.md](plugins.md)), so the jukebox, vending machine, 8-ball, kiosk
+and rally show *out of order*; the upload panel says this office can't run
+uploads, and `GET /api/office` shows objects and uploads as `offline`. Each upload is
 one Dynamic Worker, kept warm by its id and code hash (`u-…@<sha>`). The
 Paid plan includes 1,000 of them a month; past that it's $0.002 per Dynamic
 Worker per day (waived during the beta), plus the usual CPU time.
@@ -163,11 +165,12 @@ builds natively for `cargo test`.
 
 | Piece | What it gives you |
 | --- | --- |
-| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event), `now`. |
-| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`. `Response::error(msg)` is just a toast. |
+| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `event` (`entered()`, `exited()`: the zone, on a zone event), `now`, `seed` (`rng()`, `pick(&list)`, `chance(p)`: WASM has no randomness of its own, so the office sends a random seed every call), `reply` (`answer()`: what the office's model said, see below). |
+| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`, `.watch(["kitchen", "lobby"])` (≤ 12 zones; the office calls `on_enter`/`on_exit` as people walk in and out) and `.unwatch()`, `.ask(Ask::new(question).system(…))` (only the office's own objects get the model's answer; an upload's `reply` is an error, see [plugins.md](plugins.md#asking-the-offices-model)). `Response::error(msg)` is just a toast. |
 | `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
 | `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. Uploads can't `take`, so there's no `Take`. |
 | `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
+| `TestOffice` | `cargo test` stand-in for the office (below): `.seed(n)` fixes the next call's seed (calls are repeatable anyway), `.model(\|ask\| Ok("…".into()))` answers `ask`, `.asked()` lists the questions. |
 
 ### The manifest
 

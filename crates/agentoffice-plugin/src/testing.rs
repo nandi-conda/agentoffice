@@ -30,7 +30,11 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::{handle_json, Actor, Display, Item, Object, Person, Plugin, Response};
+use crate::{handle_json, Actor, Ask, Display, Item, Object, Person, Plugin, Response};
+
+/// Stands in for the office's language model: the question in, the answer
+/// (or why there's none) out.
+pub type Model = Box<dyn FnMut(&Ask) -> Result<String, String>>;
 
 /// The office's limits (server/plugins.js, server/sandbox.js, public/js/items.js).
 pub mod limits {
@@ -92,6 +96,9 @@ pub struct TestOffice<P> {
     warnings: Vec<String>,
     manifest: Value,
     next_id: u32,
+    seed: u64,
+    model: Option<Model>,
+    asked: Vec<Ask>,
     plugin: std::marker::PhantomData<P>,
 }
 
@@ -118,9 +125,26 @@ impl<P: Plugin> TestOffice<P> {
             warnings: Vec::new(),
             manifest: serde_json::from_str(&P::MANIFEST.to_json()).expect("the manifest is JSON"),
             next_id: 0,
+            seed: 1,
+            model: None,
+            asked: Vec::new(),
             plugin: std::marker::PhantomData,
         }
     }
+
+    /// The `seed` the next call gets (each call after that gets a new one).
+    /// Calls are repeatable: the same seeds every run.
+    pub fn seed(&mut self, seed: u64) -> &mut Self { self.seed = seed; self }
+
+    /// Answer [`Response::ask`] with this. Without one, asks get the reply an
+    /// office without a model gives: an `error`.
+    pub fn model(&mut self, model: impl FnMut(&Ask) -> Result<String, String> + 'static) -> &mut Self {
+        self.model = Some(Box::new(model));
+        self
+    }
+
+    /// Everything the plugin asked the model, oldest first.
+    pub fn asked(&self) -> &[Ask] { &self.asked }
 
     /// Start from this state instead of none.
     pub fn with_state(mut self, state: P) -> Self {
@@ -204,20 +228,36 @@ impl<P: Plugin> TestOffice<P> {
         self.run(who, action, input)
     }
 
-    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response {
-        self.now += 1000.0;
+    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response { self.run_with(who, action, input, None) }
+
+    fn run_with(&mut self, who: Actor, action: &str, input: Option<&str>, reply: Option<Value>) -> Response {
+        if reply.is_none() { self.now += 1000.0; }
+        let seed = self.seed;
+        self.seed = self.seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        let event = self.event_now.take();
         let nearby: Vec<Person> = self.people.values().map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone() }).collect();
         let inventory = if who.is_system() { Vec::new() } else { self.inventory(&who.name).to_vec() };
         let req = json!({
             "object": self.object, "actor": who, "action": action, "input": input,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
-            "event": self.event_now.take(),
+            "event": event, "seed": seed, "reply": reply,
         });
         let out = handle_json::<P>(&serde_json::to_vec(&req).unwrap());
         self.logs.extend(take_logs());
         assert!(out.len() <= limits::ANSWER_BYTES, "the answer is {} bytes; the office takes 64 KB at most", out.len());
         let raw: Value = serde_json::from_slice(&out).expect("the answer is JSON");
         let mut r: Response = serde_json::from_value(raw.clone()).expect("the answer fits Response");
+
+        // ask: like the office, keep this answer's state, ask the model, and
+        // call again with the reply (once: a second ask is ignored).
+        if let (Some(ask), None) = (r.ask.clone(), &reply) {
+            if let Some(state) = raw.get("state") { self.save_state(state); }
+            self.asked.push(ask.clone());
+            let answer = match self.model.as_mut() { Some(m) => m(&ask), None => Err("this office has no model".into()) };
+            let reply = match answer { Ok(text) => json!({ "text": text, "model": "test" }), Err(error) => json!({ "error": error }) };
+            self.event_now = event;
+            return self.run_with(who, action, input, Some(reply));
+        }
         self.check(&r);
 
         // give: all or nothing, like the office.
@@ -227,11 +267,7 @@ impl<P: Plugin> TestOffice<P> {
                 return r;
             }
         }
-        if let Some(state) = raw.get("state") {
-            let size = state.to_string().len();
-            if size <= limits::STATE_BYTES { self.state = state.clone(); }
-            else { self.warn(format!("state is {size} bytes; the office doesn't save state over 32 KB")); }
-        }
+        if let Some(state) = raw.get("state") { self.save_state(state); }
         if let Some(s) = &r.say { self.said.push(s.clone()); }
         if let Some(d) = &r.display { self.display = Some(d.clone()); }
         if let Some(at) = r.wake_at { self.wake_at = Some(at); }
@@ -241,6 +277,12 @@ impl<P: Plugin> TestOffice<P> {
         }
         if who.is_system() { r.ui = None; }
         r
+    }
+
+    fn save_state(&mut self, state: &Value) {
+        let size = state.to_string().len();
+        if size <= limits::STATE_BYTES { self.state = state.clone(); }
+        else { self.warn(format!("state is {size} bytes; the office doesn't save state over 32 KB")); }
     }
 
     fn give_to(&mut self, name: &str, give: &[crate::Give]) -> Result<(), String> {

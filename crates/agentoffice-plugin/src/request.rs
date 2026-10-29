@@ -87,6 +87,18 @@ pub struct Event {
     pub zone: String,
 }
 
+/// What the office's model answered to your [`Response::ask`]: `text`, or
+/// `error` when there was no answer (no model in this office, it failed,
+/// or it's an upload: only the office's own objects may ask).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Reply {
+    pub text: Option<String>,
+    /// Which model answered.
+    pub model: Option<String>,
+    pub error: Option<String>,
+}
+
 /// One call of your plugin. Your state isn't in here: it's your plugin
 /// itself (`&mut self`).
 #[derive(Clone, Debug, Default)]
@@ -108,6 +120,13 @@ pub struct Request {
     pub event: Option<Event>,
     /// The office's clock, epoch ms.
     pub now: f64,
+    /// A random number from the office, new every call: WASM has no
+    /// randomness of its own. Use [`rng`](Request::rng), [`pick`](Request::pick)
+    /// or [`chance`](Request::chance).
+    pub seed: u64,
+    /// Set on the second call of a turn that answered with [`Response::ask`]:
+    /// the same action and input again, with what the model said.
+    pub reply: Option<Reply>,
 }
 
 impl Request {
@@ -141,6 +160,40 @@ impl Request {
     pub fn has(&self, kind: &str) -> bool { self.count(kind) > 0 }
     /// The first stack of `kind` they carry.
     pub fn item(&self, kind: &str) -> Option<&Item> { self.inventory.iter().find(|i| i.kind == kind) }
+    /// Random numbers for this call, from the office's [`seed`](Request::seed).
+    pub fn rng(&self) -> Rng { Rng::new(self.seed) }
+    /// One of `list` at random (panics on an empty list). For more than one
+    /// draw in a call, use one [`rng`](Request::rng).
+    pub fn pick<'a, T>(&self, list: &'a [T]) -> &'a T { self.rng().pick(list) }
+    /// True with probability `p` (0–1).
+    pub fn chance(&self, p: f64) -> bool { self.rng().chance(p) }
+    /// What the model answered, when this is the reply to your `ask`.
+    pub fn answer(&self) -> Option<&str> { self.reply.as_ref()?.text.as_deref() }
+}
+
+/// A small random number generator (SplitMix64): plenty for dice and
+/// shuffles, not for secrets.
+#[derive(Clone, Debug)]
+pub struct Rng(u64);
+
+impl Rng {
+    pub fn new(seed: u64) -> Self { Rng(seed ^ 0x9e37_79b9_7f4a_7c15) }
+    pub fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+    /// In [0, 1).
+    pub fn next_f64(&mut self) -> f64 { (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64 }
+    /// In [0, n) (0 when n is 0).
+    pub fn below(&mut self, n: usize) -> usize { if n == 0 { 0 } else { (self.next_f64() * n as f64) as usize } }
+    pub fn chance(&mut self, p: f64) -> bool { self.next_f64() < p }
+    pub fn pick<'a, T>(&mut self, list: &'a [T]) -> &'a T { &list[self.below(list.len())] }
+    pub fn shuffle<T>(&mut self, list: &mut [T]) {
+        for i in (1..list.len()).rev() { list.swap(i, self.below(i + 1)); }
+    }
 }
 
 // The request as it arrives; the state is split off for the plugin.
@@ -156,6 +209,8 @@ pub(crate) struct RawRequest {
     pub inventory: Vec<Item>,
     pub event: Option<Event>,
     pub now: f64,
+    pub seed: u64,
+    pub reply: Option<Reply>,
 }
 
 impl RawRequest {
@@ -166,6 +221,7 @@ impl RawRequest {
             action: self.action.unwrap_or_else(|| "use".into()),
             input: self.input, fresh,
             nearby: self.nearby, inventory: self.inventory, event: self.event, now: self.now,
+            seed: self.seed, reply: self.reply,
         })
     }
 }

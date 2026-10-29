@@ -1,7 +1,7 @@
 // The desk computer: walk up to a desk, press E (or tap the monitor), and your
 // workstation comes up over the office. A small desktop with windows and a
 // taskbar; the apps are pluggable (registerApp), and the ones that run on
-// plugin Workers (apps.js) get a generic window that draws their panels.
+// WASM plugins (apps.js) get a generic window that draws their panels.
 //
 // Everything that persists lives in your Workstation entity on the server
 // (server/entities/workstation.js): this file only calls it, as
@@ -542,7 +542,7 @@ registerApp({
   },
 });
 
-// An app that runs on a plugin Worker: its panels, drawn like the objects'.
+// An app that runs on a WASM plugin: its panels, drawn like the objects'.
 function pluginApp(a) {
   return {
     id: a.id, name: a.name, icon: a.icon, size: [420, 380],

@@ -37,6 +37,8 @@
 //! - the ABI (`memory`, `alloc`, `interact`, JSON in and out) via [`export_plugin!`];
 //! - your state loaded before each call and saved after it when it changed;
 //! - a panel builder ([`Ui`]), inventory helpers ([`Request::count`], [`Give`]);
+//! - randomness from the office ([`Request::rng`], [`Request::pick`]), since
+//!   WASM has none of its own;
 //! - a [`Manifest`], checked at compile time and embedded in the module, which
 //!   the office reads on upload so the form fills itself in and agents see
 //!   your actions in `gallery_view`;
@@ -52,8 +54,8 @@ mod response;
 pub mod testing;
 
 pub use manifest::{Action, Look, Manifest};
-pub use request::{Actor, Event, Item, Object, Person, Request};
-pub use response::{Button, Display, Give, Input, List, Music, Response, Row, Ui};
+pub use request::{Actor, Event, Item, Object, Person, Reply, Request, Rng};
+pub use response::{Ask, Button, Display, Give, Input, List, Music, Response, Row, Ui};
 #[doc(hidden)]
 pub use serde;
 #[doc(hidden)]
@@ -61,7 +63,7 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{export_plugin, log, Action, Actor, Display, Event, Give, Input, Item, Look, Manifest, Plugin, Request, Response, Row, Ui};
+    pub use crate::{export_plugin, log, Action, Actor, Ask, Display, Event, Give, Input, Item, Look, Manifest, Plugin, Reply, Request, Response, Rng, Row, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }

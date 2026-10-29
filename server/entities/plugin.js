@@ -1,9 +1,8 @@
-// Interactive objects run by plugin Workers (jukebox, vending machine,
-// 8-ball, kiosk…): one entity per object on the map, address
-// `plugin:<object id>`. The entity owns the object's memory; the behaviour
-// comes from the plugin, reached through the PluginHost in this.services
-// (a service binding on Cloudflare, the built-in copy otherwise). See
-// server/plugins.js and docs/plugins.md.
+// Interactive objects on the map (jukebox, vending machine, 8-ball, kiosk,
+// the Office Rally…): one entity per object, address `plugin:<object id>`.
+// The entity owns the object's memory; the behaviour is a WASM module in
+// public/plugins, run in the sandbox by the PluginHost in this.services.
+// See server/plugins.js and docs/plugins.md.
 
 import { Entity } from './runtime.js';
 import { str, obj, opt } from './schema.js';
@@ -11,15 +10,15 @@ import { PLUGIN_OBJECTS, zoneAt } from '../../public/js/map.js';
 import { PluginHost } from '../plugins.js';
 
 const COOLDOWN_MS = 400;
-let builtins = null; // a host with no bindings, when the runtime didn't pass one
+let offline = null; // a host with no sandbox, when the runtime didn't pass one
 // Who a plugin sees on a wake-up call: the office, not a person.
 const SYSTEM = { id: 'system', key: 'system', name: 'the office', handle: null, did: null, kind: 'system', zone: null };
 
 export class PluginObject extends Entity {
   static rpc = ['interact'];
-  static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour comes from a plugin Worker over a service binding (with a built-in fallback), or from a WASM module the office ships in public/plugins, run in the uploads sandbox.';
+  static doc = 'An interactive object on the map (jukebox, vending machine, 8-ball, kiosk, the Office Rally…). Its behaviour is a WASM module the office ships in public/plugins, run in the uploads sandbox.';
   static api = {
-    view: { doc: 'What everyone sees on the object and how its plugin was last reached.', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'binding, builtin, offline, or null before first use' } }) },
+    view: { doc: 'What everyone sees on the object and how its plugin was last reached.', returns: obj({ display: { type: ['object', 'null'], description: '{ label, glow, until } or null' }, via: { type: ['string', 'null'], description: 'the sandbox that ran it (dynamic-worker, worker-thread), offline, or null before first use' } }) },
     interact: {
       doc: 'Use the object. `action` is "use" to open it, or an action id from the panel it answered with; `input` is typed text for actions that take it. The panel goes back to the caller as an objui message; what it says goes to everyone.',
       who: true,
@@ -42,15 +41,12 @@ export class PluginObject extends Entity {
   }
 
   get object() { return PLUGIN_OBJECTS.find((f) => f.id === this.name); }
-  get plugins() { return this.services.plugins || (builtins ||= new PluginHost()); }
+  get plugins() { return this.services.plugins || (offline ||= new PluginHost()); }
 
-  // The object as the PluginHost gets it. Uploads add their code, and so do
-  // the office's own WASM objects (`wasm` on the map object, the file in
-  // public/plugins, read through services.wasm), which run in the same sandbox.
+  // The object as the PluginHost gets it: `wasm` names its module in
+  // public/plugins (uploads override this with their own code).
   async pluginObject(f, zone) {
-    const o = { id: f.id, plugin: f.plugin, name: f.name, zone };
-    const w = f.wasm && (await this.services.wasm?.(f.wasm).catch((e) => { this.log('error', `can't read ${f.wasm}: ${e.message}`); return null; }));
-    return w ? { ...o, upload: { id: f.id, version: w.version, lang: 'wasm', code: w.code } } : o;
+    return { id: f.id, plugin: f.plugin, name: f.name, zone, wasm: f.wasm };
   }
 
   // What everyone sees (a label, a glow), and how the plugin was last reached.

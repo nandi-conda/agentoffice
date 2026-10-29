@@ -5,6 +5,7 @@ import { Office } from '../server/office.js';
 import { DESKS, SPAWN } from '../public/js/map.js';
 import { describeApi, generatedTools } from '../server/apidoc.js';
 import { cleanUrl } from '../server/entities/workstation.js';
+import { wasmPlugins } from './support/plugins.js';
 
 class FakeWs extends EventEmitter {
   constructor() { super(); this.readyState = 1; this.sent = []; }
@@ -31,7 +32,7 @@ let ref = 0;
 async function ws(u, method, ...args) {
   const r = ++ref;
   u.ws.msg({ t: 'ws', ref: r, method, args });
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 400; i++) {
     await tick();
     const m = u.ws.sent.find((x) => x.t === 'wsr' && x.ref === r);
     if (m) { if (m.error) throw new Error(m.error); return m.result; }
@@ -106,15 +107,15 @@ test('the focus timer rings through your actor, even after you left', async () =
   o.runtime.stop();
 });
 
-test('apps on plugin Workers answer with panels; guests get a workstation that goes with them', async () => {
-  const o = new Office({});
+test('apps on WASM plugins answer with panels; guests get a workstation that goes with them', async () => {
+  const o = new Office({}, { plugins: wasmPlugins() });
   const guest = await join(o, 'visitor');
   await toDesk(guest);
   const d = await ws(guest, 'desktop');
   assert.equal(d.guest, true);
   await ws(guest, 'noteSave', { text: 'hello' });
   const r = await ws(guest, 'app', { app: 'oracle', action: 'use' });
-  assert.equal(r.via, 'builtin');
+  assert.equal(r.via, 'worker-thread');
   assert.match(r.ui.title, /8-ball/);
   await new Promise((res) => setTimeout(res, 320));
   const a = await ws(guest, 'app', { app: 'oracle', action: 'ask', input: 'Will it ship?' });

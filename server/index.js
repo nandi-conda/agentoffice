@@ -16,7 +16,7 @@ import { createMcpOAuth, memoryStores, TTL } from './mcpauth.js';
 import { captureConsole, setLogSink, addSecret, log } from './logs.js';
 import { FreeqBridge, FREEQ_URL } from './freeq.js';
 import { LocalRuntime } from './entities/runtime.js';
-import { PluginHost } from './plugins.js';
+import { PluginHost, workersAi, restAi } from './plugins.js';
 import { NodeSandbox } from './sandbox-node.js';
 import { bundledWasm } from './sandbox.js';
 import { KINDS } from './entities/kinds.js';
@@ -93,10 +93,17 @@ async function fileStore(name, ttlMs) {
 // saved together in DATA_DIR/entities.json; on Workers each is a Durable Object.
 let entityData = {};
 try { entityData = JSON.parse(await readFile(ENTITIES_FILE, 'utf8')); } catch { /* first run */ }
-// The office's own WASM objects on the map (the rally flag): public/plugins/<file>.
-const wasmFiles = bundledWasm((file) => readFile(path.join(PUBLIC, 'plugins', file)));
+// Interactive objects are WASM (public/plugins/<file>), run in worker threads.
+// The kiosk's model is Workers AI over the REST API when there's a token.
+const plugins = new PluginHost({
+  sandbox: new NodeSandbox(),
+  wasm: bundledWasm((file) => readFile(path.join(PUBLIC, 'plugins', file))),
+  ai: process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_TOKEN
+    ? workersAi(restAi({ accountId: process.env.CLOUDFLARE_ACCOUNT_ID, token: process.env.CLOUDFLARE_AI_TOKEN }), { model: process.env.AI_MODEL })
+    : null,
+});
 const actorLoader = process.env.OFFLINE ? null : loadActor;
-const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), wasm: wasmFiles, roles: bootstrapRoles(process.env) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
+const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins, roles: bootstrapRoles(process.env) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
 
 // Each person's OAuth session is kept by their actor entity, so a restart
 // (or `just dev` reloading) doesn't lose it while their cookie still says

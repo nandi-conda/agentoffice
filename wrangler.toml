@@ -43,36 +43,19 @@ class_name = "TopicDO"
 tag = "v2"
 new_sqlite_classes = ["ActorDO", "RoomDO", "ItemDO", "TopicDO"]
 
-# Interactive objects (server/plugins.js, docs/plugins.md): each plugin
-# object on the map calls PLUGIN_<NAME>, a service binding to a
-# WorkerEntrypoint in a plugin Worker. `just deploy` deploys plugins/* first so
-# these resolve. A binding that's missing or failing falls back to the
-# built-in copy of the object, so the office keeps working without them.
-[[services]]
-binding = "PLUGIN_JUKEBOX"
-service = "agentoffice-objects"
-entrypoint = "Jukebox"
+# Interactive objects (server/plugins.js, docs/plugins.md) are WASM plugins
+# in public/plugins, run in the sandbox below. The sandbox has no network, so
+# when one asks a question (the help kiosk) the office answers with Workers
+# AI. Without this binding the kiosk answers from what it knows. To try
+# another model first, set AI_MODEL under [vars].
+[ai]
+binding = "AI"
 
-[[services]]
-binding = "PLUGIN_VENDING"
-service = "agentoffice-objects"
-entrypoint = "Vending"
-
-[[services]]
-binding = "PLUGIN_EIGHTBALL"
-service = "agentoffice-objects"
-entrypoint = "EightBall"
-
-[[services]]
-binding = "PLUGIN_KIOSK"
-service = "agentoffice-objects"
-entrypoint = "Kiosk"
-
-# Uploaded objects (docs/uploads.md, server/sandbox.js): each plugin people
-# upload runs in its own Dynamic Worker, with no network. Needs the Workers
-# Paid plan: on the Free plan `wrangler deploy` refuses this binding (`just
-# deploy` says so). To run without uploads, comment these two lines out; the
-# office then refuses uploads and says why.
+# The plugin sandbox (docs/uploads.md, server/sandbox.js): every interactive
+# object, the office's own and the ones people upload, runs in its own
+# Dynamic Worker, with no network. Needs the Workers Paid plan: on the Free
+# plan `wrangler deploy` refuses this binding (`just deploy` says so).
+# Without it the objects are out of order and uploads are refused.
 [[worker_loaders]]
 binding = "LOADER"
 

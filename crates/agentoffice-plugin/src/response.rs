@@ -43,6 +43,13 @@ pub struct Response {
     /// `None` keeps whatever you watch now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watch: Option<Vec<String>>,
+    /// Ask the office's language model. The office calls you again straight
+    /// away with the same action and input and [`Request::reply`] set; only
+    /// the `state` of this first answer is kept, the rest comes from the
+    /// second. Only the office's own objects get an answer: uploads get a
+    /// reply with an `error`, as does an office with no model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
 }
 
 impl Response {
@@ -64,6 +71,33 @@ impl Response {
     }
     /// Stop watching zones.
     pub fn unwatch(mut self) -> Self { self.watch = Some(Vec::new()); self }
+    /// Ask the office's model (see [`Response::ask`]'s field).
+    pub fn ask(mut self, ask: Ask) -> Self { self.ask = Some(ask); self }
+}
+
+/// A question for the office's language model.
+///
+/// ```
+/// use agentoffice_plugin::prelude::*;
+/// let r = Response::new().ask(Ask::new("Where is the coffee?").system("You are a help kiosk. Be brief."));
+/// ```
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Ask {
+    /// The question (≤ 2000 characters).
+    pub prompt: String,
+    /// How to answer (≤ 4000 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// 1–400 (the office's default is 200).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+impl Ask {
+    pub fn new(prompt: impl Into<String>) -> Self { Ask { prompt: prompt.into(), ..Default::default() } }
+    pub fn system(mut self, text: impl Into<String>) -> Self { self.system = Some(text.into()); self }
+    pub fn max_tokens(mut self, n: u32) -> Self { self.max_tokens = Some(n); self }
 }
 
 /// What everyone sees on the object: a floating label and an accent colour.

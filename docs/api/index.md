@@ -1,6 +1,6 @@
 # API
 
-Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml`, the plugin Workers and the example uploads' manifests, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.
+Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the WASM plugins' manifests, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.
 
 | Page | What it is |
 | --- | --- |
@@ -25,28 +25,27 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |
 | [mod (Office)](mod.md) | Moderation and server roles. |
-| [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
-| [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
-| [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
-| [plugin: Help kiosk](plugin-kiosk.md) | Answers questions about the office, with Workers AI when bound and a canned help desk otherwise. |
+| [wasm: Magic 8-ball](upload-magic-8-ball.md) | Ask a yes-or-no question and shake it. |
 | [upload: Guestbook](upload-guestbook.md) | Leave a note for the office; the last 20 stay up. |
+| [wasm: Jukebox](upload-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another for everyone nearby, and the jukebox shows what's on. |
+| [wasm: Help kiosk](upload-help-kiosk.md) | Ask where things are or how the office works. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
+| [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
 
 ## Bindings
 
 From `wrangler.toml`.
 
-| Binding | Kind | Class / service |
+| Binding | Kind | Class |
 | --- | --- | --- |
 | `OFFICE` | Durable Object | `OfficeRoom` |
 | `ACTOR` | Durable Object | `ActorDO` |
 | `ROOM` | Durable Object | `RoomDO` |
 | `ITEM` | Durable Object | `ItemDO` |
 | `TOPIC` | Durable Object | `TopicDO` |
-| `PLUGIN_JUKEBOX` | service | `agentoffice-objects` → `Jukebox` |
-| `PLUGIN_VENDING` | service | `agentoffice-objects` → `Vending` |
-| `PLUGIN_EIGHTBALL` | service | `agentoffice-objects` → `EightBall` |
-| `PLUGIN_KIOSK` | service | `agentoffice-objects` → `Kiosk` |
+| `ASSETS` | static assets | |
+| `AI` | Workers AI | |
+| `LOADER` | Worker Loader | |
 
 ## Roles
 

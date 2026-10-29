@@ -1,6 +1,7 @@
-// Uploaded plugins: code that signed-in people upload through the web UI (or
-// MCP) and place on the map. They follow the same contract as the plugin
-// Workers (server/plugins.js, docs/plugins.md) and run in a sandbox:
+// The plugin sandbox: every interactive object is WASM run here, the office's
+// own (public/plugins) and the code signed-in people upload through the web UI
+// (or MCP) and place on the map. The contract is in server/plugins.js and
+// docs/plugins.md:
 //
 //   Cloudflare  a Dynamic Worker per upload (the Worker Loader binding LOADER,
 //               Workers Paid plan): its own isolate, no network

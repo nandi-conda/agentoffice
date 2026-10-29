@@ -4,7 +4,8 @@ import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
 import { LocalRuntime } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
-import { PluginHost, sanitize } from '../server/plugins.js';
+import { sanitize } from '../server/plugins.js';
+import { wasmPlugins, fakePlugins, until } from './support/plugins.js';
 import { FURNITURE, isBlocked } from '../public/js/map.js';
 import { cleanItem, addItems, takeItems, applyChange, useLine, placeTiles, placeError, GUEST_SLOTS, MAX_QTY } from '../public/js/items.js';
 
@@ -167,34 +168,32 @@ test('giving: only to someone close, and it comes back when their hands are full
 });
 
 test('the vending machine hands you the snack; eating it uses it up', async () => {
+  // The machine gets its seed from Math.random: 0.5 is one that doesn't stick.
   const rnd = Math.random; Math.random = () => 0.5;
   try {
-    const o = new Office();
+    const o = new Office({}, { plugins: wasmPlugins() });
     await o.ready;
     const a = await join(o, 'ada');
     await at(a, spot('vending').x, spot('vending').y);
-    a.ws.msg({ t: 'use', id: 'vending', action: 'buy:cookie' }); await settle();
-    const snack = a.items()[0];
+    a.ws.msg({ t: 'use', id: 'vending', action: 'buy:cookie' });
+    const snack = await until(() => a.items()[0]);
     assert.equal(snack.kind, 'cookie');
     assert.equal(snack.from, 'Vending machine');
     a.ws.msg({ t: 'inv', op: 'use', id: snack.id }); await settle();
     assert.equal(a.items().length, 0);
     assert.match(a.ws.sent.filter((m) => m.t === 'chat' && m.action).at(-1).text, /eats a Giant Cookie/);
+    o.runtime.stop();
   } finally { Math.random = rnd; }
 });
 
 test('plugins see your things, and a take you can\'t cover changes nothing', async () => {
   const calls = [];
-  const env = {
-    PLUGIN_JUKEBOX: {
-      interact: async (req) => {
-        calls.push(req);
-        if (req.action === 'grant') return { state: { n: 1 }, give: [{ kind: 'jukebox:token', name: 'Song token', emoji: '🪙', qty: 2 }] };
-        return { state: { n: 2 }, say: 'played', take: [{ kind: 'jukebox:token', qty: 5 }] };
-      },
-    },
-  };
-  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins: new PluginHost({ env }) } });
+  const plugins = fakePlugins((req) => {
+    calls.push(req);
+    if (req.action === 'grant') return { state: { n: 1 }, give: [{ kind: 'jukebox:token', name: 'Song token', emoji: '🪙', qty: 2 }] };
+    return { state: { n: 2 }, say: 'played', take: [{ kind: 'jukebox:token', qty: 5 }] };
+  });
+  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins } });
   const o = new Office({}, { runtime: rt });
   await o.ready;
   const a = await join(o, 'ada');

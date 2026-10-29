@@ -58,9 +58,9 @@ nav:
       - "chan (ChannelRoom)": api/chan.md
       - "inventory (Office)": api/inventory.md
       - "mod (Office)": api/mod.md
-      - "plugin: Jukebox": api/plugin-jukebox.md
-      - "plugin: Vending machine": api/plugin-vending.md
-      - "plugin: Magic 8-ball": api/plugin-eightball.md
-      - "plugin: Help kiosk": api/plugin-kiosk.md
+      - "wasm: Magic 8-ball": api/upload-magic-8-ball.md
       - "upload: Guestbook": api/upload-guestbook.md
+      - "wasm: Jukebox": api/upload-jukebox.md
+      - "wasm: Help kiosk": api/upload-help-kiosk.md
       - "wasm: Office Rally": api/upload-office-rally.md
+      - "wasm: Vending machine": api/upload-vending-machine.md

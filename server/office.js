@@ -139,12 +139,14 @@ export class Office {
   // so a Durable Object waking from hibernation doesn't ask every entity again.
   // roles: the env bootstrap { owners, admins } (public/js/roles.js bootstrap());
   // without it, the runtime's services.roles.
-  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now(), runtime = null, mirror = null, onMirror = () => {}, roles = null } = {}) {
+  // plugins: the PluginHost that runs the WASM objects, when the office makes
+  // its own runtime (without one they're out of order).
+  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now(), runtime = null, mirror = null, onMirror = () => {}, roles = null, plugins = null } = {}) {
     this.peers = new Map();
     this.onChange = onChange;
     this.loadActor = loadActor;
     this.now = now;
-    this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor, roles: roles || { owners: [], admins: [] } } });
+    this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor, plugins, roles: roles || { owners: [], admins: [] } } });
     this.roleEnv = roles || this.runtime.services?.roles || { owners: [], admins: [] };
     // Owner key -> muted until (ms), so leaving and coming back doesn't lift it.
     this.mutes = new Map((saved.mutes || []).filter(([, t]) => t > now()));
@@ -441,7 +443,7 @@ export class Office {
       upSince: this.upSince,
       freeq: this.freeq?.status() || null,
       channels: this.wing,
-      // How each plugin object was last reached: binding, builtin or offline.
+      // How each plugin object last ran (dynamic-worker, worker-thread, offline).
       objects: Object.fromEntries(PLUGIN_OBJECTS.map((f) => [f.id, this.mirror.get(`plugin:${f.id}`)?.via || 'unused'])),
       // Uploaded objects and how each last ran (dynamic-worker, worker-thread, offline).
       uploads: Object.fromEntries(this.gallery.map((f) => [f.id, this.mirror.get(`uobj:${f.id}`)?.via || 'unused'])),

@@ -1,6 +1,6 @@
 // The office API, generated from what every entity kind declares (its
 // `static api`, see entities/schema.js), the World, the wrangler bindings
-// and the plugin Workers bound to items. One description feeds:
+// and the WASM plugins' manifests. One description feeds:
 //
 //   - the API pages of the MkDocs site (docs/api, `just docs`; checked by the tests)
 //   - /api/schema (the same description as JSON, live)
@@ -20,15 +20,16 @@ function instancesOf(kind) {
   return names.length ? names : null;
 }
 
-// Durable Object and service bindings from wrangler.toml (just the
-// [[durable_objects.bindings]] and [[services]] tables).
+// Durable Object bindings from wrangler.toml (the [[durable_objects.bindings]]
+// tables), plus the other bindings by name ([ai], [[worker_loaders]], [assets]).
 export function parseWrangler(text) {
-  const out = { durableObjects: [], services: [] };
+  const out = { durableObjects: [], other: [] };
+  const OTHER = { '[ai]': 'Workers AI', '[[worker_loaders]]': 'Worker Loader', '[assets]': 'static assets' };
   let cur = null;
   for (const line of String(text).split('\n').map((l) => l.trim())) {
     if (line.startsWith('[')) {
-      cur = line === '[[durable_objects.bindings]]' ? {} : line === '[[services]]' ? {} : null;
-      if (cur) (line === '[[services]]' ? out.services : out.durableObjects).push(cur);
+      cur = line === '[[durable_objects.bindings]]' ? {} : OTHER[line] ? { kind: OTHER[line] } : null;
+      if (cur) (cur.kind ? out.other : out.durableObjects).push(cur);
       continue;
     }
     const m = cur && line.match(/^(\w+)\s*=\s*"([^"]*)"/);
@@ -37,11 +38,10 @@ export function parseWrangler(text) {
   return out;
 }
 
-// plugins: [{ name, doc, prompt, api, binding, service, entrypoint, source,
-// objects }], what each plugin Worker's describe() returns plus where it's bound.
-// uploads: [{ name, doc, prompt, api, file, source }], the manifests of the
-// example uploads in public/plugins (public/js/manifest.js).
-export function describeApi({ kinds = KINDS, wrangler = null, plugins = [], uploads = [] } = {}) {
+// uploads: [{ name, doc, prompt, api, file, source, objects }], the manifests
+// of the WASM plugins in public/plugins (public/js/manifest.js): the office's
+// own objects (objects = their ids on the map) and the example uploads.
+export function describeApi({ kinds = KINDS, wrangler = null, uploads = [] } = {}) {
   const entities = Object.entries(kinds).map(([kind, Kind]) => {
     const d = describeKind(kind, Kind);
     const binding = BINDINGS[kind] || null;
@@ -53,7 +53,6 @@ export function describeApi({ kinds = KINDS, wrangler = null, plugins = [], uplo
   return {
     world: { kind: 'world', address: 'world:main', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], ...WORLD },
     entities,
-    plugins,
     uploads,
     bindings: wrangler,
   };
@@ -180,23 +179,12 @@ function sections(api) {
     doc: 'Every entity answers these besides its own methods (server/entities/runtime.js). Entities talk by direct RPC (this.ref(address).method()), messages (this.tell(address, type, data) → receive → onMessage) and pub/sub (this.subscribe(topic), this.publish(topic, ev) → notify → onEvent). Calls are structured-cloned on Node and on Workers alike.',
     api: Object.fromEntries(Object.entries(BUILTIN_API).filter(([m, spec]) => shared(m, spec))),
   };
-  return [entity(api.world), { ...entity(builtins), id: 'entity', title: 'Every entity (built-ins)' }, ...api.entities.map(entity), ...api.plugins.map((p) => ({
-    id: `plugin-${p.binding.toLowerCase().replace(/^plugin_/, '').replace(/_/g, '-')}`,
-    title: `plugin: ${p.name}`,
-    doc: `${p.doc}${p.prompt ? ` People see it as “${p.prompt}”.` : ''}`,
-    where: [
-      `service binding \`${p.binding}\` → Worker \`${p.service}\`, WorkerEntrypoint \`${p.entrypoint}\` (source \`${p.source}\`)`,
-      p.objects.length && `on the map as ${p.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${p.objects.map((o) => `\`${o}\``).join(', ')})`,
-      'every call goes through the office (server/plugins.js), which clips and shape-checks the answer and falls back to the built-in copy when the binding is missing',
-    ].filter(Boolean),
-    methods: pluginMethods(p.api),
-    events: [],
-  })), ...(api.uploads || []).map((u) => ({
+  return [entity(api.world), { ...entity(builtins), id: 'entity', title: 'Every entity (built-ins)' }, ...api.entities.map(entity), ...(api.uploads || []).map((u) => ({
     id: `upload-${u.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
     title: `${u.objects?.length ? "wasm" : "upload"}: ${u.name}`,
     doc: `${u.doc}${u.prompt ? ` People see it as “${u.prompt}”.` : ''}`,
     where: u.objects?.length ? [
-      `a WASM plugin the office ships: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from; it runs in the uploads sandbox`,
+      `a WASM plugin the office ships: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from; it runs in the plugin sandbox`,
       `on the map as ${u.objects.map((o) => `\`plugin:${o}\``).join(', ')}: use it with the MCP tool \`plugin_interact\` (name ${u.objects.map((o) => `\`${o}\``).join(', ')}, action = one of these)`,
     ] : [
       `an example upload: \`${u.file}\`, built from \`${u.source}\` with the agentoffice-plugin crate, whose manifest these actions come from`,
@@ -207,7 +195,7 @@ function sections(api) {
   }))];
 }
 
-const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml`, the plugin Workers and the example uploads\' manifests, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.';
+const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the WASM plugins\' manifests, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.';
 
 const ACCESS = { observer: 'open', guest: 'signed in, in the office' };
 
@@ -233,9 +221,9 @@ export function renderPages(api) {
   for (const s of secs) index.push(`| [${s.title}](${s.id}.md) | ${cell(s.doc.split(/(?<=\.)\s/)[0])} |`);
   index.push('');
   if (api.bindings) {
-    index.push('## Bindings', '', 'From `wrangler.toml`.', '', '| Binding | Kind | Class / service |', '| --- | --- | --- |');
+    index.push('## Bindings', '', 'From `wrangler.toml`.', '', '| Binding | Kind | Class |', '| --- | --- | --- |');
     for (const b of api.bindings.durableObjects) index.push(`| \`${b.name}\` | Durable Object | \`${b.class_name}\` |`);
-    for (const b of api.bindings.services) index.push(`| \`${b.binding}\` | service | \`${b.service}\`${b.entrypoint ? ` → \`${b.entrypoint}\`` : ''} |`);
+    for (const b of api.bindings.other || []) if (b.binding) index.push(`| \`${b.binding}\` | ${b.kind} | |`);
     index.push('');
   }
   const tools = generatedTools(api);

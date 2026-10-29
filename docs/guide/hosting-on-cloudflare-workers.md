@@ -50,8 +50,8 @@ and return, and flags: `mutates`, `who`, `ctx`, `inZone`, `internal`) and
 turns every non-internal method into a tool named `<kind>_<method>`
 (`desk_claim`, `noticeboard_add`, `room_book`, `pomodoro_start`, `*_view`…).
 The World fills in the caller and checks the rules (`Office.call`). `just
-deploy` regenerates the docs first and the tests fail if they're stale. Plugin
-Workers on service bindings describe themselves the same way (`describe()`).
+deploy` regenerates the docs first and the tests fail if they're stale. WASM
+plugins describe themselves with the manifest embedded in the module.
 
 The first start after this change hands the old single-object state (desks,
 notes, scores, counters, strokes, bookings) to the entities; the old rows are

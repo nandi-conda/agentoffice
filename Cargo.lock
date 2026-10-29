@@ -11,6 +11,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "eightball"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+]
+
+[[package]]
 name = "guestbook"
 version = "0.1.0"
 dependencies = [
@@ -24,6 +32,23 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "jukebox"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "kiosk"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+]
 
 [[package]]
 name = "memchr"
@@ -117,6 +142,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "vending"
+version = "0.1.0"
+dependencies = [
+ "agentoffice-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "zmij"

@@ -1,4 +1,4 @@
-// The API description every entity kind (and every plugin Worker) declares.
+// The API description every entity kind declares.
 // It is plain JSON so it crosses Durable Object and service binding RPC, and
 // it is the one source for the API docs (server/apidoc.js → docs/API.md,
 // /docs, /api/schema) and for the MCP tools generated from it (server/mcp.js).

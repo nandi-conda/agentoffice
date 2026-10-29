@@ -63,12 +63,12 @@ test('the rally ships as a WASM module that passes the upload checks', async () 
 
 test('without a sandbox the rally is out of order, not a crash', async () => {
   const host = new PluginHost();
-  const r = await host.interact({ object: { id: 'rally', plugin: 'rally', name: 'Office Rally', upload: { id: 'rally', version: 'x', lang: 'wasm', code: '' } }, actor: { id: 'p1', name: 'Ada', kind: 'human' } });
+  const r = await host.interact({ object: { id: 'rally', plugin: 'rally', name: 'Office Rally', wasm: 'rally.wasm' }, actor: { id: 'p1', name: 'Ada', kind: 'human' } });
   assert.equal(r.via, 'offline');
 });
 
 test('in the office: the flag watches the route, walking it wins a medal', async () => {
-  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins: new PluginHost({ sandbox: new NodeSandbox({ timeoutMs: 4000 }) }), wasm: bundledWasm(wasmFile) } });
+  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins: new PluginHost({ sandbox: new NodeSandbox({ timeoutMs: 4000 }), wasm: bundledWasm(wasmFile) }) } });
   try {
     const o = new Office({}, { runtime: rt });
     await o.ready;

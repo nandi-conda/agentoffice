@@ -13,27 +13,24 @@
 
 ## Interactive objects (plugins)
 
-The jukebox, vending machine, magic 8-ball and help kiosk get their behaviour
-from a separate Worker over a Cloudflare **service binding**: each is an item
-entity that calls a `WorkerEntrypoint` (`PLUGIN_JUKEBOX` → `Jukebox`, …) with
-who used it, what they picked and the object's saved state, and gets back new
-state, a speech bubble, a label and a small panel. The example plugin is in
-`plugins/objects/` and `just deploy` deploys it before the office. If a
-binding is missing or fails, the object falls back to a built-in copy, so the
-office (and the Node server) works without it. Writing your own:
-[docs/plugins.md](../plugins.md).
-
-The **Office Rally** flag is a WASM plugin (`plugins/wasm-rally/`, Rust): a
-checkpoint race that asks the office to `watch` the route's zones (walking
-into one calls it back), runs on the object's Durable Object alarms, keeps
-its all-time board in the object's state and hands out medals.
+The jukebox, vending machine, magic 8-ball, help kiosk and the **Office
+Rally** flag are WASM plugins: Rust crates in `plugins/wasm-*` built with the
+agentoffice-plugin crate into `public/plugins/*.wasm`, and run in the same
+sandbox as uploaded objects (a Dynamic Worker on Cloudflare, a worker thread
+on Node). Each is an item entity that hands the module who used it, what they
+picked and the object's saved state, and gets back new state, a speech
+bubble, a label and a small panel. The sandbox has no network, so the kiosk
+asks the office for its answer (`ask`), and the office runs Workers AI. The
+rally asks the office to `watch` the route's zones (walking into one calls it
+back), runs on the object's Durable Object alarms and hands out medals.
+Writing your own: [docs/plugins.md](../plugins.md).
 
 ## Uploaded objects
 
 Signed-in people can upload a plugin of their own from the browser (**U**,
 or 🧩 in the toolbar) and drop it on the floor next to them: a WebAssembly
 module speaking a small JSON ABI, or on Cloudflare a JS module. It follows the
-same contract as the plugin Workers. Uploads never run inside the office: on
+same contract as the office's own objects. Uploads never run inside the office: on
 Cloudflare each one is its own Dynamic Worker with no network (needs the
 Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
 limit. Only the uploader (or a moderator) can remove one. How it
@@ -79,7 +76,7 @@ not the desk's, so the same one comes up at whichever desk you use.
 - **Things**: your inventory, the same panel as **I**.
 - **Desk monitor**: share your screen to your desk's monitor, and people
   standing within a few steps (with audio on) can watch it.
-- Apps that run on plugin Workers (**Ask the office**, **Magic 8-Ball**) use
+- Apps that run on WASM plugins (**Ask the office**, **Magic 8-Ball**) use
   the same contract and declarative panels as the objects on the map; list
   more in `public/js/apps.js`. Built-in apps register with `registerApp`
   in `public/js/workstation.js`.

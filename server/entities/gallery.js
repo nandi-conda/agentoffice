@@ -7,7 +7,7 @@
 //   uobj:<id>      one per object: its code (own storage key, so state saves
 //                  don't rewrite it) and its memory. A PluginObject whose
 //                  plugin runs in the sandbox (server/sandbox.js), with the
-//                  same contract as the plugin Workers.
+//                  same contract as the office's own WASM objects.
 //
 // The uploader (or a moderator, see public/js/roles.js) can remove an object again.
 

@@ -9,6 +9,7 @@ import { build } from '../scripts/docs.mjs';
 import { Office } from '../server/office.js';
 import { AgentAuth } from '../server/agentauth.js';
 import { McpHub } from '../server/mcp.js';
+import { wasmPlugins } from './support/plugins.js';
 
 test('the generated docs pages are up to date (run `just docs`)', async () => {
   for (const [file, text] of Object.entries(await build())) {
@@ -43,7 +44,7 @@ test('generated tools: names, read-only split, no internal methods', () => {
 });
 
 async function setup() {
-  const office = new Office({});
+  const office = new Office({}, { plugins: wasmPlugins() });
   await office.ready;
   const hub = new McpHub({ office, auth: new AgentAuth({ fetch: async () => new Response('', { status: 404 }), resolve: async () => ({}) }), token: 'op' });
   const connect = async (headers = {}) => {

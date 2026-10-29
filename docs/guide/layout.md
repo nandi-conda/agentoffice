@@ -11,15 +11,15 @@ public/js/rooms.js      meeting room booking rules, status and holders (shared)
 public/js/rtc.js        proximity voice + A/V room video and screen share (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking
 public/js/workstation.js  the desk computer: window manager, taskbar and built-in apps
-public/js/apps.js       workstation apps that run on plugin Workers (shared)
+public/js/apps.js       workstation apps that run on WASM plugins (shared)
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
 server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js, channels.js)
-server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
+server/plugins.js       plugin objects: runs their WASM in the sandbox, answer clean-up, the model for `ask`
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)
-plugins/objects/        example plugin Worker: jukebox, vending machine, 8-ball, help kiosk
+plugins/wasm-jukebox/, wasm-vending/, wasm-eightball/, wasm-kiosk/  the office's objects (Rust WASM); built copies in public/plugins/
 plugins/wasm-rally/     the Office Rally checkpoint race (Rust WASM; zone events, alarms, medals); built copy in public/plugins/
 public/js/objects.js    panels for plugin objects
 public/js/gallery.js    the upload panel, and uploaded objects on the map

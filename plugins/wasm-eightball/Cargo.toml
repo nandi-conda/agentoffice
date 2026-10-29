@@ -1,0 +1,13 @@
+[package]
+name = "eightball"
+version = "0.1.0"
+description = "The office magic 8-ball, as a WASM plugin."
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+agentoffice-plugin = { path = "../../crates/agentoffice-plugin" }
+serde = { version = "1", features = ["derive"] }

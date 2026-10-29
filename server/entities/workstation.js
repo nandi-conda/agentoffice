@@ -2,7 +2,7 @@
 // comes up, whichever desk you're at. One entity per identity
 // (`workstation:<did>` or `workstation:agent:<name>`), hosted next to the
 // actors: notes, a todo list, bookmarks, a personal focus timer, how the
-// windows were laid out, a small shell, and apps run by plugin Workers.
+// windows were laid out, a small shell, and apps run by WASM plugins.
 //
 // The address is never chosen by the caller: the World names it after
 // whoever is calling (`self` in the api), so nobody can read or create
@@ -22,7 +22,7 @@ const shortId = () => crypto.randomUUID().slice(0, 8);
 
 export const LIMITS = { notes: 30, noteText: 20000, todos: 100, links: 40, prefs: 8 * 1024, timerMin: 240 };
 const COOLDOWN_MS = 300;
-let builtins = null;
+let offline = null;
 
 const NOTE = obj({ id: str('Note id'), title: str('Title', 80), text: str('Text', LIMITS.noteText), updated: int('ms since epoch', 0) });
 const TODO = obj({ id: str('Todo id'), text: str('What to do', 200), done: bool('Done'), at: int('Added, ms since epoch', 0) });
@@ -48,7 +48,7 @@ export function cleanUrl(u) {
 }
 
 export class Workstation extends Entity {
-  static doc = 'The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on plugin Workers. Always your own: the World names it after the caller, and you must be at a desk.';
+  static doc = 'The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on WASM plugins. Always your own: the World names it after the caller, and you must be at a desk.';
   static api = {
     view: { doc: 'Nothing: a workstation shows the office nothing.', internal: true },
     desktop: { doc: 'Your workstation: notes, todos, bookmarks, timer, layout and the apps you can open.', ...DESK, returns: DESKTOP },
@@ -69,7 +69,7 @@ export class Workstation extends Entity {
       params: { prefs: { type: 'object', description: 'Layout' } } },
     run: { doc: 'Run one line in the workstation shell (try "help"): who, desks, rooms, todo, notes, timer, links and more. Returns what it printed.', ...DESK, mutates: true,
       params: { line: str('The command line', 500) }, returns: obj({ out: str('What it printed', 20000), open: opt(str('An app the browser should open')), url: opt(str('A page to open in the browser app')) }) },
-    app: { doc: 'Use an app that runs on a plugin Worker. `action` is "use" to open it or an action id from the panel it answered with; `input` is typed text.', ...DESK, mutates: true,
+    app: { doc: 'Use an app that runs on a WASM plugin. `action` is "use" to open it or an action id from the panel it answered with; `input` is typed text.', ...DESK, mutates: true,
       params: { req: obj({ app: str('App id (see desktop().apps)', 32), action: opt(str('Action id', 64, { pattern: '^[\\w:.-]{1,64}$' })), input: opt({ type: ['string', 'null'], maxLength: 500, description: 'Typed text' }) }, 'What to do') },
       returns: { type: ['object', 'null'], description: '{ ui, say, toast, via }: what the plugin answered; null when called again within 300 ms' } },
   };
@@ -80,7 +80,7 @@ export class Workstation extends Entity {
     this.lastApp = 0;
   }
 
-  get plugins() { return this.services.plugins || (builtins ||= new PluginHost()); }
+  get plugins() { return this.services.plugins || (offline ||= new PluginHost()); }
   get notes() { return (this.state.notes ||= []); }
   get todos() { return (this.state.todos ||= []); }
   get links() { return (this.state.links ||= []); }
@@ -215,8 +215,8 @@ export class Workstation extends Entity {
     return true;
   }
 
-  // ---- apps on plugin Workers ------------------------------------------------
-  // The same contract as the objects on the map (plugins/objects): the app
+  // ---- apps on WASM plugins -------------------------------------------------
+  // The same contract and modules as the objects on the map: the app
   // gets an object of its own (`ws-<app>`), keeps its state here, and answers
   // with a declarative panel. Nothing is said out loud: it's your screen.
   async app(who, { app, action = 'use', input = null } = {}) {
@@ -228,7 +228,7 @@ export class Workstation extends Entity {
     this.lastApp = now;
     const apps = (this.state.apps ||= {});
     const { result, state, via } = await this.plugins.interact({
-      object: { id: `ws-${a.id}`, plugin: a.plugin, name: a.name, zone: who.zone || null },
+      object: { id: `ws-${a.id}`, plugin: a.plugin, name: a.name, zone: who.zone || null, wasm: a.wasm },
       actor: who, action, input, state: apps[a.id] ?? null, nearby: [],
     });
     apps[a.id] = state;

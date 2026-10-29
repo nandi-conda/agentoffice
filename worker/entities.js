@@ -7,7 +7,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { EntityHost, makeRef, parse } from '../server/entities/runtime.js';
 import { KINDS } from '../server/entities/kinds.js';
 import { loadActor } from '../server/atproto.js';
-import { PluginHost } from '../server/plugins.js';
+import { PluginHost, workersAi } from '../server/plugins.js';
 import { DynamicSandbox, bundledWasm } from '../server/sandbox.js';
 import { captureConsole, setLogSink, forwarder } from '../server/logs.js';
 import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
@@ -19,19 +19,22 @@ export { BINDINGS };
 export class DORuntime {
   constructor(env) {
     this.env = env;
-    // plugins: interactive objects call their plugin Worker through the
-    // PLUGIN_<NAME> service bindings in env (see server/plugins.js).
-    // Uploaded objects run in Dynamic Workers when the office has a Worker
-    // Loader binding (LOADER, Workers Paid); without one uploads are refused.
+    // plugins: interactive objects are WASM (see server/plugins.js), the
+    // office's own read from the static assets (public/plugins), uploads from
+    // their entity. Both run in Dynamic Workers through the Worker Loader
+    // binding (LOADER, Workers Paid); without one they're out of order and
+    // uploads are refused. Their `ask` goes to Workers AI (the AI binding).
     this.services = {
       loadActor: env.OFFLINE ? null : loadActor,
-      plugins: new PluginHost({ env, sandbox: env.LOADER ? new DynamicSandbox(env.LOADER) : null }),
-      // The office's own WASM objects (the rally flag), from the static assets.
-      wasm: env.ASSETS ? bundledWasm(async (file) => {
-        const r = await env.ASSETS.fetch(`https://assets.local/plugins/${file}`);
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.arrayBuffer();
-      }) : null,
+      plugins: new PluginHost({
+        sandbox: env.LOADER ? new DynamicSandbox(env.LOADER) : null,
+        wasm: env.ASSETS ? bundledWasm(async (file) => {
+          const r = await env.ASSETS.fetch(`https://assets.local/plugins/${file}`);
+          if (!r.ok) throw new Error(`${r.status}`);
+          return r.arrayBuffer();
+        }) : null,
+        ai: env.AI ? workersAi(env.AI, { model: env.AI_MODEL }) : null,
+      }),
       // Owners and admins to start with (OWNER_DIDS, ADMIN_DIDS): public/js/roles.js.
       roles: bootstrapRoles(env),
     };
