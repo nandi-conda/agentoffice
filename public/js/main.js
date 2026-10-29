@@ -1665,16 +1665,43 @@ function tapAt(sx, sy, touch = false) {
   const c = canvas.getBoundingClientRect();
   sx -= c.left; sy -= c.top;
   if (placing) return placeAt(R.toWorld(sx, sy));
-  const hit = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
-  if (hit) return openProfile(hit);
-  const w = R.toWorld(sx, sy);
+  const h = hitAt(sx, sy, touch);
+  if (h.peer) return openProfile(h.peer);
   // Something on the floor: walk over and pick it up.
-  const e = nearestFloorItem(floor, w.x, w.y + 0.2, touch ? 0.7 : 0.5);
-  if (e) return walkTo(e.x, e.y, { floorItem: e.id, x: e.x, y: e.y, w: 0, h: 0 });
+  if (h.item) return walkTo(h.item.x, h.item.y, { floorItem: h.item.id, x: h.item.x, y: h.item.y, w: 0, h: 0 });
   // Clicking a piece of furniture walks to it and uses it on arrival.
-  const f = FURNITURE.find((f2) => (f2.interact || f2.seat) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
-  walkTo(w.x, w.y, f);
+  walkTo(h.w.x, h.w.y, h.f);
 }
+// What's under a point on the map (canvas pixels): a person, a floor item or usable furniture.
+function hitAt(sx, sy, touch = false) {
+  const peer = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
+  const w = R.toWorld(sx, sy);
+  if (peer) return { peer, w };
+  const item = nearestFloorItem(floor, w.x, w.y + 0.2, touch ? 0.7 : 0.5);
+  if (item) return { item, w };
+  const f = FURNITURE.find((f2) => (f2.interact || f2.seat) && w.x >= f2.x - 0.1 && w.x <= f2.x + f2.w + 0.1 && w.y >= f2.y - 1 && w.y <= f2.y + f2.h + 0.1);
+  return { f, w };
+}
+
+// Mouse hover: a pointer (and a faint outline) over anything clicking would
+// use, not-allowed over things in a room that's booked and locked to you.
+let hover = null;
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || !me) return;
+  const c = canvas.getBoundingClientRect();
+  const h = placing ? {} : hitAt(e.clientX - c.left, e.clientY - c.top);
+  hover = h.f || null;
+  let cursor = '';
+  if (h.peer || h.item) cursor = 'pointer';
+  else if (h.f) {
+    const z = zoneAt(h.f.x + h.f.w / 2, h.f.y + h.f.h / 2);
+    const locked = z?.bookable && z !== zoneAt(me.x, me.y) && lockedOut(bookings, z.id, me, serverNow());
+    cursor = locked ? 'not-allowed' : 'pointer';
+    if (locked) hover = null;
+  }
+  if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+});
+canvas.addEventListener('pointerleave', () => { hover = null; canvas.style.cursor = ''; });
 
 // A mouse acts on press. A finger acts on release: a tap walks, a drag turns
 // into a joystick centred where it started, and two fingers pinch to zoom.
@@ -1999,7 +2026,7 @@ function loop(t) {
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
       target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, place, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others), wing,
-      promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null, promptTarget: label ? target : null,
+      hover, promptSize: label ? { w: promptEl.offsetWidth, h: promptEl.offsetHeight } : null, promptTarget: label ? target : null,
     });
     // The prompt rides on the object it's about; without a spot it waits at the bottom of the map.
     const at = label && R.promptAt;

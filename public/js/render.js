@@ -1183,6 +1183,13 @@ export function createRenderer(canvas) {
       else if (it.drop) drawDrop(it.drop, st);
     }
 
+    // mouse hover: a faint outline on what a click would use
+    if (st.hover && st.hover !== st.target) {
+      const f = st.hover;
+      const hgt = HEIGHTS[f.type] ?? 0.4;
+      ctx.strokeStyle = 'rgba(37,99,235,0.45)'; ctx.lineWidth = 1.5;
+      roundRect(ctx, S(f.x - 0.05), S(f.y - hgt - 0.05), S(f.w + 0.1), S(f.h + hgt + 0.1), 6); ctx.stroke();
+    }
     // interaction target highlight
     if (st.target) {
       const f = st.target;
