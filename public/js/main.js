@@ -695,7 +695,7 @@ function setStatusUI() {
 const micBtn = $('.mic');
 micBtn.addEventListener('click', toggleMic);
 async function toggleMic() {
-  if (!voice.on) {
+  if (!voice.on || voice.listening) {
     const ok = await voice.enable();
     if (!ok) return toast('🎙️ Microphone permission was blocked. Allow it in your browser to talk.');
     net.send({ t: 'audio', on: true });
@@ -1456,7 +1456,7 @@ camBtn.addEventListener('click', toggleCam);
 shareBtn.addEventListener('click', toggleShare);
 
 async function ensureVoice() {
-  if (voice.on) return true;
+  if (voice.on && !voice.listening) return true;
   if (!(await voice.enable({ silent: true }))) return false;
   net.send({ t: 'audio', on: true });
   me.audio = true;
@@ -1916,6 +1916,10 @@ function loop(t) {
       if (voice.screen && !z?.av) voice.stopScreen();
       if (station.isOpen) station.close();
     }
+    // In an A/V room you're on the call listen-only even without voice on,
+    // so screen shares and cameras reach you; it ends at the door.
+    if (z?.av && !voice.on) voice.listen();
+    else if (!z?.av && voice.listening) voice.disable();
     const v = voice.update(me, others, deaf, { deskScreen: atDesk() && !z?.av });
     deskWatch(others, t);
     me.speaking = v.meSpeaking;

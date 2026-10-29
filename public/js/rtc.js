@@ -4,6 +4,10 @@
 // full inside a private room. Inside an A/V room the same connection also
 // carries camera and screen tracks, but only to people in that room. A
 // screen put up on a desk monitor goes to whoever stands within DESK_VIEW.
+//
+// Inside an A/V room everyone is connected, mic or not: people who haven't
+// turned voice on join listen-only (listen()), so they still get the room's
+// voices, cameras and screen shares without being asked for a microphone.
 
 import { canHear, zoneAt, HEAR_RADIUS } from './map.js';
 
@@ -21,22 +25,38 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
   let deviceId = prefs.deviceId || '';
   let gain = prefs.gain ?? 1;
   let lvl = 0, loudSince = 0, quietSince = 0;
+  let listening = false; // connected listen-only, without having turned voice on
 
   const getMic = (id) => navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, ...(id ? { deviceId: { exact: id } } : {}) },
   });
 
+  // Receive-only: no mic, nothing asked of the browser. enable() upgrades it.
+  function listen() {
+    if (local) return;
+    actx = new AudioContext();
+    actx.resume?.().catch(() => {});
+    local = new MediaStream();
+    listening = true;
+  }
+
   // `silent` joins without a mic (listen and watch only) if the mic is refused.
   async function enable({ silent = false } = {}) {
-    if (local) return true;
+    if (local && !listening) return true;
     try {
       raw = await getMic(deviceId).catch((e) => (deviceId && e.name === 'OverconstrainedError' ? getMic('') : Promise.reject(e)));
     } catch (e) {
       if (!silent) return false;
       raw = null;
     }
-    actx = new AudioContext();
-    actx.resume?.().catch(() => {});
+    if (listening) {
+      // Already connected listen-only: keep the calls, add the mic to them.
+      listening = false;
+      if (!raw) return true;
+    } else {
+      actx = new AudioContext();
+      actx.resume?.().catch(() => {});
+    }
     if (raw) {
       // mic -> gain -> (analyser, outgoing track). The analyser sits before the
       // mute switch, so it can still tell when you talk while muted.
@@ -48,6 +68,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
       plug(raw);
       local = dest.stream;
       local.getAudioTracks().forEach((t) => (t.enabled = !muted));
+      for (const c of conns.values()) local.getTracks().forEach((t) => { try { c.pc.addTrack(t, local); } catch (e) { console.warn('rtc', e); } });
     } else {
       local = new MediaStream();
     }
@@ -88,7 +109,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     for (const id of [...conns.keys()]) hangup(id);
     raw?.getTracks().forEach((t) => t.stop());
     local?.getTracks().forEach((t) => t.stop());
-    raw = null; local = null; mic = null; lvl = 0;
+    raw = null; local = null; mic = null; lvl = 0; listening = false;
     actx?.close(); actx = null;
   }
 
@@ -242,12 +263,18 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     out.mutedTalking = muted && loudSince > 0 && now - loudSince > 350;
     const myZone = zoneAt(me.x, me.y);
     const avRoom = myZone?.av ? myZone : null;
+    // Something to send means we should start the call ourselves; a
+    // listen-only peer has no tracks, so it would never make an offer.
+    const sending = !!(mic || cam || screen);
     for (const p of peers) {
       if (p.id === me.id) continue;
-      const near = p.audio && canHear(me, p);
-      const keep = conns.has(p.id) && p.audio && (canHear(me, p) || Math.hypot(me.x - p.x, me.y - p.y) < HEAR_RADIUS + 1.5);
-      // The lower id starts the call; the other side answers.
-      if (near && !conns.has(p.id) && myId() < p.id) create(p.id);
+      // Reachable: voice on, or (mic or not) in the same A/V room as me.
+      const linked = p.audio || (avRoom && p.kind !== 'agent' && zoneAt(p.x, p.y) === avRoom);
+      const near = linked && canHear(me, p);
+      const keep = conns.has(p.id) && linked && (canHear(me, p) || Math.hypot(me.x - p.x, me.y - p.y) < HEAR_RADIUS + 1.5);
+      // The lower id starts the call and the other side answers, unless only
+      // one side has anything to send; perfect negotiation sorts out overlaps.
+      if (near && !conns.has(p.id) && (myId() < p.id || sending)) create(p.id);
       if (!keep && conns.has(p.id) && !near) hangup(p.id);
       const c = conns.get(p.id);
       if (c) {
@@ -272,6 +299,7 @@ export function createVoice({ send, myId, onMedia = () => {}, prefs = {} }) {
     enable, disable, setMuted, onSignal, update, conns, remote,
     setDevice, setGain, devices,
     startCam, stopCam, startScreen, stopScreen,
+    listen, get listening() { return listening; },
     get on() { return !!local; }, get muted() { return muted; }, get hasMic() { return !!mic; },
     get level() { return lvl; }, get deviceId() { return deviceId; }, get gain() { return gain; },
     get cam() { return cam; }, get screen() { return screen; },
