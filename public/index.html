@@ -17,36 +17,38 @@
 <body>
   <div id="hud" hidden>
     <canvas id="world" aria-label="The office"></canvas>
-    <div class="hud-tl">
-      <div class="pill zone"><span class="zone-kind"></span><b class="zone-name">Lobby</b></div>
-      <div class="pill pomo-hud" hidden></div>
-      <button class="pill music-hud" type="button" hidden title="Music from the jukebox (N)"></button>
-      <button class="pill room-hud" hidden></button>
-    </div>
     <div class="av-stage" hidden></div>
-    <div class="hud-tr">
-      <canvas id="minimap" width="192" height="128" aria-label="Map"></canvas>
-      <div class="people card">
-        <button class="people-head" type="button" aria-expanded="true"><b><span class="long">In the office</span><span class="short">People</span></b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
-        <ul class="people-list"></ul>
+    <aside class="side">
+      <div class="hud-tl">
+        <div class="pill zone"><span class="zone-kind"></span><b class="zone-name">Lobby</b></div>
+        <div class="pill pomo-hud" hidden></div>
+        <button class="pill music-hud" type="button" hidden title="Music from the jukebox (N)"></button>
+        <button class="pill room-hud" hidden></button>
       </div>
-      <div class="channels card" hidden>
-        <button class="channels-head" type="button" aria-expanded="true" title="Channel rooms off the hallway: click one to walk there"><b>Channel rooms</b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
-        <ul class="channel-list"></ul>
+      <div class="hud-tr">
+        <canvas id="minimap" width="192" height="128" aria-label="Map"></canvas>
+        <div class="people card">
+          <button class="people-head" type="button" aria-expanded="true"><b><span class="long">In the office</span><span class="short">People</span></b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
+          <ul class="people-list"></ul>
+        </div>
+        <div class="channels card" hidden>
+          <button class="channels-head" type="button" aria-expanded="true" title="Channel rooms off the hallway: click one to walk there"><b>Channel rooms</b><span class="count">0</span><span class="chev" aria-hidden="true"></span></button>
+          <ul class="channel-list"></ul>
+        </div>
       </div>
-    </div>
 
-    <div class="chat card">
-      <div class="chat-grip" title="Drag to resize" aria-hidden="true"></div>
-      <button class="chat-head" type="button" aria-expanded="true" title="Collapse / expand chat">
-        <b>Chat</b><span class="unread" hidden>0</span><span class="chev" aria-hidden="true"></span>
-      </button>
-      <div class="chat-log" aria-live="polite"></div>
-      <form class="chat-form" autocomplete="off">
-        <span class="scope" title="Who will hear you">nearby</span>
-        <input class="chat-input" maxlength="500" placeholder="Say something… (Enter)" title="/shout reaches everyone · @name taps someone">
-      </form>
-    </div>
+      <div class="chat card">
+        <div class="chat-grip" title="Drag to resize" aria-hidden="true"></div>
+        <button class="chat-head" type="button" aria-expanded="true" title="Collapse / expand chat">
+          <b>Chat</b><span class="unread" hidden>0</span><span class="chev" aria-hidden="true"></span>
+        </button>
+        <div class="chat-log" aria-live="polite"></div>
+        <form class="chat-form" autocomplete="off">
+          <span class="scope" title="Who will hear you">nearby</span>
+          <input class="chat-input" maxlength="500" placeholder="Say something… (Enter)" title="/shout reaches everyone · @name taps someone">
+        </form>
+      </div>
+    </aside>
 
     <div class="toolbar card" role="toolbar" aria-label="Controls">
       <div class="tb-group">

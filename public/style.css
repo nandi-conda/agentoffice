@@ -62,20 +62,38 @@ input, select, textarea { font: inherit; color: inherit; }
    the map's cell and only appear when there's something to say. */
 #hud { position: fixed; inset: 0; z-index: 10; display: grid; gap: 10px; padding: var(--gt) var(--gr) var(--gb) var(--gl);
   grid-template-columns: minmax(0, 1fr) var(--side-w);
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  grid-template-areas: "stage tl" "stage tr" "stage chat" "bar chat"; }
-#hud.side-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "stage" "stage" "bar"; }
-#hud.side-closed > .hud-tl, #hud.side-closed > .hud-tr, #hud.side-closed > .chat { display: none; }
-.hud-tl { grid-area: tl; display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: "stage side" "bar side"; }
+#hud.side-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "bar"; }
+#hud.side-closed > .side { display: none; }
+/* The side column: zone info and minimap at their natural size, then the open
+   list (people or channel rooms) and the chat sharing what's left. The chat
+   keeps the height you drag it to and takes any spare room; the list shrinks
+   and scrolls inside its own card. */
+.side { grid-area: side; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.side > .hud-tr { display: contents; }
+.side > .hud-tr > .card { flex: 1 1 0; min-height: 104px; }
+.side > .hud-tr > .card.collapsed { flex: none; min-height: 0; }
+/* The open list and the chat split the room; the splitter on the chat sets the ratio. */
+.side > .chat { flex: var(--chat-grow, 1) 1 0; min-height: 130px; }
+/* With both lists folded, the chat takes the spare room. */
+.side:not(:has(.hud-tr > .card:not(.collapsed):not([hidden]))) > .chat { flex-grow: 1; }
+.side > .chat.collapsed { flex: none !important; min-height: 0; margin-top: auto; align-self: stretch; }
+.side > * { min-width: 0; }
+/* Short windows: the map is right there (and 0 frames all of it), so the
+   minimap gives its room to the lists and chat. */
+@media (max-height: 560px) { .side #minimap { display: none; } .chat-log { min-height: 40px; } }
+.hud-tl { flex: none; display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: #57534e; border-radius: 999px; padding: 2px 8px; }
 .zone-kind.room { background: #7c3aed; }
 .zone-kind.quiet { background: #dc2626; }
 .zone-kind.open { background: #16a34a; }
 .pomo-hud { font-variant-numeric: tabular-nums; }
 
-.hud-tr { grid-area: tr; display: flex; flex-direction: column; gap: 10px; min-height: 0; max-height: 52dvh; }
-#minimap { width: min(100%, 42dvh); align-self: center; height: auto; aspect-ratio: 3 / 2; border-radius: var(--radius); box-shadow: var(--shadow); background: var(--card); cursor: pointer; }
-.people { padding: 4px 6px 6px; min-height: 0; overflow: auto; flex: 0 1 auto; }
+.hud-tr { flex: 0 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#minimap { width: min(100%, 33dvh); align-self: center; height: auto; aspect-ratio: 3 / 2; border-radius: var(--radius); box-shadow: var(--shadow); background: var(--card); cursor: pointer; }
+.people { padding: 4px 6px 6px; min-height: 0; overflow: auto; flex: 1 1 auto; }
+.people.collapsed, .channels.collapsed { flex: none; overflow: hidden; }
 #minimap { flex: none; }
 .people-head { padding: 6px 8px; font-size: 13px; }
 .people-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -90,7 +108,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .people-list .who { min-width: 0; flex: 1; }
 .people-list .who b { display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .people-list .who span { display: block; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.channels { padding: 4px 6px 6px; min-height: 0; overflow: auto; flex: 0 1 auto; }
+.people-list .who b .badge { display: inline; font-size: 10px; color: #0e7490; margin-left: 4px; vertical-align: 1px; }
+.people-list .who b .badge.freeq { color: #6d28d9; }
+.channels { padding: 4px 6px 6px; min-height: 0; overflow: auto; flex: 1 1 auto; }
 .channels-head { padding: 6px 8px; font-size: 13px; }
 .channels-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .channels.collapsed { padding-bottom: 4px; }
@@ -125,9 +145,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .new-room-form label { display: grid; gap: 4px; }
 .badge { font-size: 10px; font-weight: 700; background: #cffafe; color: #0e7490; border-radius: 5px; padding: 1px 5px; }
 
-.chat { grid-area: chat; position: relative; display: flex; flex-direction: column; overflow: hidden; min-height: 0; align-self: stretch; }
+.chat { position: relative; display: flex; flex-direction: column; overflow: hidden; min-height: 0; align-self: stretch; }
 .chat.collapsed { align-self: end; }
-.chat-grip { display: none; position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; touch-action: none; z-index: 1; }
+.chat-grip { position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; touch-action: none; z-index: 1; }
 .chat-grip::after { content: ''; position: absolute; top: 3px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: rgba(28, 25, 23, 0.16); }
 .chat-grip:hover::after { background: rgba(28, 25, 23, 0.32); }
 .chat.collapsed .chat-grip, .chat.collapsed .chat-log { display: none; }
@@ -342,9 +362,16 @@ input, select, textarea { font: inherit; color: inherit; }
    The side panel (map, people, channels) opens as a sheet over the map. ---- */
 @media (max-width: 600px), (max-width: 760px) and (orientation: portrait) {
   :root { --g: 6px; }
+  .side, #hud.side-closed > .side { display: contents; }
+  .hud-tl { grid-area: tl; }
+  .chat { grid-area: chat; }
+  .side > .chat, .side > .chat.collapsed { flex: none; min-height: 0; margin: 0; }
+  .side > .hud-tr { display: flex; }
+  .side > .hud-tr > .card { flex: 0 1 auto; min-height: 0; }
+  .hud-tr > .card:not(.collapsed) { min-height: 0; }
+  #hud.side-closed .hud-tr { display: none; }
   #hud, #hud.side-closed { gap: 6px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto;
     grid-template-areas: "tl" "stage" "chat" "bar"; }
-  #hud.side-closed > .hud-tl, #hud.side-closed > .chat { display: flex; }
   .hud-tr { grid-area: stage; align-self: start; justify-self: end; z-index: 4; width: min(240px, 70vw); max-height: calc(100% - 12px); margin: 6px; overflow: auto; }
   .chat { align-self: auto; }
   .chat-grip { display: block; }

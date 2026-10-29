@@ -534,15 +534,32 @@ function setChatCollapsed(c) {
 setChatCollapsed(chatCollapsed);
 chatHead.addEventListener('click', () => setChatCollapsed(!chatCollapsed));
 const chatH = store.get('chatHeight', 0);
-if (chatH) chatEl.style.setProperty('--chat-h', `${chatH}px`);
+if (chatH) hud.style.setProperty('--chat-h', `${chatH}px`);
+if (store.get('chatGrow', 0)) hud.style.setProperty('--chat-grow', store.get('chatGrow', 1));
 $('.chat-grip').addEventListener('pointerdown', (e) => {
   if (chatCollapsed) return;
   e.preventDefault();
   const grip = e.currentTarget, startY = e.clientY, startH = log.getBoundingClientRect().height;
   grip.setPointerCapture(e.pointerId);
+  // Docked beside the map, the grip splits the side column between the open list and the chat.
+  const list = !phoneLayout.matches && [...document.querySelectorAll('.hud-tr > .card')].find((c) => !c.hidden && !c.classList.contains('collapsed'));
+  if (list) {
+    const chat0 = chatEl.getBoundingClientRect().height, both = chat0 + list.getBoundingClientRect().height;
+    const split = (ev) => {
+      const ch = Math.max(130, Math.min(both - 104, chat0 + startY - ev.clientY));
+      const grow = +(ch / (both - ch)).toFixed(3);
+      hud.style.setProperty('--chat-grow', grow);
+      store.set('chatGrow', grow);
+      stickToBottom();
+    };
+    grip.addEventListener('pointermove', split);
+    grip.addEventListener('pointerup', () => grip.removeEventListener('pointermove', split), { once: true });
+    return;
+  }
   const move = (ev) => {
-    const h = Math.max(80, Math.min(innerHeight * 0.45, startH + startY - ev.clientY));
-    chatEl.style.setProperty('--chat-h', `${Math.round(h)}px`);
+    // On phones the chat sits under the map; docked, it shares the side column with the lists.
+    const h = Math.max(80, Math.min(phoneLayout.matches ? innerHeight * 0.45 : innerHeight - 260, startH + startY - ev.clientY));
+    hud.style.setProperty('--chat-h', `${Math.round(h)}px`);
     stickToBottom();
   };
   const up = () => {
@@ -808,13 +825,19 @@ function openHelp() {
 
 // ---- people list & minimap ---------------------------------------------------
 const peopleHead = $('.people-head');
+// People and channel rooms work as an accordion: opening one gives it the
+// column's spare height and folds the other to its header.
 function setPeopleCollapsed(c) {
   $('.people').classList.toggle('collapsed', c);
   peopleHead.setAttribute('aria-expanded', String(!c));
   store.set('peopleCollapsed', c);
 }
-setPeopleCollapsed(store.get('peopleCollapsed', innerWidth <= 760 || phone()));
-peopleHead.addEventListener('click', () => setPeopleCollapsed(!$('.people').classList.contains('collapsed')));
+setPeopleCollapsed(store.get('peopleCollapsed', innerWidth <= 760 || (coarse && phone())));
+peopleHead.addEventListener('click', () => {
+  const open = $('.people').classList.contains('collapsed');
+  setPeopleCollapsed(!open);
+  if (open && !phoneLayout.matches) setChannelsCollapsed(true);
+});
 let peopleTimer = null;
 function refreshPeople() {
   clearTimeout(peopleTimer);
@@ -838,8 +861,14 @@ function setChannelsCollapsed(c) {
   channelsHead.setAttribute('aria-expanded', String(!c));
   store.set('channelsCollapsed', c);
 }
-setChannelsCollapsed(store.get('channelsCollapsed', phone()));
-channelsHead.addEventListener('click', () => setChannelsCollapsed(!$('.channels').classList.contains('collapsed')));
+setChannelsCollapsed(store.get('channelsCollapsed', coarse && phone()));
+// Docked, only one list is open at a time.
+if (!phoneLayout.matches && !$('.people').classList.contains('collapsed')) setChannelsCollapsed(true);
+channelsHead.addEventListener('click', () => {
+  const open = $('.channels').classList.contains('collapsed');
+  setChannelsCollapsed(!open);
+  if (open && !phoneLayout.matches) setPeopleCollapsed(true);
+});
 const ago = (t) => {
   const s = Math.max(0, (serverNow() - t) / 1000);
   return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
