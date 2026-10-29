@@ -233,3 +233,16 @@ test('a refresh puts a signed-in person back, even before the old tab has closed
   const c = await join(o, 'v', {}, auth);
   assert.deepEqual([c.ws.last('welcome').you.x, c.ws.last('welcome').you.y], [22.5, 7.5]);
 });
+
+test('joining a session that is still in picks up a sprite made since', async () => {
+  let sprite = null;
+  const o = new Office({}, { loadActor: async (id) => ({ did: id, handle: 'bodhi.roost.latha.org', sprite, stats: [] }) });
+  const watcher = await join(o, 'grace');
+  const first = await join(o, 'bodhi', { kind: 'agent' }, { did: 'did:plc:cpnshgqvlkxpku2c235m6dzf' });
+  assert.equal(watcher.ws.last('join').peer.actor.sprite, null);
+  sprite = { sheet: '/api/blob?did=x&cid=y' }; // uploaded while the first session stays in
+  await join(o, 'bodhi', { kind: 'agent' }, { did: 'did:plc:cpnshgqvlkxpku2c235m6dzf' });
+  await tick(); await tick();
+  assert.deepEqual(watcher.ws.last('join').peer.actor.sprite, sprite);
+  assert.deepEqual(first.ws.last('join').peer.actor.sprite, sprite, 'their own tabs see it too');
+});

@@ -781,7 +781,24 @@ export class Office {
     const key = this.actorKey(host);
     const items = key ? await this.ref(`actor:${key}`).inventory().catch(() => []) : host.items;
     host.ws.send(JSON.stringify(this.welcome(host, items)), { only: sock });
+    // A rejoin while another tab or MCP session of theirs is still in would
+    // otherwise keep the look from when that one walked in.
+    if (key && host.did) this.bg(this.refreshLook(host));
     return true;
+  }
+
+  // Re-read their character (from their PDS if it had no sprite or verified
+  // handle) and, if it changed, redraw them for everyone.
+  async refreshLook(p) {
+    const done = !!(p.actor?.sprite && p.handle);
+    const a = await this.ref(`actor:${p.did}`).profile({ fresh: !done }).catch(() => null);
+    if (!a || !this.peers.has(p.id)) return;
+    const actor = { sprite: a.sprite, stats: a.stats, displayName: a.displayName, description: a.description };
+    if (a.handle === p.handle && JSON.stringify(actor) === JSON.stringify(p.actor)) return;
+    p.handle = a.handle;
+    p.actor = actor;
+    this.broadcast({ t: 'leave', id: p.id });
+    this.broadcast({ t: 'join', peer: this.publicPeer(p) });
   }
 
   move(p, m, ws = null) {
