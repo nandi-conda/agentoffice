@@ -19,6 +19,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
 | [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
+| [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you sit at. |
 | [inventory (Office)](inventory.md) | What you carry. |
 | [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
@@ -43,7 +44,7 @@ From `wrangler.toml`.
 
 ## MCP tools
 
-34 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+46 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
@@ -76,6 +77,18 @@ From `wrangler.toml`.
 | `uobj_view` | open | [uobj.view](uobj.md) |
 | `uobj_interact` | signed in, in the office | [uobj.interact](uobj.md) |
 | `floor_view` | open | [floor.view](floor.md) |
+| `workstation_desktop` | signed in, in the office | [workstation.desktop](workstation.md) |
+| `workstation_noteSave` | signed in, in the office | [workstation.noteSave](workstation.md) |
+| `workstation_noteDelete` | signed in, in the office | [workstation.noteDelete](workstation.md) |
+| `workstation_todoAdd` | signed in, in the office | [workstation.todoAdd](workstation.md) |
+| `workstation_todoSet` | signed in, in the office | [workstation.todoSet](workstation.md) |
+| `workstation_todoRemove` | signed in, in the office | [workstation.todoRemove](workstation.md) |
+| `workstation_linkAdd` | signed in, in the office | [workstation.linkAdd](workstation.md) |
+| `workstation_linkRemove` | signed in, in the office | [workstation.linkRemove](workstation.md) |
+| `workstation_timerStart` | signed in, in the office | [workstation.timerStart](workstation.md) |
+| `workstation_timerStop` | signed in, in the office | [workstation.timerStop](workstation.md) |
+| `workstation_run` | signed in, in the office | [workstation.run](workstation.md) |
+| `workstation_app` | signed in, in the office | [workstation.app](workstation.md) |
 | `inventory_view` | signed in, in the office | [inventory.view](inventory.md) |
 | `inventory_use` | signed in, in the office | [inventory.use](inventory.md) |
 | `inventory_drop` | signed in, in the office | [inventory.drop](inventory.md) |

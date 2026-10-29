@@ -11,7 +11,7 @@ import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { SPAWN, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked } from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
 import { ROOMS, roomById, lockedOut, activeBooking, fmtTime } from '../public/js/rooms.js';
-import { LocalRuntime, parse } from './entities/runtime.js';
+import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
 import { str, int, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
 import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine } from '../public/js/items.js';
@@ -161,11 +161,19 @@ export class Office {
   // internal methods never, anything acting or naming the caller needs
   // someone in the office, inZone needs them standing in the entity's zone.
   // The World fills in `who` and `ctx`, so callers only pass the params.
-  async call(p, address, method, args = []) {
-    const { kind, name } = parse(address);
+  // `self` entities (workstations) are always the caller's own, whatever the
+  // address said; `atDesk` needs the caller sitting at a desk.
+  async call(p, address, method, args = [], { internal = false } = {}) {
+    let { kind, name } = parse(address);
     const spec = kind === 'inventory' ? INVENTORY.api[method] : KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
-    if (!spec || spec.internal) throw new Error(`${address} has no public method ${method}`);
-    if ((spec.who || spec.mutates || spec.inZone || spec.near) && !p?.ready) throw new Error('join the office first');
+    if (!spec || (spec.internal && !internal)) throw new Error(`${address} has no public method ${method}`);
+    if ((spec.who || spec.mutates || spec.inZone || spec.near || spec.self) && !p?.ready) throw new Error('join the office first');
+    let target = null;
+    if (spec.self) {
+      const key = this.actorKey(p);
+      if (key) { address = `${kind}:${key}`; name = key; } else target = this.guestStation(p, kind);
+    }
+    if (spec.atDesk && !this.deskOf(p)) throw new Error('sit at a desk first (take_desk, or sit on a desk-N-chair)');
     if (spec.inZone && zoneAt(p.x, p.y)?.id !== name) throw new Error(`walk to ${name} first`);
     if (spec.near) {
       // Same rule as the browser: walk up to it (its nearest edge) first.
@@ -179,7 +187,49 @@ export class Office {
     const params = paramList(spec).map((_, i) => args[i]);
     while (params.length && params.at(-1) === undefined) params.pop();
     if (spec.ctx) params.length = paramList(spec).length;
-    return this.ref(address)[method](...(spec.who ? [this.who(p)] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : []));
+    const all = [...(spec.who ? [this.who(p)] : []), ...params, ...(spec.ctx ? [{ all: this.bookings, presence: this.presence() }] : [])];
+    if (target) return structuredClone(await target.invoke(method, structuredClone(all)));
+    return this.ref(address)[method](...all);
+  }
+
+  // The desk whose chair p sits on, if any.
+  deskOf(p) { return p?.seat ? SEATS.find((s) => s.id === p.seat)?.desk || null : null; }
+
+  // A guest has no actor, so their workstation lives with their connection
+  // and is gone when they leave (or when a hibernating Worker wakes).
+  guestStation(p, kind) {
+    if (p.station) return p.station;
+    const storage = new MemoryStorage({ state: { guest: true, peer: p.id } });
+    p.station = new EntityHost(KINDS[kind], {
+      address: `${kind}:guest`, kind, name: 'guest', storage, services: this.runtime.services || {},
+      now: () => this.now(),
+      ref: (a) => this.ref(a),
+      setAlarm: (t) => {
+        clearTimeout(p.stationTimer);
+        if (t == null) return;
+        p.stationTimer = setTimeout(() => p.station?.alarm().catch(() => {}), Math.max(0, t - this.now()));
+        p.stationTimer.unref?.();
+      },
+    });
+    return p.station;
+  }
+
+  // The browser's workstation (public/js/workstation.js): any public method
+  // of the caller's own workstation, answered by ref. The computer shows on
+  // the desk while it's in use.
+  async workstation(p, m) {
+    if (m.method === 'power') {
+      p.pc = !!m.on && !!this.deskOf(p);
+      return this.broadcast({ t: 'peer', id: p.id, pc: p.pc });
+    }
+    const ref = typeof m.ref === 'number' || typeof m.ref === 'string' ? m.ref : null;
+    try {
+      const allowed = m.method === 'prefs' ? { internal: true } : {};
+      const result = await this.call(p, 'workstation:self', String(m.method || ''), Array.isArray(m.args) ? m.args.slice(0, 4) : [], allowed);
+      this.sendTo(p, { t: 'wsr', ref, result: result ?? null });
+    } catch (e) {
+      this.sendTo(p, { t: 'wsr', ref, error: e.message });
+    }
   }
 
   // ---- what entities may call on the World --------------------------------
@@ -277,7 +327,7 @@ export class Office {
       id: p.id, name: p.name, handle: p.handle, did: p.did, kind: p.kind,
       actor: p.actor, x: p.x, y: p.y, dir: p.dir, moving: p.moving,
       status: p.status, note: p.note, seat: p.seat, emote: p.emote, audio: p.audio,
-      video: p.video, screen: p.screen, cup: p.cup, joinedAt: p.joinedAt,
+      video: p.video, screen: p.screen, pc: p.pc, cup: p.cup, joinedAt: p.joinedAt,
     };
   }
 
@@ -335,6 +385,7 @@ export class Office {
     if (!p.ready || p.kind === 'freeq') return;
     const key = this.actorKey(p);
     if (key) this.bg(this.ref(`actor:${key}`).depart());
+    clearTimeout(p.stationTimer); p.station = null;
     const zone = zoneAt(p.x, p.y);
     if (zone) this.publish(`zone:${zone.id}`, { type: 'exit', who: this.who(p) });
     this.publish('office', { type: 'leave', who: this.who(p) });
@@ -419,6 +470,7 @@ export class Office {
       case 'use': return this.use(p, m);
       case 'gallery': return this.galleryOp(p, m);
       case 'inv': return this.inv(p, m);
+      case 'ws': return this.workstation(p, m);
       case 'wave': return this.wave(p, m);
       case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
       case 'av': return this.av(p, m);
@@ -570,7 +622,10 @@ export class Office {
   sit(p, m) {
     if (m.seat === null) {
       p.seat = null;
-      return this.broadcast({ t: 'peer', id: p.id, seat: null });
+      // Standing up switches the desk computer off, and ends a share to its monitor.
+      const off = { pc: false, ...(p.screen && !zoneAt(p.x, p.y)?.av ? { screen: false } : {}) };
+      Object.assign(p, off);
+      return this.broadcast({ t: 'peer', id: p.id, seat: null, ...off });
     }
     const seat = SEATS.find((s) => s.id === m.seat);
     if (!seat || Math.hypot(seat.x - p.x, seat.y - p.y) > 2.5) return;
@@ -830,9 +885,10 @@ export class Office {
   // Camera and screen share flags. The media itself is peer to peer; these
   // just let everyone draw who's on camera. Only meaningful in an A/V room.
   av(p, m) {
+    // Cameras belong to A/V rooms; a screen can also go up on your desk monitor.
     const ok = !!zoneAt(p.x, p.y)?.av;
     p.video = ok && !!m.video;
-    p.screen = ok && !!m.screen;
+    p.screen = (ok || !!this.deskOf(p)) && !!m.screen;
     this.broadcast({ t: 'peer', id: p.id, video: p.video, screen: p.screen });
   }
 

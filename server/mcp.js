@@ -399,6 +399,12 @@ export class McpHub {
         return json({ arrived: ok, at: { x: round(c.me.x), y: round(c.me.y) }, zone: zoneAt(c.me.x, c.me.y)?.name, target: target.label });
       });
 
+    // Until the World has the agent on that seat, so the next call (a
+    // workstation tool, say) sees them sitting. Gives up after a second.
+    const seated = async (seat) => {
+      for (let i = 0; i < 50 && office.peers.get(agent.client?.me?.id)?.seat !== seat; i++) await new Promise((r) => setTimeout(r, 20));
+    };
+
     tool('sit', 'Sit on a seat (protocol `sit`), walking there first. seat=null stands up. Seat ids: desk-N-chair, den-…-chair, board-chair-…, huddle-chair-…, booth-stool-N, k-chair-….',
       { seat: z.string().nullable() },
       async ({ seat }, extra) => {
@@ -409,6 +415,7 @@ export class McpHub {
         await c.walkTo(s.x, s.y, progress(extra));
         send({ t: 'sit', seat });
         c.me.seat = seat;
+        await seated(seat);
         return json({ ok: true, seat });
       });
 
@@ -426,9 +433,11 @@ export class McpHub {
           await c.walkTo(d.x + 1, d.y + 1, progress(extra));
           await c.sit(`${d.id}-chair`);
           send({ t: 'desk', action: 'claim', desk: d.id, goal });
+          await seated(`${d.id}-chair`);
           return json({ desk: d.id });
         }
         const id = await c.takeDesk(goal);
+        if (id) await seated(`${id}-chair`);
         return id ? json({ desk: id }) : fail('no free desk');
       });
 

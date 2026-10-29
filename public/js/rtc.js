@@ -2,11 +2,13 @@
 // people who can hear each other (and both have audio on) gets a direct
 // WebRTC connection; volume falls off with distance in open areas and is
 // full inside a private room. Inside an A/V room the same connection also
-// carries camera and screen tracks, but only to people in that room.
+// carries camera and screen tracks, but only to people in that room. A
+// screen put up on a desk monitor goes to whoever stands within DESK_VIEW.
 
 import { canHear, zoneAt, HEAR_RADIUS } from './map.js';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+export const DESK_VIEW = 4;
 
 export function createVoice({ send, myId, onMedia = () => {} }) {
   let local = null;
@@ -166,7 +168,8 @@ export function createVoice({ send, myId, onMedia = () => {} }) {
   };
 
   // Called every frame with my position and everyone else's.
-  function update(me, peers, deafened) {
+  // deskScreen: I'm sharing my screen to my desk monitor (not in an A/V room).
+  function update(me, peers, deafened, { deskScreen = false } = {}) {
     const out = { meSpeaking: false, speaking: new Set() };
     if (!local) return out;
     out.meSpeaking = !muted && level(local.analyser, local.data) > 18;
@@ -188,7 +191,7 @@ export function createVoice({ send, myId, onMedia = () => {} }) {
         // Video only flows between people in the same A/V room.
         const share = avRoom && zoneAt(p.x, p.y) === avRoom;
         syncTrack(c, 'cam', share ? cam : null);
-        syncTrack(c, 'screen', share ? screen : null);
+        syncTrack(c, 'screen', share || (deskScreen && d <= DESK_VIEW) ? screen : null);
       }
     }
     for (const id of conns.keys()) if (!peers.some((p) => p.id === id)) hangup(id);

@@ -71,7 +71,8 @@ export function generatedTools(api) {
       delete input.description;
       if (flat && params[0][1].optional) input.required = [];
       // Which entity: a fixed one, one of a known set, or any name.
-      const many = !e.instances || e.instances.length > 1;
+      // A `self` entity is always the caller's own (the World names it).
+      const many = !spec.self && (!e.instances || e.instances.length > 1);
       if (many) {
         if ('name' in input.properties) throw new Error(`${e.kind}.${method}: param "name" clashes with the entity name`);
         input.properties = {
@@ -85,11 +86,11 @@ export function generatedTools(api) {
       tools.push({
         name: `${e.kind}_${method}`,
         kind: e.kind, method,
-        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
+        description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.atDesk ? ' You must be sitting at a desk: take_desk first.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
         input,
-        readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near,
+        readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near && !spec.self,
         needsZone: !!spec.inZone && many,
-        address: (args, zone) => `${e.kind}:${many ? (args.name || zone) : e.instances[0]}`,
+        address: (args, zone) => `${e.kind}:${spec.self ? 'self' : many ? (args.name || zone) : e.instances[0]}`,
         args: (args) => (flat ? [Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'name' || !many))] : params.map(([k]) => args[k])),
       });
     }
@@ -127,6 +128,8 @@ const flags = (spec) => [
   spec.ctx && 'ctx { all, presence } filled in by the World',
   spec.inZone && 'caller must be in its zone',
   spec.near && `caller must be within ${spec.near} tiles`,
+  spec.self && 'always the caller\'s own (the World picks the address)',
+  spec.atDesk && 'caller must sit at a desk',
   spec.internal && 'internal (entity to entity)',
 ].filter(Boolean);
 

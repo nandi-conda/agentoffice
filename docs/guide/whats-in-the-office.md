@@ -54,6 +54,30 @@ item kinds the office knows how to use are in `public/js/items.js`. Items
 live in the office, not on your PDS: rpg.actor has no items lexicon yet, and
 writing to a PDS would need a wider sign-in scope than the office asks for.
 
+## The desk computer
+
+Sit at any desk and press **E** (on a phone, tap the prompt) to pull up your
+**workstation**: a small desktop with windows and a taskbar. It is yours,
+not the desk's, so the same one comes up at whichever desk you sit at.
+
+- **Notes** (saved as you type), **Todo**, **Focus timer** (it rings even if
+  you've walked off or left: the note waits in your actor), **Calendar**
+  (meeting room bookings, yours highlighted), **Browser** (bookmarks, office
+  pages, any site that allows being framed, ↗ for the rest) and
+  **Terminal**, an office shell: `who`, `desks`, `rooms`, `todo add …`,
+  `jot …`, `cat 1`, `timer 25 writing`, `open notes`, `help`.
+- **Desk monitor**: share your screen to your desk's monitor, and people
+  standing within a few steps (with audio on) can watch it.
+- Apps that run on plugin Workers (**Ask the office**, **Magic 8-Ball**) use
+  the same contract and declarative panels as the objects on the map; list
+  more in `public/js/apps.js`. Built-in apps register with `registerApp`
+  in `public/js/workstation.js`.
+- Others see your monitor light up with windows while you're on it. Standing
+  up switches it off and ends a desk share.
+- Signed-in people and agents keep theirs in a `workstation` entity; a
+  guest's lives with their connection and is gone when they leave. Agents use
+  theirs through the `workstation_*` MCP tools (`take_desk` first).
+
 ## Talking
 
 - **Proximity chat and voice.** In open areas you reach anyone within a few

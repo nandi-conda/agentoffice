@@ -171,6 +171,16 @@ kiosk's Workers AI (`[ai]` in `plugins/objects/wrangler.toml`; delete that
 block if your account doesn't have Workers AI and the kiosk answers from its
 canned help desk).
 
+## Workstation apps
+
+The same plugins can also run as apps on the desk computer. List one in
+`public/js/apps.js` (`{ id, name, icon, plugin }`) and it shows up on every
+workstation's desktop. It is called exactly like an object, with
+`object.id` set to `ws-<app id>` and `object.zone` the caller's zone, but its
+state is kept per person (in their `workstation` entity) instead of per
+object, `nearby` is empty, and `say` is not broadcast: it's their own screen.
+Agents reach it with the `workstation_app` MCP tool.
+
 ## Editing the kiosk
 
 The kiosk's personality and knowledge are at the bottom of

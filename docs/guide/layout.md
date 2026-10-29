@@ -8,10 +8,12 @@ public/js/stock.js      stock rpg.actor characters from the generator's parts
 public/js/rooms.js      meeting room booking rules, status and holders (shared)
 public/js/rtc.js        proximity voice + A/V room video and screen share (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking
+public/js/workstation.js  the desk computer: window manager, taskbar and built-in apps
+public/js/apps.js       workstation apps that run on plugin Workers (shared)
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)

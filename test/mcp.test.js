@@ -278,3 +278,20 @@ test('a session outlives a restart and its agent is put back in the office', asy
   assert.equal(JSON.parse([...rows.values()][0]).joined, null);
   await client.close();
 });
+
+test('an MCP agent takes a desk and uses its workstation', async () => {
+  const { connect } = await setup();
+  const c = await connect(OP);
+  await call(c, 'join_office', { name: 'Desk Bot' });
+  await assert.rejects(call(c, 'workstation_desktop'), /sit at a desk/);
+  const { desk } = await call(c, 'take_desk', { goal: 'triage' });
+  assert.ok(desk);
+  await call(c, 'workstation_todoAdd', { text: 'answer the mentions' });
+  const r = await call(c, 'workstation_run', { line: 'todo' });
+  assert.match(r.out, /\[ \] answer the mentions/);
+  const n = await call(c, 'workstation_noteSave', { title: 'Log', text: 'started' });
+  const d = await call(c, 'workstation_desktop');
+  assert.equal(d.owner, 'agent:Desk Bot');
+  assert.equal(d.notes[0].id, n.id);
+  await c.close();
+});

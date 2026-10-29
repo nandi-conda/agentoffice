@@ -51,6 +51,7 @@ nav:
       - "gallery (Gallery)": api/gallery.md
       - "uobj (UploadedObject)": api/uobj.md
       - "floor (Floor)": api/floor.md
+      - "workstation (Workstation)": api/workstation.md
       - "inventory (Office)": api/inventory.md
       - "plugin: Jukebox": api/plugin-jukebox.md
       - "plugin: Vending machine": api/plugin-vending.md

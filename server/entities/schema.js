@@ -15,6 +15,9 @@
 //       inZone: true,                          the caller must stand in the zone this entity is named after
 //       near: 3,                               the caller must stand within this many tiles of the
 //                                              thing on the map this entity is named after
+//       self: true,                            the entity is always the caller's own: the World
+//                                              names it after them, whatever address was asked for
+//       atDesk: true,                          the caller must be sitting at a desk
 //       internal: true,                        entity-to-entity only: documented, but no MCP tool
 //     },
 //   }

@@ -3,10 +3,11 @@ import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
 import { STATUS, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
-import { createVoice } from './rtc.js';
+import { createVoice, DESK_VIEW } from './rtc.js';
 import { createBoard, openEditor } from './whiteboard.js';
 import { openSnake } from './snake.js';
 import { openObject } from './objects.js';
+import { createWorkstation } from './workstation.js';
 import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
@@ -92,7 +93,8 @@ function toast(html, actions = [], ms = 6000) {
     b.onclick = () => { fn(); t.remove(); };
     t.append(b);
   }
-  $('.toasts').append(t);
+  // Over the desk computer while it's up, so nothing slips by underneath it.
+  ($('#workstation:not([hidden]) .ws-toasts') || $('.toasts')).append(t);
   setTimeout(() => t.remove(), ms);
 }
 
@@ -291,7 +293,7 @@ function onMessage(m) {
     case 'peer': {
       const p = peers.get(m.id);
       if (!p) break;
-      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'cup', 'seat']) if (key in m) p[key] = m[key];
+      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'pc', 'cup', 'seat']) if (key in m) p[key] = m[key];
       if (p === me && 'seat' in m) me.seat = m.seat;
       refreshPeople();
       break;
@@ -388,7 +390,8 @@ function onMessage(m) {
       }
       break;
     }
-    case 'toast': toast(esc(m.text)); break;
+    case 'toast': toast(esc(m.text)); if (m.ws) { chime('break'); station.poke(); } break;
+    case 'wsr': station.onReply(m); break;
     // How the freeq bridge is doing for you: a line in the chat log, and a toast when something failed.
     case 'freeq-note': {
       sys(`${m.ok ? '💬' : '⚠️'} ${m.text}`);
@@ -845,8 +848,8 @@ function promptFor(f) {
   if (!f) return null;
   if (f.floorItem) { const e = floor.find((x) => x.id === f.floorItem); return e ? `Pick up ${itemLabel(e.item)}` : null; }
   if (f.seat) {
-    if (me.seat === f.id) return 'Stand up';
     const seat = SEATS.find((s) => s.id === f.id);
+    if (me.seat === f.id) return seat?.desk ? 'Use the computer' : 'Stand up';
     if (seat?.desk) {
       const c = desks[seat.desk];
       if (!c) return 'Sit & claim this desk';
@@ -875,8 +878,11 @@ function interact(f) {
   if (!f) return;
   if (f.floorItem) return net.send({ t: 'inv', op: 'pickup', id: f.floorItem });
   if (f.seat) {
-    if (me.seat === f.id) { me.seat = null; net.send({ t: 'sit', seat: null }); return; }
     const seat = SEATS.find((s) => s.id === f.id);
+    if (me.seat === f.id) {
+      if (seat?.desk) return openStation();
+      me.seat = null; net.send({ t: 'sit', seat: null }); return;
+    }
     const taken = [...peers.values()].some((p) => p !== me && p.seat === f.id);
     if (taken) return toast('Someone is already sitting there.');
     path = null; walkTarget = null;
@@ -887,6 +893,7 @@ function interact(f) {
       const c = desks[seat.desk];
       if (!c) openClaim(seat.desk);
       else if (c.owner === ownerKey()) net.send({ t: 'desk', action: 'claim', desk: seat.desk, goal: c.goal });
+      if (c) toast(`💻 ${coarse ? 'Tap' : 'Press <kbd>E</kbd>'} to use the computer.`, [['Use it', openStation]], 5000);
     }
     return;
   }
@@ -922,6 +929,7 @@ function openClaim(deskId) {
     net.send({ t: 'desk', action: 'claim', desk: deskId, goal: goal.value });
     if (goal.value !== me.note) { me.note = goal.value; net.send({ t: 'status', note: goal.value }); setStatusUI(); }
     modal.close();
+    toast(`💻 ${coarse ? 'Tap' : 'Press <kbd>E</kbd>'} to use the computer.`, [['Use it', openStation]], 5000);
   };
   modal.body.querySelector('.claim').addEventListener('click', claim);
   goal.addEventListener('keydown', (e) => { if (e.key === 'Enter') claim(); });
@@ -1207,6 +1215,11 @@ function updateStage() {
     if (voice.cam) want.push({ key: 'me:cam', stream: voice.cam, name: 'You', kind: 'cam self', id: me.id });
     for (const p of others) { const r = voice.remote(p.id); if (r.cam) want.push({ key: `${p.id}:cam`, stream: r.cam, name: p.name, kind: 'cam', id: p.id }); }
   }
+  // Screens people put up on their desk monitors, for whoever is close by.
+  for (const p of deskSharers()) {
+    const r = voice.remote(p.id);
+    if (r.screen && !want.some((w) => w.key === `${p.id}:screen`)) want.push({ key: `${p.id}:screen`, stream: r.screen, name: `${p.name}'s desk screen`, kind: 'screen', id: p.id });
+  }
   const keys = new Set(want.map((w) => w.key));
   for (const [k2, el] of tiles) if (!keys.has(k2)) { el.remove(); tiles.delete(k2); }
   for (const w of want) {
@@ -1234,11 +1247,71 @@ function screenFeed(z) {
   return null;
 }
 
+// ---- the desk computer ---------------------------------------------------------------
+// public/js/workstation.js draws it; the World and your Workstation entity keep it.
+const deskOf = (p) => (p?.seat ? SEATS.find((s) => s.id === p.seat)?.desk || null : null);
+const atDesk = () => !!deskOf(me);
+const myScreen = Object.assign(document.createElement('video'), { muted: true, autoplay: true, playsInline: true });
+const station = createWorkstation({
+  send: (m) => net.send(m),
+  office: {
+    me: () => me, bookings: () => bookings, serverNow, toast,
+    deskId: () => deskOf(me),
+    openSchedule: () => openSchedule(),
+    standUp: () => { if (me.seat) { me.seat = null; net.send({ t: 'sit', seat: null }); } },
+    closeStation: () => station.close(),
+    share: {
+      on: () => !!voice.screen,
+      stream: () => voice.screen,
+      async toggle() {
+        if (voice.screen) return voice.stopScreen();
+        await ensureVoice();
+        if (!(await voice.startScreen())) toast('🖥️ Screen sharing was cancelled or blocked.');
+        else if (!zoneAt(me.x, me.y)?.av) toast('🖥️ Your screen is on your desk monitor. People close by with audio on can watch.', [], 5000);
+      },
+    },
+  },
+});
+function openStation() {
+  if (!atDesk()) return toast('Sit at a desk to use its computer.');
+  modal.close();
+  station.open();
+}
+// People sharing a screen to their desk monitor, within a few steps of me.
+function deskSharers() {
+  if (!me) return [];
+  return [...peers.values()].filter((p) => p !== me && p.screen && deskOf(p) && !zoneAt(p.x, p.y)?.av && Math.hypot(p.x - me.x, p.y - me.y) <= DESK_VIEW);
+}
+// Walking up to a shared desk screen without audio on: say how to watch.
+const deskHinted = new Set();
+function deskWatch(others, t) {
+  if (t - (deskWatch.t || 0) < 1000) return;
+  deskWatch.t = t;
+  if (voice.on) return;
+  for (const p of deskSharers()) {
+    if (deskHinted.has(p.id)) continue;
+    deskHinted.add(p.id);
+    toast(`🖥️ <b>${esc(p.name)}</b> is sharing their screen on their desk monitor.`, [['Watch (turns audio on)', ensureVoice]], 8000);
+  }
+}
+// What each desk's monitor shows: its computer on, and a live screen if I can see one.
+function deskUse(others) {
+  const out = {};
+  if (myScreen.srcObject !== (voice.screen || null)) { myScreen.srcObject = voice.screen || null; myScreen.play().catch(() => {}); }
+  for (const p of others) {
+    const d = deskOf(p);
+    if (!d) continue;
+    const video = p === me ? (voice.screen ? myScreen : null) : p.screen ? tiles.get(`${p.id}:screen`)?.querySelector('video') || null : null;
+    out[d] = { pc: p === me ? station.isOpen : !!p.pc, video, color: colorFor(p.did || `${p.kind}:${p.name}`) };
+  }
+  return out;
+}
+
 // ---- input ----------------------------------------------------------------------
 const keys = new Set();
 const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
 addEventListener('keydown', (e) => {
-  if (!me) return;
+  if (!me || station.isOpen) return;
   if (modal.isOpen) { if (e.key === 'Escape') modal.close(); return; }
   if (typing()) return;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1452,7 +1525,8 @@ function zoneChanged(z, freeqOnly = false) {
   if (z?.kind === 'quiet') toast('🤫 Deep Work Den: voice is off in here. Press E at the tomato clock to start a shared focus session.', [], 5000);
   // Camera and screen share belong to A/V rooms; they stop at the door.
   camBtn.hidden = shareBtn.hidden = !z?.av;
-  if (!z?.av && (voice.cam || voice.screen)) { voice.stopCam(); voice.stopScreen(); }
+  if (!z?.av && voice.cam) voice.stopCam();
+  if (!z?.av && voice.screen && !atDesk()) voice.stopScreen();
   if (z?.av && !avHinted) { avHinted = true; toast(`🎥 ${esc(z.name)} is an A/V room: turn on your camera or share your screen with everyone in here.`, [['Camera', toggleCam], ['Share screen', toggleShare]], 7000); }
   if (z?.bookable) {
     const b = activeBooking(bookings, z.id, serverNow());
@@ -1534,7 +1608,13 @@ function loop(t) {
 
     const others = [...peers.values()];
     const deaf = me.status === 'focus';
-    const v = voice.update(me, others, deaf);
+    // A screen put up on a desk monitor stops when you stand up; so does the computer.
+    if (!atDesk()) {
+      if (voice.screen && !z?.av) voice.stopScreen();
+      if (station.isOpen) station.close();
+    }
+    const v = voice.update(me, others, deaf, { deskScreen: atDesk() && !z?.av });
+    deskWatch(others, t);
     me.speaking = v.meSpeaking;
     for (const p of others) if (p !== me) p.speaking = v.speaking.has(p.id);
 
@@ -1557,7 +1637,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
+      target: target?.floorItem ? null : target, floorTarget: target?.floorItem || null, floor, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects, deskUse: deskUse(others),
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
@@ -1565,4 +1645,4 @@ function loop(t) {
 }
 
 // Debug/test hook.
-window.__office = { get me() { return me; }, music, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };
+window.__office = { station, openStation, get me() { return me; }, music, cam, send: (m) => net.send(m), voice, peers, get desks() { return desks; }, get bookings() { return bookings; }, walkTo, interact, openSchedule, openRoom, FURNITURE, DESKS };

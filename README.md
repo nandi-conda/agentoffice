@@ -96,6 +96,7 @@ saved to `$DATA_DIR/entities.json`):
 | `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, what they carry, the OAuth session |
 | `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
+| `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
 | `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
 | `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
@@ -217,6 +218,30 @@ their answer (`give`, `take`); see [docs/plugins.md](docs/plugins.md). The
 item kinds the office knows how to use are in `public/js/items.js`. Items
 live in the office, not on your PDS: rpg.actor has no items lexicon yet, and
 writing to a PDS would need a wider sign-in scope than the office asks for.
+
+### The desk computer
+
+Sit at any desk and press **E** (on a phone, tap the prompt) to pull up your
+**workstation**: a small desktop with windows and a taskbar. It is yours,
+not the desk's, so the same one comes up at whichever desk you sit at.
+
+- **Notes** (saved as you type), **Todo**, **Focus timer** (it rings even if
+  you've walked off or left: the note waits in your actor), **Calendar**
+  (meeting room bookings, yours highlighted), **Browser** (bookmarks, office
+  pages, any site that allows being framed, ↗ for the rest) and
+  **Terminal**, an office shell: `who`, `desks`, `rooms`, `todo add …`,
+  `jot …`, `cat 1`, `timer 25 writing`, `open notes`, `help`.
+- **Desk monitor**: share your screen to your desk's monitor, and people
+  standing within a few steps (with audio on) can watch it.
+- Apps that run on plugin Workers (**Ask the office**, **Magic 8-Ball**) use
+  the same contract and declarative panels as the objects on the map; list
+  more in `public/js/apps.js`. Built-in apps register with `registerApp`
+  in `public/js/workstation.js`.
+- Others see your monitor light up with windows while you're on it. Standing
+  up switches it off and ends a desk share.
+- Signed-in people and agents keep theirs in a `workstation` entity; a
+  guest's lives with their connection and is gone when they leave. Agents use
+  theirs through the `workstation_*` MCP tools (`take_desk` first).
 
 ### Talking
 
@@ -530,9 +555,9 @@ the upgrade request (or an agent's `?grant=`), not from `hello`; agents
 without either appear under their chosen name. The MCP server at `/mcp`
 speaks this same protocol for its agents. Client → server: `hello`, `move`, `chat`,
 `status`, `emote`, `sit`, `desk`, `pomo`, `wb`, `note`, `coffee`, `score`,
-`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`, `inv`. Server → client: `welcome`, `join`, `leave`, `move`,
+`wave`, `audio`, `av`, `book`, `rtc`, `use`, `gallery`, `inv`, `ws`. Server → client: `welcome`, `join`, `leave`, `move`,
 `peer`, `chat`, `desks`, `pomo`, `wb`, `notes`, `scores`, `counters`, `wave`,
-`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `error`.
+`toast`, `bookings`, `booked`, `roomnote`, `bounce`, `rtc`, `obj`, `objui`, `gallery`, `galleryres`, `inv`, `floor`, `wsr`, `error`.
 
 `inv` takes `op`: `use`, `drop` (`qty`), `give` (`to`: a peer id, name or
 handle; `qty`) or `pickup` (a floor `id`), each with the stack `id`. The
@@ -546,7 +571,9 @@ dropping, giving and picking up show up as `chat` lines with `action: true`.
 `extend` (`minutes`), `end`, `update`, or `admit` (`to`: a peer id). Pass a
 `ref` and the answer (`booked` or `error`) carries it back. `bounce` means a
 locked room turned you away (or showed you out) and says where you stand.
-`av` sets your `video` / `screen` flags (A/V rooms only); the media itself
+`ws` calls a method of your own workstation (`{ ref, method, args }`, answered
+by `wsr` with `result` or `error`; `{ method: "power", on }` lights the monitor).
+`av` sets your `video` / `screen` flags (A/V rooms, and `screen` at a desk); the media itself
 goes over the `rtc` connections. The server decides who receives each chat message
 using the same `canHear` rule the client uses for voice
 (`public/js/map.js`).
@@ -561,10 +588,12 @@ public/js/stock.js      stock rpg.actor characters from the generator's parts
 public/js/rooms.js      meeting room booking rules, status and holders (shared)
 public/js/rtc.js        proximity voice + A/V room video and screen share (WebRTC, perfect negotiation)
 public/js/main.js       client: input, UI, networking
+public/js/workstation.js  the desk computer: window manager, taskbar and built-in apps
+public/js/apps.js       workstation apps that run on plugin Workers (shared)
 server/atproto.js       handle/DID resolution and rpg.actor record reads
 server/auth.js          AT Protocol OAuth sign-in and the session cookie
 server/office.js        the World: sockets, presence, movement, chat routing, the entity mirror
-server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js)
+server/entities/        entity runtime + messaging (runtime.js) and the kinds (kinds.js, plugin.js, workstation.js)
 server/plugins.js       plugin objects: service binding calls, answer clean-up, built-in fallback
 server/sandbox.js       uploaded objects: WASM checks and ABI, Dynamic Worker sandbox (sandbox-node.js: Node)
 server/entities/gallery.js  uploaded objects: the list (gallery:main) and each object (uobj:<id>)

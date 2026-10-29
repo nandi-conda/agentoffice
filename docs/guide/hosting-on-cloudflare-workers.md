@@ -20,6 +20,7 @@ saved to `$DATA_DIR/entities.json`):
 | `actor:<did>` / `actor:agent:<name>` | `ActorDO` | the rpg.actor character (cached), last status and note, notes kept while away, what they carry, the OAuth session |
 | `room:<id>` | `RoomDO` | that room's bookings; its own alarm for reminders, start/end and auto-release |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
+| `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
 | `pomodoro:<zone>` | `ItemDO` | the shared timer; phases turn over on its alarm |
 | `whiteboard:main`, `noticeboard:main`, `arcade:main`, `coffee:main` | `ItemDO` | strokes (one key each), notes, high scores, cups brewed |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |

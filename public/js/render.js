@@ -319,7 +319,29 @@ export function createRenderer(canvas) {
       ctx.fillStyle = '#1f2937'; roundRect(ctx, S(x + 0.45), S(top - 0.25), S(1.1), S(0.62), S(0.05)); ctx.fill();
       ctx.fillStyle = owner ? '#0b1220' : '#111827';
       ctx.fillRect(S(x + 0.5), S(top - 0.2), S(1.0), S(0.5));
-      if (owner) {
+      const use = st.deskUse?.[f.id];
+      const feed = use?.video;
+      if (feed && feed.readyState >= 2 && feed.videoWidth) {
+        // a screen shared to this desk's monitor
+        ctx.fillStyle = '#000'; ctx.fillRect(S(x + 0.5), S(top - 0.2), S(1.0), S(0.5));
+        const r = Math.min(1.0 / feed.videoWidth, 0.5 / feed.videoHeight);
+        const dw = feed.videoWidth * r, dh = feed.videoHeight * r;
+        ctx.drawImage(feed, S(x + 0.5 + (1.0 - dw) / 2), S(top - 0.2 + (0.5 - dh) / 2), S(dw), S(dh));
+        st.lights.push({ x: x + 1, y: y + 0.2, r: 1.4, c: 'rgba(191,219,254,0.45)' });
+      } else if (use?.pc) {
+        // the workstation is up: a little desktop with windows
+        const g = ctx.createLinearGradient(S(x + 0.5), S(top - 0.2), S(x + 1.5), S(top + 0.3));
+        g.addColorStop(0, '#1e3a8a'); g.addColorStop(1, '#7c3aed');
+        ctx.fillStyle = g; ctx.fillRect(S(x + 0.5), S(top - 0.2), S(1.0), S(0.5));
+        ctx.fillStyle = 'rgba(255,252,247,0.9)';
+        ctx.fillRect(S(x + 0.58), S(top - 0.14), S(0.48), S(0.3));
+        ctx.fillRect(S(x + 1.0), S(top - 0.06), S(0.42), S(0.26));
+        ctx.fillStyle = use.color || '#38bdf8';
+        ctx.fillRect(S(x + 0.58), S(top - 0.14), S(0.48), S(0.05));
+        ctx.fillRect(S(x + 1.0), S(top - 0.06), S(0.42), S(0.05));
+        ctx.fillStyle = 'rgba(15,23,42,0.7)'; ctx.fillRect(S(x + 0.5), S(top + 0.25), S(1.0), S(0.05));
+        st.lights.push({ x: x + 1, y: y + 0.2, r: 1.2, c: 'rgba(167,139,250,0.4)' });
+      } else if (owner) {
         const t = st.time / 1000;
         const cols = ['#38bdf8', '#a78bfa', '#4ade80', '#f472b6', '#facc15'];
         for (let i = 0; i < 5; i++) {
@@ -335,6 +357,13 @@ export function createRenderer(canvas) {
       ctx.fillStyle = '#334155'; ctx.fillRect(S(x + 0.95), S(top + 0.5), S(0.1), S(0.2));
       ctx.fillStyle = '#475569'; roundRect(ctx, S(x + 0.45), S(top + 0.35), S(1.1), S(0.45), S(0.05)); ctx.fill();
       ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.arc(S(x + 1), S(top + 0.57), S(0.05), 0, 7); ctx.fill();
+      // a computer in use glows on the far side
+      const use = st.deskUse?.[f.id];
+      if (use?.pc || use?.video) {
+        ctx.fillStyle = use.video ? 'rgba(191,219,254,0.85)' : 'rgba(167,139,250,0.8)';
+        ctx.fillRect(S(x + 0.47), S(top + 0.33), S(1.06), S(0.04));
+        st.lights.push({ x: x + 1, y: y + 1.1, r: 1.2, c: use.video ? 'rgba(191,219,254,0.4)' : 'rgba(167,139,250,0.35)' });
+      }
       ctx.fillStyle = '#d6d3d1'; roundRect(ctx, S(x + 0.6), S(top + 0.1), S(0.8), S(0.18), S(0.03)); ctx.fill();
     }
     // desk props, picked per desk so the floor feels lived in

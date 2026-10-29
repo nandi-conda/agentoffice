@@ -8,6 +8,7 @@ import { DESKS, ZONES, PLUGIN_OBJECTS } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
 import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
+import { Workstation } from './workstation.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, fmtTime, fmtRange } from '../../public/js/rooms.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
@@ -681,7 +682,7 @@ export class Floor extends Entity {
 export const KINDS = {
   topic: Topic, actor: Actor, room: Room, desk: Desk,
   whiteboard: Whiteboard, noticeboard: NoticeBoard, arcade: Arcade, coffee: CoffeeMachine, pomodoro: Pomodoro,
-  plugin: PluginObject, gallery: Gallery, uobj: UploadedObject, floor: Floor,
+  plugin: PluginObject, gallery: Gallery, uobj: UploadedObject, floor: Floor, workstation: Workstation,
 };
 
 // Everything the World mirrors, pulled when it starts.
