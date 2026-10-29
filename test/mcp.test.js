@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Office } from '../server/office.js';
 import { AgentAuth, PROOF_COLLECTION } from '../server/agentauth.js';
+import { wasmPlugins } from './support/plugins.js';
 import { McpHub, resolvePlace } from '../server/mcp.js';
 import { log, setLogSink } from '../server/logs.js';
 
@@ -43,10 +44,10 @@ function fakeAtproto() {
   return { repo, fetch, resolve };
 }
 
-async function setup({ logDids = '' } = {}) {
+async function setup({ logDids = '', plugins = null } = {}) {
   const at = fakeAtproto();
   const auth = new AgentAuth({ fetch: at.fetch, resolve: at.resolve });
-  const office = new Office({});
+  const office = new Office({}, { plugins });
   const hub = new McpHub({ office, auth, token: 'op-token', logDids });
   // headers: e.g. { authorization: 'Bearer rmcp_good' }; none = read-only.
   const connect = async (headers = {}) => {
@@ -285,7 +286,7 @@ test('a session outlives a restart and its agent is put back in the office', asy
 });
 
 test('an MCP agent takes a desk and uses its workstation', async () => {
-  const { connect } = await setup();
+  const { connect } = await setup({ plugins: wasmPlugins() });
   const c = await connect(OP);
   await call(c, 'join_office', { name: 'Desk Bot' });
   await assert.rejects(call(c, 'workstation_desktop'), /walk up to a desk/);

@@ -1,6 +1,6 @@
 # workstation (Workstation)
 
-The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on WASM plugins. Always your own: the World names it after the caller, and you must be at a desk.
+The computer on the desks: one per identity, so yours comes up at whichever desk you use. Holds notes, a todo list, bookmarks, a personal focus timer and the window layout, runs a small office shell, and hosts apps that run on WASM plugins. What it does is a WASM program itself (public/plugins/workstation.wasm). Always your own: the World names it after the caller, and you must be at a desk.
 
 - address `workstation:<name>`
 - Durable Object binding `ACTOR` (class `ActorDO`)

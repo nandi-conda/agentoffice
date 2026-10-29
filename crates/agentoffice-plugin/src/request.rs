@@ -137,6 +137,8 @@ pub struct Request {
     pub input: Option<String>,
     /// JSON sent with the action (≤ 16 KB) by an office-drawn panel or an
     /// agent, e.g. a whiteboard stroke. Read it with [`data_as`](Request::data_as).
+    /// When the office runs the module as a program (the desk computer), the
+    /// method's params: answer with [`Response::reply`] or [`Response::fail`].
     pub data: Option<Value>,
     /// True when there was no state yet (the first call ever).
     pub fresh: bool,
@@ -161,6 +163,7 @@ pub struct Request {
 }
 
 impl Request {
+
     /// `req.is("sign")`
     pub fn is(&self, action: &str) -> bool { self.action == action }
     /// Someone walked up and pressed E.

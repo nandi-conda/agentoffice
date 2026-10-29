@@ -12,11 +12,31 @@ const obj = (id) => { const f = PLUGIN_OBJECTS.find((x) => x.id === id); return 
 
 test('every plugin object on the map and every workstation app is a WASM module that passes the upload checks', async () => {
   assert.ok(PLUGIN_OBJECTS.length >= 7);
-  for (const f of [...PLUGIN_OBJECTS, ...WS_APPS]) {
+  for (const f of [...PLUGIN_OBJECTS, ...WS_APPS, { id: 'workstation', wasm: 'workstation.wasm' }]) {
     assert.match(f.wasm || '', /^[\w-]+\.wasm$/, `${f.id} names its module`);
     const info = checkUpload('wasm', new Uint8Array(await wasmFile(f.wasm)));
     assert.ok(info.manifest?.name, `${f.wasm} has a manifest`);
   }
+});
+
+test('the office\'s own programs: method and args in, reply or error out, more state, no permissions', async () => {
+  const desk = { id: 'workstation', plugin: 'workstation', name: 'workstation', wasm: 'workstation.wasm' };
+  const calls = [];
+  const host = fakePlugins((req) => {
+    calls.push(req);
+    if (req.action === 'bad') return { error: 'no such note' };
+    return { reply: { echo: req.data }, state: { big: 'x'.repeat(200 * 1024) }, wakeAt: 5, give: [{ kind: 'cookie' }], take: [{ kind: 'cookie' }], unlock: 'boardroom' };
+  }, { permissions: ['take', 'unlock'] });
+  const r = await host.program({ object: desk, actor, method: 'noteSave', args: { text: 'hi' } });
+  assert.deepEqual(r.reply, { echo: { text: 'hi' } });
+  assert.equal(r.state.big.length, 200 * 1024, 'a whole workstation, past the 32 KB objects get');
+  assert.equal(r.wakeAt, 5);
+  assert.deepEqual(Object.keys(r).sort(), ['reply', 'state', 'toast', 'via', 'wakeAt'], 'give, take and unlock go nowhere');
+  assert.deepEqual(calls[0].permissions, []);
+  assert.equal(calls[0].action, 'noteSave');
+  await assert.rejects(host.program({ object: desk, actor, method: 'bad', state: { a: 1 } }), /no such note/);
+  await assert.rejects(host.program({ object: { ...desk, upload: { id: 'u-x', lang: 'wasm', code: '' } }, actor, method: 'desktop' }), /only the office's own/);
+  await assert.rejects(new PluginHost().program({ object: desk, actor, method: 'desktop' }), /workstation is out of order/);
 });
 
 test('the host runs the object\'s module with a seed, and its state comes back', async () => {

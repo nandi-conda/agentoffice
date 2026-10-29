@@ -4,7 +4,6 @@ import { EventEmitter } from 'node:events';
 import { Office } from '../server/office.js';
 import { DESKS, SPAWN } from '../public/js/map.js';
 import { describeApi, generatedTools } from '../server/apidoc.js';
-import { cleanUrl } from '../server/entities/workstation.js';
 import { wasmPlugins } from './support/plugins.js';
 
 class FakeWs extends EventEmitter {
@@ -41,7 +40,7 @@ async function ws(u, method, ...args) {
 }
 
 test('the desk computer needs you at a desk, and is yours at any desk', async () => {
-  const o = new Office({});
+  const o = new Office({}, { plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   await assert.rejects(ws(ada, 'desktop'), /walk up to a desk/);
   await toDesk(ada);
@@ -73,7 +72,7 @@ test('the desk computer needs you at a desk, and is yours at any desk', async ()
 });
 
 test('the shell runs office commands against your workstation', async () => {
-  const o = new Office({});
+  const o = new Office({}, { plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   await toDesk(ada);
   assert.match((await ws(ada, 'run', 'help')).out, /todo add/);
@@ -92,7 +91,7 @@ test('the shell runs office commands against your workstation', async () => {
 
 test('the focus timer rings through your actor, even after you left', async () => {
   let now = 1_000_000;
-  const o = new Office({}, { now: () => now });
+  const o = new Office({}, { now: () => now, plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   await toDesk(ada);
   const t = await ws(ada, 'timerStart', { minutes: 25, label: 'Deep work' });
@@ -128,7 +127,7 @@ test('apps on WASM plugins answer with panels; guests get a workstation that goe
 });
 
 test('walking away switches the computer off and ends a share to the desk monitor', async () => {
-  const o = new Office({});
+  const o = new Office({}, { plugins: wasmPlugins() });
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
   ada.ws.msg({ t: 'av', screen: true }); await tick();
@@ -159,9 +158,37 @@ test('workstation MCP tools are always your own: no name to pick, at a desk', ()
   }
 });
 
-test('bookmarks are http(s) or office pages', () => {
-  assert.equal(cleanUrl('example.com/a'), 'https://example.com/a');
-  assert.equal(cleanUrl('/docs/'), '/docs/');
-  assert.equal(cleanUrl('javascript:alert(1)'), null);
-  assert.equal(cleanUrl('data:text/html,hi'), null);
+test('bookmarks are http(s) or office pages', async () => {
+  const o = new Office({}, { plugins: wasmPlugins() });
+  const ada = await join(o, 'ada', { did: 'did:plc:ada' });
+  await toDesk(ada);
+  assert.equal((await ws(ada, 'linkAdd', { url: 'example.com/a' })).url, 'https://example.com/a');
+  assert.equal((await ws(ada, 'linkAdd', { url: '/docs/' })).url, '/docs/');
+  await assert.rejects(ws(ada, 'linkAdd', { url: 'javascript:alert(1)' }), /only http/);
+  await assert.rejects(ws(ada, 'linkAdd', { url: 'data:text/html,hi' }), /only http/);
+  o.runtime.stop();
+});
+
+test('the program is WASM: saved workstations load, a big one fits, and without a sandbox it is out of order', async () => {
+  const saved = { notes: [{ id: 'n1', title: 'From before', text: 'x'.repeat(20000), updated: 5 }], todos: [{ id: 't1', text: 'kept', done: false, at: 1 }], links: [], prefs: { wallpaper: 'night' } };
+  const o = new Office({}, { plugins: wasmPlugins() });
+  o.runtime.data['workstation:did:plc:ada'] = { state: structuredClone(saved) };
+  const ada = await join(o, 'ada', { did: 'did:plc:ada' });
+  await toDesk(ada);
+  const d = await ws(ada, 'desktop');
+  assert.equal(d.notes[0].title, 'From before');
+  assert.equal(d.todos[0].text, 'kept');
+  assert.equal(d.prefs.wallpaper, 'night', 'the layout stays with the host');
+  // Thirty full notes: far more than an object on the map may keep.
+  for (let i = 1; i < 30; i++) await ws(ada, 'noteSave', { text: `${i}`.repeat(20000) });
+  await assert.rejects(ws(ada, 'noteSave', { text: 'one more' }), /30 notes at most/);
+  assert.equal((await ws(ada, 'desktop')).notes.length, 30);
+  assert.match((await ws(ada, 'run', 'notes')).out, /20000 chars/);
+  o.runtime.stop();
+
+  const off = new Office({});
+  const bob = await join(off, 'bob', { did: 'did:plc:bob' });
+  await toDesk(bob);
+  await assert.rejects(ws(bob, 'desktop'), /workstation is out of order/);
+  off.runtime.stop();
 });

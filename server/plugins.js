@@ -19,6 +19,7 @@ import { ZONES } from '../public/js/map.js';
 import { cleanItem } from '../public/js/items.js';
 import { roomById } from '../public/js/rooms.js';
 import { cleanPermissions } from '../public/js/permissions.js';
+import { MAX_PROGRAM_ANSWER } from './sandbox.js';
 
 export const TIMEOUT_MS = 5000;
 export const MAX_STATE = 32 * 1024;
@@ -29,6 +30,8 @@ export const MAX_REQUEST_DATA = 16 * 1024;
 export const MAX_APPEND = 20;
 export const MAX_FEED_ENTRY = 8 * 1024;
 export const MAX_FEED = 3000;
+// What the office's own programs (the desk computer) may keep: a whole workstation.
+export const MAX_PROGRAM_STATE = MAX_PROGRAM_ANSWER - 64 * 1024;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
 const COLOR = /^#[0-9a-f]{3,8}$/i;
 const ACTION = /^[\w:.-]{1,64}$/;
@@ -64,9 +67,55 @@ export class PluginHost {
   }
 
   // One call into the sandbox, with the time limit.
-  async call(upload, req) {
+  async call(upload, req, opts) {
     if (!this.sandbox?.langs.includes(upload.lang)) throw new Error(`this office can't run ${upload.lang} plugins`);
-    return withTimeout(this.sandbox.run(upload, req), this.timeoutMs);
+    return withTimeout(this.sandbox.run(upload, req, opts), this.timeoutMs);
+  }
+
+  // One of the office's own modules run as a program, not an object someone
+  // walks up to: the desk computer (server/entities/workstation.js) calls a
+  // method with its params as JSON `data` (not held to the 16 KB an action's
+  // data gets), and the module answers with `reply` or `error` (SDK:
+  // Request::data_as, Response::reply / fail). Only modules the office
+  // ships (object.wasm), never uploads, and nothing beyond the basics: an
+  // answer's give, take or unlock is ignored. They keep more than objects
+  // on the map (a workstation with its notes), up to MAX_PROGRAM_STATE.
+  // Returns { reply, state, wakeAt, toast, via }; throws the module's error,
+  // or that it's out of order.
+  async program({ object, actor, method, args = null, state = null, now = this.now() }) {
+    const name = object.name || object.plugin;
+    if (!object.wasm || object.upload) throw new Error('only the office\'s own modules run as programs');
+    const req = {
+      object: { id: object.id, kind: object.plugin, name, zone: object.zone || null },
+      actor: { id: actor.id, did: actor.did || null, handle: actor.handle || null, name: actor.name, kind: actor.kind, role: actor.role || null },
+      action: method, input: null, data: args, state, nearby: [], inventory: [], now, event: null, permissions: [],
+      seed: Math.floor(Math.random() * 2 ** 53),
+    };
+    let raw;
+    try {
+      const { upload } = await this.code(object);
+      raw = await this.call(upload, req, { maxAnswer: MAX_PROGRAM_ANSWER });
+      delete this.problems[object.id];
+    } catch (e) {
+      const problem = clip(e?.message || e, 200);
+      this.problems[object.id] = { at: now, message: problem };
+      log('error', `plugin:${object.id}`, problem);
+      throw new Error(`the ${name} is out of order right now (${problem})`);
+    }
+    raw = raw && typeof raw === 'object' ? raw : {};
+    if (raw.error) throw new Error(clip(raw.error, 300));
+    let next = state;
+    if ('state' in raw) {
+      const json = JSON.stringify(raw.state ?? null);
+      if (json.length > MAX_PROGRAM_STATE) throw new Error(`the ${name} is full (over ${MAX_PROGRAM_STATE >> 10} KB): delete something first`);
+      next = JSON.parse(json);
+    }
+    return {
+      reply: raw.reply ?? null, state: next,
+      wakeAt: Number.isFinite(raw.wakeAt) ? raw.wakeAt : null,
+      toast: raw.toast ? clip(raw.toast, 200) : null,
+      via: this.sandbox.via,
+    };
   }
 
   // object: { id, plugin, name, zone, wasm? , upload? }; actor: { id, did, handle, name, kind, role }.

@@ -262,7 +262,7 @@ not the desk's, so the same one comes up at whichever desk you use.
 - **Things**: your inventory, the same panel as **I**.
 - **Desk monitor**: share your screen to your desk's monitor, and people
   standing within a few steps (with audio on) can watch it.
-- Apps that run on WASM plugins (**Ask the office**, **Magic 8-Ball**) use
+- Apps that run on WASM plugins (**Magic 8-Ball**) use
   the same contract and declarative panels as the objects on the map; list
   more in `public/js/apps.js`. Built-in apps register with `registerApp`
   in `public/js/workstation.js`.
@@ -271,6 +271,13 @@ not the desk's, so the same one comes up at whichever desk you use.
 - Signed-in people and agents keep theirs in a `workstation` entity; a
   guest's lives with their connection and is gone when they leave. Agents use
   theirs through the `workstation_*` MCP tools (`take_desk` first).
+- What it does (notes, todos, bookmarks, the timer, the shell) is a WASM
+  program, `plugins/wasm-workstation` built to `public/plugins/workstation.wasm`,
+  run in the same sandbox as the objects. The `workstation` entity is its
+  host: it keeps the state, checks it's yours and that you're at a desk,
+  rings the timer through your actor, keeps the window layout and hands the
+  shell what it prints about the office. The window manager, desk monitor
+  sharing and seating stay in the browser and the World.
 
 ### Talking
 

@@ -64,3 +64,4 @@ nav:
       - "upload: Skeleton Key": api/upload-skeleton-key.md
       - "wasm: Vending machine": api/upload-vending-machine.md
       - "wasm: Whiteboard": api/upload-whiteboard.md
+      - "upload: Workstation": api/upload-workstation.md

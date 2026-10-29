@@ -5,13 +5,13 @@
 // Cloudflare sandbox: node:vm isn't a security boundary.
 
 import { Worker } from 'node:worker_threads';
-import { runWasm, fromBase64, logLines } from './sandbox.js';
+import { runWasm, fromBase64, logLines, MAX_ANSWER } from './sandbox.js';
 
 const SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
 const runWasm = ${runWasm.toString()};
 let logs = null;
-runWasm(workerData.bytes, workerData.req, (l) => { logs = l; }).then(
+runWasm(workerData.bytes, workerData.req, (l) => { logs = l; }, workerData.maxAnswer).then(
   (ok) => parentPort.postMessage({ ok, logs }),
   (e) => parentPort.postMessage({ error: String(e && e.message || e) }),
 );
@@ -25,7 +25,7 @@ export class NodeSandbox {
     this.bytes = new Map(); // `${id}@${version}` -> decoded code
   }
 
-  run(upload, req) {
+  run(upload, req, { maxAnswer = MAX_ANSWER } = {}) {
     const key = `${upload.id}@${upload.version}`;
     let bytes = this.bytes.get(key);
     if (!bytes) {
@@ -34,7 +34,7 @@ export class NodeSandbox {
       if (this.bytes.size > 50) this.bytes.delete(this.bytes.keys().next().value);
     }
     return new Promise((resolve, reject) => {
-      const w = new Worker(SOURCE, { eval: true, workerData: { bytes, req }, resourceLimits: { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 } });
+      const w = new Worker(SOURCE, { eval: true, workerData: { bytes, req, maxAnswer }, resourceLimits: { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 } });
       const done = (f, v) => { clearTimeout(t); w.terminate(); f(v); };
       const t = setTimeout(() => done(reject, new Error(`no answer within ${this.timeoutMs} ms`)), this.timeoutMs);
       w.once('message', (m) => { if (m.error) return done(reject, new Error(m.error)); logLines(upload, m.logs); done(resolve, m.ok); });

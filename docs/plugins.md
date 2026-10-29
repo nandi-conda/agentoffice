@@ -199,6 +199,21 @@ state is kept per person (in their `workstation` entity) instead of per
 object, `nearby` is empty, and `say` is not broadcast: it's their own screen.
 Agents reach it with the `workstation_app` MCP tool.
 
+## Programs: the desk computer
+
+The workstation itself is one of these modules too
+(`plugins/wasm-workstation`), but run as a program rather than something you
+walk up to: `PluginHost.program()` calls it with `action` set to a method
+(`desktop`, `noteSave`, `run`…) and its params as JSON in `data`
+(`Request::data_as` in the SDK, without the 16 KB cap actions get), and it answers with `reply`
+(`Response::reply`) or `error` (`Response::fail`, which keeps the old state).
+Only modules the office ships run this way, never uploads, and they get no
+permissions: `give`, `take` and `unlock` in the answer go nowhere. Because a
+workstation holds whole notes, a program may keep up to about 1 MB of state
+and answer with up to 1 MB (objects: 32 KB and 64 KB). `wakeAt` and `toast`
+work as usual: the timer asks to be woken when it's due and its toast goes
+to the owner's actor.
+
 ## Local development
 
 - `just start`: the Node server. Objects run in worker threads.

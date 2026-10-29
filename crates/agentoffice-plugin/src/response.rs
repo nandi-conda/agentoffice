@@ -63,12 +63,23 @@ pub struct Response {
     /// [`Permission::Feed`](crate::Permission::Feed).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clear_feed: bool,
+    /// What a program call returns (see [`Request::data`]): any JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<Value>,
+    /// A program call that didn't work: the office raises this as the
+    /// error, and keeps the state it had.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl Response {
     pub fn new() -> Self { Self::default() }
     /// Just a toast, for when something went wrong.
     pub fn error(msg: impl Into<String>) -> Self { Self::new().toast(msg) }
+    /// A program call's answer (see [`Request::data`]).
+    pub fn reply(mut self, value: impl Serialize) -> Self { self.reply = serde_json::to_value(value).ok(); self }
+    /// A program call that didn't work: the caller gets `msg` as the error.
+    pub fn fail(msg: impl Into<String>) -> Self { Response { error: Some(msg.into()), ..Self::default() } }
     pub fn say(mut self, text: impl Into<String>) -> Self { self.say = Some(text.into()); self }
     /// Say it only if there's something to say.
     pub fn say_opt(mut self, text: Option<impl Into<String>>) -> Self { self.say = text.map(Into::into); self }

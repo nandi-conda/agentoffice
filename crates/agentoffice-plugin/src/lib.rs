@@ -163,8 +163,9 @@ pub fn handle_json<P: Plugin>(input: &[u8]) -> Vec<u8> {
                 Ok(mut plugin) => {
                     let mut res = plugin.interact(&req);
                     // Save the plugin when it changed (or on the first call).
+                    // (A failed program call keeps the state it had.)
                     let now = serde_json::to_value(&plugin).unwrap_or(Value::Null);
-                    res.state = (now != saved || req.fresh).then_some(now);
+                    res.state = (res.error.is_none() && (now != saved || req.fresh)).then_some(now);
                     res
                 }
             }

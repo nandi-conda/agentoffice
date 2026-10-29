@@ -31,6 +31,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [upload: Skeleton Key](upload-skeleton-key.md) | Opens any meeting room that's booked and not yours. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
 | [wasm: Whiteboard](upload-whiteboard.md) | The shared Boardroom whiteboard. |
+| [upload: Workstation](upload-workstation.md) | The program on the desk computers: your notes, todo list, bookmarks, a focus timer and the office shell. |
 
 ## Bindings
 

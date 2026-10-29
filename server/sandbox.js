@@ -28,6 +28,8 @@ import { log } from './logs.js';
 export const MAX_WASM = 512 * 1024;
 export const MAX_JS = 128 * 1024;
 export const MAX_ANSWER = 64 * 1024;
+// The office's own programs (the desk computer) answer with whole workstations.
+export const MAX_PROGRAM_ANSWER = 1024 * 1024;
 export const MAX_PAGES = 256; // initial memory: 16 MiB
 export const CPU_MS = 50;
 export const LANGS = ['wasm', 'js'];
@@ -36,8 +38,9 @@ export const IMPORTS = ['office.log', 'env.abort'];
 // Runs one call of a WASM plugin. Self-contained (no outer references, not
 // even imports), because its source is shipped into the sandbox with
 // toString(). What the plugin logs goes to onLog(text), and the sandbox hands
-// it back to the office to log there (logLines).
-export async function runWasm(module, req, onLog = null) {
+// it back to the office to log there (logLines). maxAnswer: bytes the
+// answer may take (64 KB; the office's own programs get more).
+export async function runWasm(module, req, onLog = null, maxAnswer = 64 * 1024) {
   if (!(module instanceof WebAssembly.Module)) module = await WebAssembly.compile(module);
   let mem = null;
   const logs = [];
@@ -63,7 +66,7 @@ export async function runWasm(module, req, onLog = null) {
   new Uint8Array(mem.buffer, ptr, input.length).set(input);
   const r = BigInt.asUintN(64, BigInt(x.interact(ptr, input.length)));
   const outPtr = Number(r >> 32n), outLen = Number(r & 0xffffffffn);
-  if (outLen > 64 * 1024) throw new Error(`the plugin answered ${outLen} bytes (64 KB at most)`);
+  if (outLen > maxAnswer) throw new Error(`the plugin answered ${outLen} bytes (${Math.round(maxAnswer / 1024)} KB at most)`);
   if (outPtr + outLen > mem.buffer.byteLength) throw new Error('the plugin answered outside its memory');
   const answer = outLen ? JSON.parse(text(outPtr, outLen)) : {};
   if (logs.length && onLog) onLog(logs.join(' | '));
@@ -197,9 +200,9 @@ import plugin from './plugin.wasm';
 const __name = (f) => f; // esbuild's keepNames helper, which runWasm's source may call
 const runWasm = ${runWasm.toString()};
 export default class extends WorkerEntrypoint {
-  async interact(req) {
+  async interact(req, maxAnswer) {
     let logs = null;
-    const answer = await runWasm(plugin, req, (l) => { logs = l; });
+    const answer = await runWasm(plugin, req, (l) => { logs = l; }, maxAnswer);
     return { answer, logs };
   }
 }
@@ -230,9 +233,9 @@ export class DynamicSandbox {
 
   // upload: { id, version, lang, code (base64) }. The loader keeps the
   // isolate warm by id, so the code is only decoded when it starts cold.
-  async run(upload, req) {
+  async run(upload, req, { maxAnswer = MAX_ANSWER } = {}) {
     const worker = this.loader.get(`${upload.id}@${upload.version}`, () => this.workerCode(upload));
-    const { answer, logs } = await worker.getEntrypoint().interact(req);
+    const { answer, logs } = await worker.getEntrypoint().interact(req, maxAnswer);
     logLines(upload, logs);
     return answer;
   }
