@@ -2,7 +2,7 @@
 
 | Area | What it's for |
 | --- | --- |
-| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. The **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
+| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves) and a bell to ring, and the **notice board**: pin sticky notes that stay up between visits. The **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
 | **Open Office** | 26 desks. Walk up to one and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |

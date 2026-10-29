@@ -1,6 +1,6 @@
 // Interactive objects on the map (jukebox, vending machine, 8-ball, the
 // Office Rally, the coffee machine, notice board, pomodoro, arcade, whiteboard,
-// the meeting room door panels…): one entity per object, address `plugin:<object id>`.
+// the reception desk, the meeting room door panels…): one entity per object, address `plugin:<object id>`.
 // The entity owns the object's memory; the behaviour is a WASM module in
 // public/plugins, run in the sandbox by the PluginHost in this.services.
 // See server/plugins.js and docs/plugins.md.
@@ -22,6 +22,8 @@ const ADOPT = {
   arcade: (v) => ({ scores: Array.isArray(v) ? v : [] }),
   whiteboard: (v) => ({ onBoard: Array.isArray(v) ? Math.min(v.length, MAX_FEED) : 0 }),
   room: (v) => ({ bookings: Array.isArray(v) ? v : [] }),
+  // The reception desk's waves were the World's own count (`world:waves`).
+  world: (v) => ({ waves: Number.isFinite(v) ? v : 0 }),
 };
 // …and those whose old view was a long list start their feed with it.
 const ADOPT_FEED = {
@@ -154,7 +156,7 @@ export class PluginObject extends Entity {
     const kind = from.split(':')[0];
     const shape = ADOPT[kind] || ((v) => v ?? null);
     let old = null;
-    try { old = await this.ref(from).view(); } catch { /* starts fresh */ }
+    try { old = from.startsWith('world:') ? await this.world.legacy(from) : await this.ref(from).view(); } catch { /* starts fresh */ }
     this.state.data = shape(old);
     // A room entity listened on its zone; the panel does now.
     if (from.startsWith('room:')) await this.ref(from).retire().catch(() => {});

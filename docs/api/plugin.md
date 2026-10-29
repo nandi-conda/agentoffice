@@ -4,7 +4,7 @@ An interactive object on the map (jukebox, vending machine, 8-ball, the Office R
 
 - address `plugin:<name>`
 - Durable Object binding `ITEM` (class `ItemDO`)
-- 14: `pomodoro`, `whiteboard`, `panel-board`, `panel-huddle`, `panel-booth1`, `panel-booth2`, `panel-booth3`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
+- 15: `pomodoro`, `whiteboard`, `panel-board`, `panel-huddle`, `panel-booth1`, `panel-booth2`, `panel-booth3`, `reception`, `rally`, `noticeboard`, `coffee`, `vending`, `arcade`, `jukebox`, `eightball`
 
 ## `view()`
 

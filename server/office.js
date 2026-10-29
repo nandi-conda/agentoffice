@@ -162,6 +162,7 @@ export class Office {
     this.onMirror = onMirror;
     // The channel wing, as last mirrored (a hibernation wake has it at once).
     this.layout(this.mirror.get('wing:main'), false);
+    // Waves counted before the reception desk did: it takes them over (legacy 'world:waves').
     this.waves = saved.counters?.waves || saved.waves || 0;
     this.shouts = [];
     // When this copy of the office started; a recent time means a restart
@@ -276,7 +277,8 @@ export class Office {
   get floor() { return this.mirror.get('floor:main') || []; }
   get counters() {
     const pomodoros = POMOS.reduce((n, f) => n + (this.shown(f.id)?.count || 0), 0);
-    return { coffees: this.shown('coffee')?.count || 0, pomodoros, waves: this.waves };
+    // Waves are the reception desk's; until it first runs, the World's old count.
+    return { coffees: this.shown('coffee')?.count || 0, pomodoros, waves: this.shown('reception')?.waves ?? this.waves };
   }
   pomoState() {
     const out = {};
@@ -379,6 +381,8 @@ export class Office {
       walk: (key, target) => this.walk(key, target),
       bookings: () => this.bookings,
       enforce: () => this.enforce(),
+      // What the World itself kept before an object took it over.
+      legacy: (what) => (what === 'world:waves' ? this.waves : null),
     };
   }
 
@@ -455,7 +459,7 @@ export class Office {
         // A whole feed (the whiteboard took over the old board's strokes).
         if (name === 'whiteboard' && value?.feed) this.broadcast({ t: 'wb', op: 'set', strokes: value.feed });
         if (name === 'noticeboard') this.broadcast({ t: 'notes', notes: this.notes });
-        else if (name === 'coffee') this.broadcast({ t: 'counters', counters: this.counters });
+        else if (name === 'coffee' || name === 'reception') this.broadcast({ t: 'counters', counters: this.counters });
         else if (name === 'arcade') this.broadcast({ t: 'scores', scores: this.scores.slice(0, 10) });
         else if (POMOS.some((f) => f.id === name)) this.broadcastPomo();
         else if (ROOMS.some((r) => panelOf(r.id) === name)) this.broadcast({ t: 'bookings', bookings: this.bookings });
@@ -1220,8 +1224,8 @@ export class Office {
   wave(p, m) {
     const q = this.peers.get(m.to);
     if (!q || !q.ready) return;
-    this.waves++;
-    this.onChange();
+    // The reception desk counts it for its sign (an office event: people can't send it).
+    this.bg(this.ref('plugin:reception').act(this.who(p), 'wave', null, { type: 'wave', data: { kind: m.kind === 'knock' ? 'knock' : 'wave' } }));
     this.sendTo(q, { t: 'wave', from: p.id, name: p.name, kind: m.kind === 'knock' ? 'knock' : 'wave' });
     this.broadcast({ t: 'peer', id: p.id, emote: 'wave' });
   }

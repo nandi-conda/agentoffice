@@ -97,7 +97,7 @@ saved to `$DATA_DIR/entities.json`):
 | `room:<id>` | `RoomDO` | retired: the bookings it kept before its door panel (`plugin:panel-<id>`) took them over |
 | `desk:<id>` | `ItemDO` | who holds the desk and their goal |
 | `workstation:<did>` / `workstation:agent:<name>` | `ActorDO` | the desk computer: notes, todos, bookmarks, focus timer (its own alarm), window layout, plugin app state |
-| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, rally, coffee machine, notice board, arcade, pomodoro, whiteboard, the meeting room door panels, which keep each room's bookings): its WASM plugin's state, what it shows, its feed (the whiteboard's strokes, one key each), its wake-up alarm |
+| `plugin:<object id>` | `ItemDO` | an interactive object (jukebox, vending machine, 8-ball, rally, coffee machine, notice board, arcade, pomodoro, whiteboard, reception desk, the meeting room door panels, which keep each room's bookings): its WASM plugin's state, what it shows, its feed (the whiteboard's strokes, one key each), its wake-up alarm |
 | `gallery:main` | `ItemDO` | the objects people uploaded: where each stands, its manifest, who owns it |
 | `uobj:<id>` | `ItemDO` | one uploaded object: its code and its state |
 | `floor:main` | `ItemDO` | things people put down, where they put them (cleared after a day) |
@@ -191,7 +191,7 @@ the Durable Object. Add new endpoints there, using only web-standard APIs
 
 | Area | What it's for |
 | --- | --- |
-| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves), and the **notice board**: pin sticky notes that stay up between visits. The **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
+| **Lobby** | Spawn point, reception desk with live office counters (☕ coffees, 🍅 pomodoros, 👋 waves) and a bell to ring, and the **notice board**: pin sticky notes that stay up between visits. The **Office Rally** flag: join a checkpoint race around the office, walk the route, win medals. |
 | **Open Office** | 26 desks. Walk up to one and **claim a desk**: your name goes on it, your monitor lights up while you're in, and your "working on" note is attached to it. Chat and voice are proximity-based. |
 | **Boardroom** | Private glass **A/V room** for 8, bookable. Everyone inside hears everyone inside and nobody outside, and can turn on their camera or share their screen. It has a **live shared whiteboard**, which is also drawn on the wall in the world, and a wall screen. |
 | **Huddle Room** | Smaller bookable **A/V room** for 4 with a wall screen. |

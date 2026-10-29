@@ -121,7 +121,10 @@ for (const bx of [1, 5, 9]) {
 }
 
 // Lobby
-add({ type: 'reception', id: 'reception', x: 3, y: 22, w: 5, h: 2, solid: true });
+// The front desk: a WASM plugin (plugins/wasm-reception). It counts the
+// office's waves for its sign (they used to live on the World itself,
+// `legacy`), and E rings the bell on it.
+add({ type: 'reception', id: 'reception', x: 3, y: 22, w: 5, h: 2, solid: true, interact: 'plugin', plugin: 'reception', wasm: 'reception.wasm', name: 'Reception desk', prompt: 'Ring the bell', legacy: 'world:waves' });
 add({ type: 'sofa', id: 'lobby-sofa', x: 2, y: 28, w: 3, h: 1, solid: true, facing: 'up' });
 add({ type: 'plant', id: 'p-lob1', x: 1, y: 20, w: 1, h: 1, solid: true });
 add({ type: 'plant', id: 'p-lob2', x: 11, y: 20, w: 1, h: 1, solid: true });

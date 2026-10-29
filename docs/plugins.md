@@ -13,6 +13,7 @@ people [upload](uploads.md). The office ships these:
 | 🎱 Magic 8-ball | Lounge, by the bookshelf | `plugins/wasm-eightball` | Ask a yes-or-no question; everyone nearby hears the answer. |
 | 🏁 Office Rally | Lobby, by the sofa | `plugins/wasm-rally` | A checkpoint race. Join at the flag; the race picks three areas in a random order and back, you walk them, the first three home win medals, best times stay on the board. Watches zones. See [the rally](uploads.md#a-bigger-example-the-office-rally). |
 | ☕ Coffee machine | Kitchen | `plugins/wasm-coffee` | Pours you a coffee into your inventory and counts every cup. The office adds the mug in your hand and the coffee-chat nudge. |
+| 🛎️ Reception desk | Lobby | `plugins/wasm-reception` | Counts every wave and knock for its sign (an office `wave` event, so nobody can bump it by hand), next to the coffee machine's cups and the pomodoro's rounds. E rings the bell on the desk, once every 10 s. |
 | 📌 Notice board | Lobby | `plugins/wasm-noticeboard` | Sticky notes, newest first, 40 at most. Take down your own; moderators take down anyone's (`actor.role`). |
 | 🕹️ Arcade cabinet | Lounge | `plugins/wasm-arcade` | The Byte Snake leaderboard both cabinets share: the top 20, best first. The game runs in your browser; a finished game's score becomes its `score:<points>` action. |
 | 🍅 Pomodoro | Deep Work Den | `plugins/wasm-pomodoro` | One shared focus timer for the den: focus, break, round after round. Phases turn over on its `wakeAt`. |
@@ -26,7 +27,7 @@ put in `display.data`. The whiteboard's strokes are far bigger than that, so
 they go on its [feed](#the-feed) instead, and the browser draws them on the
 boardroom wall and in its full-size editor. These used to be core
 entities (`coffee:main`, `noticeboard:main`, `arcade:main`, `pomodoro:focus`,
-`whiteboard:main`, `room:<id>`); the map object names the old one as `legacy`, and the
+`whiteboard:main`, `room:<id>`, and the World's own wave count, `world:waves`); the map object names the old one as `legacy`, and the
 first time the plugin object runs (the World wakes it when it starts) it
 takes over that entity's state, so nothing pinned, counted, drawn or booked is lost.
 The old protocol messages (`coffee`, `note`, `score`, `pomo`, `wb`, `book`) and their

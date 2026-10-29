@@ -108,6 +108,27 @@ test('the plugin objects take over what the core entities kept, a running timer 
   runtime.stop();
 });
 
+test('the reception desk takes over the World\'s wave count, counts new ones, and its bell rings', async () => {
+  const o = new Office({ migrated: true, counters: { waves: 9 } }, { plugins: wasmPlugins() });
+  await o.ready;
+  await until(() => o.shown('reception')?.waves === 9);
+  const ada = await join(o, 'ada'), bob = await join(o, 'bob');
+  ada.ws.msg({ t: 'wave', to: bob.p.id });
+  ada.ws.msg({ t: 'wave', to: bob.p.id, kind: 'knock' });
+  await until(() => o.counters.waves === 11);
+  assert.equal(ada.ws.last('counters').counters.waves, 11);
+  // People can't count waves by poking the desk themselves.
+  Object.assign(ada.p, { x: 5, y: 25 });
+  ada.ws.msg({ t: 'use', id: 'reception', action: 'wave' });
+  await until(() => ada.ws.last('objui'));
+  assert.equal(o.counters.waves, 11);
+  await new Promise((r) => setTimeout(r, 450)); // the object's cooldown
+  ada.ws.msg({ t: 'use', id: 'reception' });
+  const ding = await until(() => bob.ws.sent.find((m) => m.t === 'obj' && m.id === 'reception' && m.say));
+  assert.match(ding.say, /ada rings the bell/);
+  o.runtime.stop();
+});
+
 test('actors remember status and keep notes for when their person is away', async () => {
   const clock = { t: Date.UTC(2026, 9, 28, 14, 0) };
   const o = new Office({}, { now: () => clock.t, plugins: wasmPlugins() });

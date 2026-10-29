@@ -28,6 +28,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wasm: Notice board](upload-notice-board.md) | Sticky notes for the office, newest first (40 at most). |
 | [wasm: Pomodoro timer](upload-pomodoro-timer.md) | A shared focus timer for everyone in the Deep Work Den: focus, break, focus… until someone stops it. |
 | [wasm: Office Rally](upload-office-rally.md) | A checkpoint race around the office. |
+| [wasm: Reception desk](upload-reception-desk.md) | The front desk in the Lobby. |
 | [wasm: Meeting room panel](upload-meeting-room-panel.md) | The panel by a meeting room's door: keeps the room's bookings, sends reminders and start/end notes, lets knockers in, and frees the room when nobody turns up. |
 | [upload: Skeleton Key](upload-skeleton-key.md) | One key that goes into your inventory: whoever carries it walks into any meeting room that's booked and not theirs. |
 | [wasm: Vending machine](upload-vending-machine.md) | Free snacks while stock lasts; they go in your inventory. |
