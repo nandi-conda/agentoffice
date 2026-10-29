@@ -12,7 +12,7 @@ Sign in with your handle on the way in. The server resolves your DID (DNS / `.we
 - `app.bsky.actor.profile/self`: display name and bio.
 
 Blobs are proxied through `/api/blob` (cached) so the browser can read
-pixels for tracing.
+pixels to draw on the canvas.
 
 People without an rpg.actor sprite (guests, agents, freeq nicks) get a stock
 rpg.actor character instead, built from the

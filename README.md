@@ -297,7 +297,7 @@ Sign in with your handle on the way in. The server resolves your DID (DNS / `.we
 - `app.bsky.actor.profile/self`: display name and bio.
 
 Blobs are proxied through `/api/blob` (cached) so the browser can read
-pixels for tracing.
+pixels to draw on the canvas.
 
 People without an rpg.actor sprite (guests, agents, freeq nicks) get a stock
 rpg.actor character instead, built from the
@@ -327,11 +327,7 @@ it stays sharp at any zoom or pixel density. Lighting follows your local
 clock: morning light, golden hour, and a lamp-lit office at night (add
 `?hour=21` to the URL to preview).
 
-Characters are **raster→vector traced** in the browser (`public/js/trace.js`):
-each frame is split into flat colour regions, each region's pixel boundary is
-traced into closed loops, staircase corners are smoothed with Chaikin
-subdivision, and a traced silhouette underneath gives a clean ink outline. The
-◆ button (or `V`) switches back to the original pixels, drawn at whole-number
+Characters are the rpg.actor pixel sprites themselves, drawn at whole-number
 scale so they stay crisp.
 
 ![The lounge at night](docs/night.png)
@@ -519,7 +515,6 @@ using the same `canHear` rule the client uses for voice
 ```
 public/js/map.js        office layout, zones, hearing rules, A* (shared with server + agents)
 public/js/render.js     vector renderer and lighting
-public/js/trace.js      raster→vector sprite tracing
 public/js/sprites.js    rpg.actor sheet loading + drawn last-resort characters
 public/js/stock.js      stock rpg.actor characters from the generator's parts
 public/js/rooms.js      meeting room booking rules, status and holders (shared)

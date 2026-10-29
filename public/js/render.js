@@ -6,7 +6,6 @@ import { W, H, ZONES, FURNITURE, grid, zoneAt } from './map.js';
 import { ROOMS, roomStatus, fmtTime } from './rooms.js';
 import { WALL_H, daylight, statusColor, colorFor, roundRect, wrapText } from './style.js';
 import { WALK } from './sprites.js';
-import { tracedFrame, drawTraced } from './trace.js';
 
 const FLOORS = {
   wood: { base: '#ead7bb', line: 'rgba(120,80,40,0.10)', kind: 'planks' },
@@ -702,17 +701,12 @@ export function createRenderer(canvas) {
       const walking = p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.05;
       const col = walking ? order[Math.floor(st.time / 100) % order.length] : Math.min(1, cols - 1);
       const row = Math.min(p.dir, Math.floor(img.height / fr) - 1);
-      const traced = st.vector ? tracedFrame(img, col, row, fr) : null;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (traced) {
-        drawTraced(ctx, traced, s.x * dpr - (fr * k) / 2, (s.y + S(0.18)) * dpr - fr * k, k);
-      } else {
-        ctx.imageSmoothingEnabled = false;
-        const dx = Math.round(s.x * dpr - (fr * k) / 2);
-        const dy = Math.round((s.y + S(0.18)) * dpr - fr * k);
-        ctx.drawImage(img, col * fr, row * fr, fr, fr, dx, dy, fr * k, fr * k);
-      }
+      ctx.imageSmoothingEnabled = false;
+      const dx = Math.round(s.x * dpr - (fr * k) / 2);
+      const dy = Math.round((s.y + S(0.18)) * dpr - fr * k);
+      ctx.drawImage(img, col * fr, row * fr, fr, fr, dx, dy, fr * k, fr * k);
       ctx.restore();
     }
     if (p.cup) {

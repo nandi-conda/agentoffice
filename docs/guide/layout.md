@@ -3,7 +3,6 @@
 ```
 public/js/map.js        office layout, zones, hearing rules, A* (shared with server + agents)
 public/js/render.js     vector renderer and lighting
-public/js/trace.js      raster→vector sprite tracing
 public/js/sprites.js    rpg.actor sheet loading + drawn last-resort characters
 public/js/stock.js      stock rpg.actor characters from the generator's parts
 public/js/rooms.js      meeting room booking rules, status and holders (shared)

@@ -1,7 +1,6 @@
 import { W, H, ZONES, FURNITURE, DESKS, SEATS, SPAWN, HEAR_RADIUS, isBlocked, zoneAt, canHear, findPath, nearestInteractable } from './map.js';
 import { createRenderer, EMOJI } from './render.js';
 import { sheetsFor, facing } from './sprites.js';
-import { tracedFrame, drawTraced } from './trace.js';
 import { STATUS, statusColor, colorFor } from './style.js';
 import { connect } from './net.js';
 import { createVoice } from './rtc.js';
@@ -31,7 +30,6 @@ const board = createBoard();
 let path = null, walkTarget = null, follow = null;
 let autoStatus = null; // status set automatically (and which one), so we can undo it
 let lastCoffee = 0;
-let vector = store.get('vector', true);
 let k = null;
 // ?hour=14 pins the office lighting to a time of day (handy for demos).
 const hourParam = new URLSearchParams(location.search).get('hour');
@@ -148,9 +146,8 @@ async function previewFor(handle) {
 function drawPortrait(g, sheets, size) {
   g.clearRect(0, 0, size, size);
   const fr = sheets.frame || 48;
-  const t = vector ? tracedFrame(sheets.base, 1, 0, fr) : null;
-  if (t) drawTraced(g, t, 0, 0, size / fr);
-  else { g.imageSmoothingEnabled = false; g.drawImage(sheets.base, fr, 0, fr, fr, 0, 0, size, size); }
+  g.imageSmoothingEnabled = false;
+  g.drawImage(sheets.base, fr, 0, fr, fr, 0, 0, size, size);
 }
 
 handleIn.addEventListener('input', () => {
@@ -595,15 +592,6 @@ async function toggleMic() {
   }
 }
 
-const vecBtn = $('.vec');
-vecBtn.classList.toggle('on', vector);
-vecBtn.addEventListener('click', toggleVector);
-function toggleVector() {
-  vector = !vector; store.set('vector', vector);
-  vecBtn.classList.toggle('on', vector);
-  toast(vector ? '◆ Characters are traced to vector' : '▦ Characters drawn as crisp pixels', [], 2000);
-}
-
 $('.zoom-in').addEventListener('click', () => zoom(1));
 $('.zoom-out').addEventListener('click', () => zoom(-1));
 function zoom(d) {
@@ -655,7 +643,6 @@ function openHelp() {
       <kbd>N</kbd><span>Mute or unmute music from the jukebox</span>
       <kbd>B</kbd><span>Meeting rooms: schedule and booking</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
-      <kbd>V</kbd><span>Toggle traced-vector characters / original pixels</span>
       <kbd>+ −</kbd><span>Zoom</span>
     </div>${coarse ? '</details>' : ''}
     <h3 style="margin-top:16px">Who hears you</h3>
@@ -1203,7 +1190,6 @@ addEventListener('keydown', (e) => {
   else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
   else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
-  else if (key === 'v') toggleVector();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);
   else if (key === '?') openHelp();
@@ -1463,9 +1449,11 @@ function updateMusic() {
 function loop(t) {
   if (coarse && me && t - lastDraw < 30 && !busy()) { requestAnimationFrame(loop); return; }
   lastDraw = t;
-  const dt = Math.min(0.05, (t - last) / 1000); last = t;
+  // Walk in steps of at most 50 ms so a slow frame rate doesn't slow you down
+  // (or tunnel you through walls); a stall over a quarter second is dropped.
+  const dt = Math.min(0.25, (t - last) / 1000); last = t;
   if (me) {
-    stepMe(dt);
+    for (let left = dt; left > 1e-4; left -= 0.05) stepMe(Math.min(0.05, left));
     for (const p of peers.values()) {
       if (p === me) continue;
       glide(p, t);
@@ -1503,7 +1491,7 @@ function loop(t) {
     R.draw({
       cam, k, time: t, clock: clockNow(), meId: me.id, peers: others,
       desks, notes, pomo, counters, serverNow, ownerOnline, wbCanvas: board.canvas,
-      target, walkTarget, lastCoffee, vector, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
+      target, walkTarget, lastCoffee, bookings, screenFeed: screenFeed(z), freeq: freeqRooms, objects,
     });
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }

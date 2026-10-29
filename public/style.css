@@ -147,7 +147,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .tb.mic { background: #efebe5; }
 .tb.mic.on { background: #22c55e; color: #fff; }
 .tb.mic.muted { background: #ef4444; color: #fff; }
-.tb.vec.on { color: var(--accent); }
 .status-btn { display: flex; gap: 7px; font-weight: 500; font-size: 13px; padding: 0 10px; }
 .status-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; flex: none; }
 .status-text { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -281,7 +280,7 @@ input, select, textarea { font: inherit; color: inherit; }
   .tile.screen { width: min(240px, 60vw); }
   .channel-list .members { display: none; }
   .status-text { display: none; }
-  .tb.vec, .zoom-out, .zoom-in { display: none; }
+  .zoom-out, .zoom-in { display: none; }
   .profile { grid-template-columns: 1fr; }
 }
 
