@@ -2285,9 +2285,34 @@ canvas.addEventListener('pointermove', (e) => {
   placing.hover = { x: Math.floor(w.x), y: Math.floor(w.y) };
 });
 canvas.addEventListener('pointerleave', () => { if (placing) placing.hover = null; });
-// Touch devices drop to ~30 fps while nothing on screen is moving, to save battery.
+// Redrawing the whole vector office is the page's main cost (mostly raster,
+// not script), so it only runs at full rate while something moves. Idle, the
+// ambient touches (plants swaying, blinking) tick at ~8 fps, and at ~4 fps
+// (30 fps while moving) when the window isn't focused.
 let lastDraw = 0;
-const busy = () => me.moving || gesture || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
+const busy = () => me.moving || gesture || stick || Math.abs(me.x + camOff.x - cam.x) + Math.abs(me.y - 0.5 + camOff.y - cam.y) > 0.01
+  || [...peers.values()].some((p) => p.moving || Math.abs(p.x - p.rx) + Math.abs(p.y - p.ry) > 0.01);
+function frameGap() {
+  if (!me) return 0;
+  const focused = document.hasFocus();
+  if (busy()) return focused ? 0 : 30;
+  return focused ? 125 : 250;
+}
+// Idle waits sleep on a timer rather than spinning on requestAnimationFrame,
+// which alone keeps Chrome producing frames 60 times a second.
+let sleeper = 0;
+function nextFrame(wait) {
+  if (wait > 12) sleeper = setTimeout(() => { sleeper = 0; requestAnimationFrame(loop); }, wait - 8);
+  else requestAnimationFrame(loop);
+}
+// Input shows up on the next frame, not the next idle tick; starting from
+// idle, walking counts from the key press rather than the last idle frame.
+const wake = () => {
+  if (me && lastDraw && !busy()) last = performance.now();
+  lastDraw = 0;
+  if (sleeper) { clearTimeout(sleeper); sleeper = 0; requestAnimationFrame(loop); }
+};
+for (const ev of ['keydown', 'keyup', 'pointerdown', 'pointermove', 'pointerup', 'wheel', 'resize', 'focus']) addEventListener(ev, wake, { capture: true, passive: true });
 const pomoHud = $('.pomo-hud');
 
 // ---- music from objects (the jukebox) ----------------------------------------------
@@ -2318,7 +2343,8 @@ function updateMusic() {
 }
 
 function loop(t) {
-  if (coarse && me && t - lastDraw < 30 && !busy()) { requestAnimationFrame(loop); return; }
+  const gap = frameGap();
+  if (t - lastDraw < gap - 20) { nextFrame(gap - (t - lastDraw)); return; }
   lastDraw = t;
   modal.inv?.tick();
   // Walk in steps of at most 50 ms so a slow frame rate doesn't slow you down
@@ -2409,7 +2435,7 @@ function loop(t) {
     if (!doorSign.el.hidden) promptEl.hidden = true;
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
-  requestAnimationFrame(loop);
+  nextFrame(frameGap());
 }
 
 // Debug/test hook.
