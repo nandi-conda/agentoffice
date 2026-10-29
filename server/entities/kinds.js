@@ -437,7 +437,7 @@ export function nextRoomEvent(bookings, now) {
 }
 
 export class Room extends Entity {
-  static doc = 'A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, locks people out of locked meetings, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking\'s owner go to their actor, so they get them even when away.';
+  static doc = 'A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, keeps everyone but the meeting out while it runs, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking\'s owner go to their actor, so they get them even when away.';
   static api = {
     view: { doc: 'Its bookings (a day of history included).', returns: arr(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') }), 'Bookings') },
     book: {
@@ -450,7 +450,7 @@ export class Room extends Entity {
         end: opt(int('ms since epoch', 0)),
         minutes: opt(int('Length for create (15..240), or how much to extend by (5..120)', 5, 240)),
         invitees: opt(arr(str('Handle, DID or agent name', 253), 'Invitees', 20)),
-        lock: opt(bool('Keep everyone else out while it runs')),
+        lock: opt(bool('Ignored: every booking keeps everyone but its holders out')),
         autoRelease: opt(bool('Free the room if nobody turns up within 10 minutes (default true)')),
         to: opt(str('Peer id to let in (admit)', 64)),
       }, 'What to do', ['op']) },
@@ -595,13 +595,13 @@ export class Room extends Entity {
       if (!sent.start) {
         sent.start = true; changed = true;
         for (const q of presence) {
-          if (isHolder(b, q)) {
-            if (!inside.includes(q)) effects.push(this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`));
-          } else if (inside.includes(q)) {
-            if (b.lock) effects.push({ op: 'showOut', to: q.id, room: room.id, text: `🔒 ${room.name} is booked now for “${b.title}” (${b.name}), so you've been shown out.` });
-            else effects.push(this.note(q, b, 'taken', `📅 ${room.name} is booked now for “${b.title}” (${b.name}) until ${stamp(b.end)}`));
-          }
+          if (isHolder(b, q) && !inside.includes(q)) effects.push(this.note(q, b, 'start', `📅 “${b.title}” in ${room.name} is starting now`));
         }
+      }
+      // A booked room is for the meeting only: anyone else inside (there when
+      // it started, or in by any other route) is shown out, every tick.
+      for (const q of inside) {
+        if (!isHolder(b, q)) effects.push({ op: 'showOut', to: q.id, room: room.id, text: `🔒 ${room.name} is booked for “${b.title}” (${b.name}) until ${stamp(b.end)}, so you've been shown out. Knock to be let in.` });
       }
       if (b.autoRelease && !b.seen && now - b.start >= RULES.grace) {
         this.bookings = this.bookings.filter((x) => x !== b);

@@ -295,9 +295,9 @@ The Boardroom, Huddle Room and the three phone booths can be booked.
   until 15:00, or the meeting and when it ends), the door tablet glows
   green, amber or red, and the wall screens show the current meeting.
 - **Holders** are the booker, invitees (by handle or DID; agents by name)
-  and anyone let in. A normal booking just announces itself to people who
-  walk in. A **locked** booking keeps everyone else out while it runs: they
-  bump into the door, anyone still inside when it starts is shown out, and
+  and anyone let in. While a booking runs nobody else gets in (people and
+  agents alike, enforced by the server): they bump into the door, anyone
+  inside when it starts (or who got in some other way) is shown out, and
   they can **knock**, which gives someone inside a **Let in** button.
 - **Reminders**: holders get a heads-up 5 minutes before and at the start
   (with a "walk there" button), people in the room get a 5-minute warning
@@ -313,7 +313,7 @@ one), and a screen being shared also plays on the room's wall screen.
 Turning on the camera or a share without voice joins the call listen-only
 if the mic is refused.
 
-![A locked booking in the Boardroom: camera tiles, a screen share on the wall screen](docs/av-room.png)
+![A booking in the Boardroom: camera tiles, a screen share on the wall screen](docs/av-room.png)
 ![The room schedule](docs/room-schedule.png)
 
 ### Channel rooms
@@ -484,7 +484,7 @@ when signed in):
 ```js
 console.log(bot.rooms());                     // [{ id: 'board', av: true, state: 'free', current, next, … }]
 const b = await bot.book({ room: 'huddle', start: new Date(Date.now() + 3600e3), minutes: 30,
-  title: 'Retro', invitees: ['ada.bsky.social'], lock: true });
+  title: 'Retro', invitees: ['ada.bsky.social'] });
 await bot.extendBooking(b.id, 15);            // also cancelBooking, endBooking, updateBooking
 bot.on('roomnote', (m) => console.log(m.text)); // reminders and start/end notices
 ```
@@ -549,7 +549,7 @@ they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
 furniture, seat, person or x/y, along the A* path, with progress
 notifications), `take_desk`, `leave_office`, and the sign-in tools below.
 Meeting rooms: `rooms` (status and schedule), `book_room` (ISO times,
-invitees, lock) and `manage_booking` (cancel, extend, end, update, admit).
+invitees) and `manage_booking` (cancel, extend, end, update, admit).
 
 **Streaming.** Every server message the office would send a browser
 (`join`, `leave`, `chat`, `desks`, `notes`, `wave`, `toast`, `pomo`,
@@ -636,10 +636,10 @@ and broadcasts `floor` with `items` (what's lying around). `welcome` carries
 dropping, giving and picking up show up as `chat` lines with `action: true`.
 
 `book` takes `op`: `create` (`room`, `start` as epoch ms / ISO / `"now"`,
-`end` or `minutes`, `title`, `invitees`, `lock`, `autoRelease`), `cancel`,
+`end` or `minutes`, `title`, `invitees`, `autoRelease`), `cancel`,
 `extend` (`minutes`), `end`, `update`, or `admit` (`to`: a peer id). Pass a
 `ref` and the answer (`booked` or `error`) carries it back. `bounce` means a
-locked room turned you away (or showed you out) and says where you stand.
+booked room turned you away (or showed you out) and says where you stand.
 `ws` calls a method of your own workstation (`{ ref, method, args }`, answered
 by `wsr` with `result` or `error`; `{ method: "power", on }` lights the monitor).
 `av` sets your `video` / `screen` flags (A/V rooms, and `screen` at a desk); the media itself

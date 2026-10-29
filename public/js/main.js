@@ -389,10 +389,10 @@ function onMessage(m) {
     case 'wave': {
       const p = peers.get(m.from);
       chime();
-      // A knock on a locked room I'm holding can be answered by letting them in.
+      // A knock on a booked room I'm holding can be answered by letting them in.
       const z = zoneAt(me.x, me.y);
       const b = z?.bookable && activeBooking(bookings, z.id, serverNow());
-      const letIn = m.kind === 'knock' && p && b && b.lock && isHolder(b, me) && !isHolder(b, p);
+      const letIn = m.kind === 'knock' && p && b && isHolder(b, me) && !isHolder(b, p);
       // A knock on a channel room's door: anyone inside can let them in.
       const chanIn = m.kind === 'knock' && p && m.chanRoom;
       toast(`${m.kind === 'knock' ? '🚪' : '👋'} <b>${esc(m.name)}</b> ${m.kind === 'knock' ? `is knocking${chanIn ? ` on ${esc(wing.find((r) => r.id === m.chanRoom)?.channel || 'the door')}` : ''}` : 'waved at you'}`, p ? [
@@ -860,7 +860,7 @@ function openHelp() {
     <h3 style="margin-top:16px">Who hears you</h3>
     <p class="small">In open areas, anyone within a few steps. In the <b>Boardroom</b>, <b>Huddle Room</b> and <b>Phone Booths</b>, only people in the same room. The <b>Deep Work Den</b> is text-only and runs a shared pomodoro. Start a message with <code>/shout</code> to reach the whole office, or <code>@name</code> to tap someone anywhere.</p>
     <h3>Meeting rooms</h3>
-    <p class="small">Book the Boardroom, Huddle Room or a phone booth from the 📅 button or the panel by each door. The Boardroom and Huddle Room are <b>A/V rooms</b>: inside, turn on your camera or share your screen with everyone in the room. A <b>locked</b> booking keeps everyone but invitees out (knock to be let in); bookings nobody turns up to are released after 10 minutes.</p>
+    <p class="small">Book the Boardroom, Huddle Room or a phone booth from the 📅 button or the panel by each door. The Boardroom and Huddle Room are <b>A/V rooms</b>: inside, turn on your camera or share your screen with everyone in the room. While a booking runs only the booker and invitees can walk in (others knock to be let in); bookings nobody turns up to are released after 10 minutes.</p>
     <h3>Agents</h3>
     <p class="small">AI agents can work here too. They connect over the same WebSocket protocol, claim desks and answer @mentions. See <code>scripts/agent.mjs</code>.</p>
     <p class="small" style="margin-top:12px">People without their own sprite wear stock <a href="https://rpg.actor/generator" target="_blank" rel="noopener">rpg.actor</a> characters. Generator art by <a href="https://bsky.app/profile/isilme.reverie.house" target="_blank" rel="noopener">isilme</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.</p>`);
@@ -1261,7 +1261,7 @@ function walkInto(room) {
   walkTo((room.x0 + room.x1 + 1) / 2, (room.y0 + room.y1 + 1) / 2);
 }
 
-// Knock on a locked room: taps someone from the meeting who's inside.
+// Knock on a booked room: taps someone from the meeting who's inside.
 function knock(roomId) {
   const b = activeBooking(bookings, roomId, serverNow());
   const inside = [...peers.values()].filter((p) => p !== me && zoneAt(p.x, p.y)?.id === roomId && isHolder(b, p));
@@ -1279,11 +1279,11 @@ function updateRoomHud(z) {
   const { state, current, next } = roomStatus(bookings, z.id, serverNow());
   roomHud.hidden = false;
   roomHud.innerHTML = state === 'busy'
-    ? `${statusDot(state)}${current.lock ? '🔒 ' : ''}“${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
+    ? `${statusDot(state)}🔒 “${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
     : state === 'soon' ? `${statusDot(state)}Free until ${fmtTime(next.start)}` : `${statusDot(state)}Free · book this room`;
 }
 
-const draft = { room: 'board', date: '', time: '', minutes: 30, title: '', invitees: '', lock: false, autoRelease: true };
+const draft = { room: 'board', date: '', time: '', minutes: 30, title: '', invitees: '', autoRelease: true };
 
 function openSchedule(opts = {}) {
   Object.assign(draft, opts);
@@ -1305,7 +1305,7 @@ function openSchedule(opts = {}) {
     const rows = ROOMS.map((r) => {
       const st = roomStatus(bookings, r.id, now);
       const blocks = bookings.filter((b) => b.room === r.id && b.end > from && b.start < to).map((b) => `
-        <div class="tl-block${b.owner === keyOf(me) ? ' mine' : ''}${b.lock ? ' locked' : ''}${b.end <= now ? ' past' : ''}" data-id="${b.id}"
+        <div class="tl-block${b.owner === keyOf(me) ? ' mine' : ''}${b.end <= now ? ' past' : ''}" data-id="${b.id}"
           style="left:${pct(b.start)}%;width:${pct(b.end) - pct(b.start)}%"
           title="${esc(`${b.title} · ${fmtRange(b)} · ${b.name}${b.invitees?.length ? ` · with ${b.invitees.join(', ')}` : ''}`)}">${esc(b.title)}</div>`).join('');
       const nowLine = now > from && now < to ? `<div class="tl-now" style="left:${pct(now)}%"></div>` : '';
@@ -1319,7 +1319,7 @@ function openSchedule(opts = {}) {
         <div class="sched-head"><h2>Meeting rooms</h2>
           <div class="day-nav"><button class="prev" aria-label="Previous day">‹</button><b>${esc(dayWord(fromLocal(draft.date, '12:00')))}</b><button class="next" aria-label="Next day">›</button></div></div>
         <div class="timeline"><div></div><div class="tl-hours">${hours}</div>${rows}</div>
-        <p class="tiny muted">Click an empty spot to pick a time. 🔒 means only invitees can walk in.</p>
+        <p class="tiny muted">Click an empty spot to pick a time. While a booking runs, only its booker and invitees can walk in; anyone else knocks.</p>
         ${canBook() ? `<form class="book-form">
           <label>Room<select name="room">${ROOMS.map((r) => `<option value="${r.id}"${r.id === draft.room ? ' selected' : ''}>${esc(r.name)}${r.av ? ' (A/V)' : ''}</option>`).join('')}</select></label>
           <label>Day<input type="date" name="date" value="${draft.date}" min="${isoDay(now)}" max="${isoDay(now + RULES.ahead)}"></label>
@@ -1328,7 +1328,6 @@ function openSchedule(opts = {}) {
           <label class="wide">What's it for<input name="title" maxlength="80" value="${esc(draft.title)}" placeholder="e.g. Design review"></label>
           <label class="wide">Invite (handles, comma separated; agents by name)<input name="invitees" value="${esc(draft.invitees)}" placeholder="ada.bsky.social, StandupBot"></label>
           <div class="checks">
-            <label><input type="checkbox" name="lock"${draft.lock ? ' checked' : ''}> 🔒 Lock the room: only invitees can walk in</label>
             <label><input type="checkbox" name="autoRelease"${draft.autoRelease ? ' checked' : ''}> Release it if nobody shows up in 10 min</label>
           </div>
           <button class="btn primary wide">Book</button>
@@ -1367,7 +1366,7 @@ function openSchedule(opts = {}) {
       const start = fromLocal(draft.date, draft.time || '10:00');
       net.send({
         t: 'book', op: 'create', ref: 'new', room: draft.room, start, end: start + draft.minutes * MIN,
-        title: draft.title, invitees: draft.invitees, lock: draft.lock, autoRelease: draft.autoRelease,
+        title: draft.title, invitees: draft.invitees, autoRelease: draft.autoRelease,
       });
       draft.title = ''; draft.invitees = '';
     });
@@ -1379,7 +1378,7 @@ function bookingRow(b, now) {
   const live = b.start <= now && now < b.end;
   const own = b.owner === keyOf(me);
   return `<li data-id="${b.id}">${statusDot(live ? 'busy' : 'soon')}
-    <span class="grow"><b>${esc(b.title)}</b>${b.lock ? ' 🔒' : ''}<br><span class="small muted">${placeLink('zone', b.room, esc(roomById(b.room).name))} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
+    <span class="grow"><b>${esc(b.title)}</b><br><span class="small muted">${placeLink('zone', b.room, esc(roomById(b.room).name))} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
     ${zoneAt(me.x, me.y)?.id !== b.room ? '<button data-act="go">Walk there</button>' : ''}
     ${own && live ? '<button data-act="extend">+15 min</button><button data-act="end">End now</button>' : ''}
     ${own && !live ? '<button data-act="cancel">Cancel</button>' : ''}</li>`;
@@ -1405,12 +1404,12 @@ function openRoom(id) {
     const upcoming = forRoom(bookings, id).filter((b) => b.end > now).slice(0, 6);
     const gap = next ? next.start - now : 60 * MIN;
     const quick = Math.min(30 * MIN, Math.floor(gap / (5 * MIN)) * 5 * MIN);
-    const lockedOutNow = current?.lock && !isHolder(current, me);
+    const lockedOutNow = current && !isHolder(current, me);
     modal.open(`
       <h2>${esc(room.name)} ${room.av ? '<span class="badge av">A/V</span>' : ''}</h2>
       <p class="small muted">${room.seats} seat${room.seats > 1 ? 's' : ''} · ${room.av ? 'voice, video and screen share for everyone inside' : 'private voice'}</p>
       <div class="room-now ${state}">${statusDot(state)}<div>${state === 'busy'
-        ? `<b>In use${current.lock ? ' 🔒' : ''}:</b> “${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
+        ? `<b>In use 🔒:</b> “${esc(current.title)}” · ${esc(current.name)} · until ${fmtTime(current.end)}`
         : state === 'soon' ? `<b>Free</b> until ${fmtTime(next.start)} (“${esc(next.title)}”)` : '<b>Free</b>'}</div></div>
       <div class="row">
         ${!current && canBook() && quick >= RULES.minLen ? `<button class="btn primary quick">Book now · ${quick / MIN} min</button>` : ''}

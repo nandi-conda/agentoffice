@@ -79,7 +79,7 @@ export class AgentClient extends EventEmitter {
     if (m.t === 'welcome' || m.t === 'bookings') this.bookings = m.bookings || [];
     // Channel rooms off the hallway reshape the map; paths need to know.
     if (m.t === 'welcome' || m.t === 'wing') { this.wing = (m.t === 'wing' ? m.rooms : m.wing) || []; applyWing(this.wing); }
-    // A locked room turned us away (or showed us out): stop walking, stand where the server says.
+    // A booked room turned us away (or showed us out): stop walking, stand where the server says.
     if (m.t === 'bounce' && this.me) { this.walkId++; Object.assign(this.me, { x: m.x, y: m.y, seat: null }); }
     const wait = m.ref !== undefined && this.pending.get(m.ref);
     if (wait && (m.t === 'booked' || m.t === 'chan' || m.t === 'error')) {
@@ -169,7 +169,7 @@ export class AgentClient extends EventEmitter {
     });
   }
 
-  // book({ room: 'board', start: Date|ms|ISO|'now', minutes: 30 | end, title, invitees: ['ada.bsky.social'], lock, autoRelease })
+  // book({ room: 'board', start: Date|ms|ISO|'now', minutes: 30 | end, title, invitees: ['ada.bsky.social'], autoRelease })
   book({ start = 'now', end, ...rest } = {}) {
     const t = (v) => (v instanceof Date ? v.getTime() : v);
     return this.bookOp('create', { ...rest, start: t(start), ...(end !== undefined ? { end: t(end) } : {}) });

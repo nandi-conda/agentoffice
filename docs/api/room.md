@@ -1,6 +1,6 @@
 # room (Room)
 
-A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, locks people out of locked meetings, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking's owner go to their actor, so they get them even when away.
+A bookable meeting room. Keeps its own bookings, wakes itself for reminders and start/end announcements, keeps everyone but the meeting out while it runs, releases rooms nobody turned up to, and listens on its zone topic for people coming in. Notes for a booking's owner go to their actor, so they get them even when away.
 
 - address `room:<name>`
 - Durable Object binding `ROOM` (class `RoomDO`)
@@ -30,7 +30,7 @@ Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min
 | &nbsp;&nbsp;&nbsp;`m.end` *(optional)* | `integer ≥ 0` | ms since epoch |
 | &nbsp;&nbsp;&nbsp;`m.minutes` *(optional)* | `integer 5–240` | Length for create (15..240), or how much to extend by (5..120) |
 | &nbsp;&nbsp;&nbsp;`m.invitees` *(optional)* | `string ≤ 253[] (≤ 20)` | Invitees |
-| &nbsp;&nbsp;&nbsp;`m.lock` *(optional)* | `boolean` | Keep everyone else out while it runs |
+| &nbsp;&nbsp;&nbsp;`m.lock` *(optional)* | `boolean` | Ignored: every booking keeps everyone but its holders out |
 | &nbsp;&nbsp;&nbsp;`m.autoRelease` *(optional)* | `boolean` | Free the room if nobody turns up within 10 minutes (default true) |
 | &nbsp;&nbsp;&nbsp;`m.to` *(optional)* | `string ≤ 64` | Peer id to let in (admit) |
 

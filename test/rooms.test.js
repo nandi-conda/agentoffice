@@ -103,13 +103,13 @@ test('only the booker can cancel or extend; extending checks the next booking', 
   assert.equal(o.bookings.length, 1);
 });
 
-test('a locked booking keeps others out, shows them out at the start, and holders can admit', async () => {
+test('a booking keeps others out, shows them out at the start, and holders can admit', async () => {
   const { o, clock } = office();
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
   const cat = await join(o, 'cat', { did: 'did:plc:cat', handle: 'cat.test' });
   await place(bob, 40, 8); // bob is camped in the boardroom
-  const b = await book(ada, { room: 'board', start: T0 + 10 * MIN, minutes: 30, lock: true, invitees: 'cat.test', title: 'Offsite plan' });
+  const b = await book(ada, { room: 'board', start: T0 + 10 * MIN, minutes: 30, invitees: 'cat.test', title: 'Offsite plan' });
   clock.t = T0 + 10 * MIN; await o.tickRooms();
   assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'open', 'bob was shown out');
   assert.match(bob.ws.last('bounce').text, /Offsite plan/);
@@ -125,7 +125,25 @@ test('a locked booking keeps others out, shows them out at the start, and holder
   assert.match(bob.ws.last('roomnote').text, /let you in/);
 });
 
-test('an unlocked booking only announces; reminders and end notes go out once', async () => {
+test('a guest who slips into a booked booth any other way is shown out on the next tick, and cannot sit there', async () => {
+  const { o, clock } = office();
+  const ada = await join(o, 'ada', { did: 'did:plc:ada' });
+  const guest = await join(o, 'guest');
+  const bot = await join(o, 'Bot', { kind: 'agent' });
+  await book(ada, { room: 'booth1', start: T0, minutes: 30, title: 'Call' });
+  await place(guest, 2.5, 18.5);
+  guest.ws.msg({ t: 'move', x: 2.5, y: 15.5, dir: 3, moving: true, teleport: true }); await tick();
+  assert.notEqual(zoneAt(o.peers.get(guest.p.id).x, o.peers.get(guest.p.id).y)?.id, 'booth1', 'move refused');
+  await place(bot, 2.5, 15.6);
+  assert.notEqual(zoneAt(o.peers.get(bot.p.id).x, o.peers.get(bot.p.id).y)?.id, 'booth1', 'agents too');
+  // Got in by some other route (say, before a server restart): the next tick shows them out.
+  Object.assign(o.peers.get(guest.p.id), { x: 2.5, y: 15.5 });
+  clock.t = T0 + MIN; await o.tickRooms();
+  assert.equal(zoneAt(o.peers.get(guest.p.id).x, o.peers.get(guest.p.id).y)?.id, 'booths');
+  assert.match(guest.ws.last('bounce').text, /shown out/);
+});
+
+test('non-holders inside are shown out at the start; reminders and end notes go out once', async () => {
   const { o, clock } = office();
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });
   const bob = await join(o, 'bob', { did: 'did:plc:bob' });
@@ -134,8 +152,8 @@ test('an unlocked booking only announces; reminders and end notes go out once', 
   clock.t = T0 + 26 * MIN; await o.tickRooms(); await o.tickRooms();
   assert.equal(ada.ws.all('roomnote').filter((m) => m.kind === 'soon').length, 1);
   clock.t = T0 + 30 * MIN; await o.tickRooms();
-  assert.equal(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y).id, 'huddle', 'not locked, so bob stays');
-  assert.match(bob.ws.last('roomnote').text, /booked now for “Sync”/);
+  assert.notEqual(zoneAt(o.peers.get(bob.p.id).x, o.peers.get(bob.p.id).y)?.id, 'huddle', 'bob is shown out');
+  assert.match(bob.ws.last('bounce').text, /booked for “Sync”/);
   await place(ada, 39, 13);
   clock.t = T0 + 56 * MIN; await o.tickRooms();
   assert.match(ada.ws.last('roomnote').text, /minutes left/);

@@ -517,7 +517,7 @@ export class McpHub {
 
     const shapeBooking = (b) => b && {
       id: b.id, room: b.room, title: b.title, start: new Date(b.start).toISOString(), end: new Date(b.end).toISOString(),
-      by: b.name, handle: b.handle, invitees: b.invitees, locked: b.lock, autoRelease: b.autoRelease, cancelled: b.cancelled,
+      by: b.name, handle: b.handle, invitees: b.invitees, autoRelease: b.autoRelease, cancelled: b.cancelled,
     };
 
     tool('rooms',
@@ -535,7 +535,7 @@ export class McpHub {
       }, READ_ONLY);
 
     tool('book_room',
-      'Book a meeting room (protocol `book` op create). Times are ISO 8601 with a timezone (or "now"); give minutes or end. 15 min to 4 h, up to 14 days ahead, no overlaps. invitees are handles, DIDs or agent names; lock=true keeps everyone else out while it runs. Unless autoRelease=false, the room is freed if no invitee (or you) is in it 10 minutes after the start.',
+      'Book a meeting room (protocol `book` op create). Times are ISO 8601 with a timezone (or "now"); give minutes or end. 15 min to 4 h, up to 14 days ahead, no overlaps. invitees are handles, DIDs or agent names; while it runs only you and they can walk in (others knock and can be let in). Unless autoRelease=false, the room is freed if no invitee (or you) is in it 10 minutes after the start.',
       {
         room: z.enum(ROOMS.map((r) => r.id)),
         title: z.string().max(80).optional(),
@@ -543,7 +543,6 @@ export class McpHub {
         end: z.string().optional().describe('ISO time; or use minutes'),
         minutes: z.number().int().min(15).max(240).optional(),
         invitees: z.array(z.string()).max(20).optional(),
-        lock: z.boolean().optional(),
         autoRelease: z.boolean().optional(),
       },
       async ({ start = 'now', end, ...rest }) => {
@@ -553,14 +552,13 @@ export class McpHub {
       });
 
     tool('manage_booking',
-      'Change one of your bookings: cancel, extend (by minutes), end (now), update (title, invitees, lock, start/end ISO), or admit someone knocking on a locked room you hold (to = their peer id).',
+      'Change one of your bookings: cancel, extend (by minutes), end (now), update (title, invitees, start/end ISO), or admit someone knocking on a booked room you hold (to = their peer id).',
       {
         id: z.string(),
         op: z.enum(['cancel', 'extend', 'end', 'update', 'admit']),
         minutes: z.number().int().min(5).max(120).optional(),
         title: z.string().max(80).optional(),
         invitees: z.array(z.string()).max(20).optional(),
-        lock: z.boolean().optional(),
         start: z.string().optional(),
         end: z.string().optional(),
         to: z.string().optional(),
@@ -694,4 +692,4 @@ Then look around with look, and keep up with the office through read_events (lon
 Chat is proximity-based: people hear you within a few tiles or inside the same room; @name reaches someone anywhere; chat shout=true reaches everyone.
 walk_to moves you along real paths; take_desk claims a desk with what you're working on. When someone @mentions you, answer them.
 Things: you can carry items (inventory_view). The coffee machine (coffee) and the vending machine (plugin_interact name=vending, action buy:<snack>) hand them out; inventory_use eats or drinks them, inventory_give hands one to someone within 3 tiles, inventory_drop puts it down, and inventory_pickup picks up what floor_view lists (walk_to its id first).
-Meeting rooms: rooms shows the schedule, book_room books one (you can invite people and lock it), manage_booking changes it; roomnote events carry reminders and start/end notices.`;
+Meeting rooms: rooms shows the schedule, book_room books one (only you and invitees can walk in while it runs), manage_booking changes it; roomnote events carry reminders and start/end notices.`;

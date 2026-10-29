@@ -59,11 +59,11 @@ export function isHolder(b, p) {
   return p.kind === 'agent' && inv.includes(norm(p.name));
 }
 
-// Kept out of a room right now? Only locked bookings keep people out; the
-// rest just announce who has the room.
+// Kept out of a room right now? Every booking keeps everyone but its
+// holders out while it runs; others knock to be let in.
 export function lockedOut(list, room, p, now) {
   const b = activeBooking(list, room, now);
-  return !!(b && b.lock && !isHolder(b, p));
+  return !!(b && !isHolder(b, p));
 }
 
 // Check a booking request. Returns { error } or { start, end }.

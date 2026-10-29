@@ -204,9 +204,8 @@ test('agents book, list and cancel meeting rooms over MCP', async () => {
   const c = await connect(OP);
   await call(c, 'join_office', { name: 'Sched Bot' });
   const start = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  const { booked } = await call(c, 'book_room', { room: 'huddle', title: 'Retro', start, minutes: 45, invitees: ['ada.bsky.social'], lock: true });
+  const { booked } = await call(c, 'book_room', { room: 'huddle', title: 'Retro', start, minutes: 45, invitees: ['ada.bsky.social'] });
   assert.equal(booked.room, 'huddle');
-  assert.equal(booked.locked, true);
   assert.equal(office.bookings.length, 1);
   await tick();
   const rooms = await call(c, 'rooms');

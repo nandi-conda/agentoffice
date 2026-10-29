@@ -629,7 +629,7 @@ export class Office {
     if (isBlocked(Math.floor(x), Math.floor(y)) && !p.seat) return;
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
-    // A locked booking keeps everyone but its holders out of the room.
+    // A booking keeps everyone but its holders out of the room while it runs.
     const from = zoneAt(p.x, p.y), to = zoneAt(x, y);
     if (to?.bookable && to !== from && lockedOut(this.bookings, to.id, p, this.now())) {
       const b = activeBooking(this.bookings, to.id, this.now());
@@ -721,6 +721,8 @@ export class Office {
     }
     const seat = SEATS.find((s) => s.id === m.seat);
     if (!seat || Math.hypot(seat.x - p.x, seat.y - p.y) > 2.5) return;
+    const sz = zoneAt(seat.x, seat.y);
+    if (sz?.bookable && sz !== zoneAt(p.x, p.y) && lockedOut(this.bookings, sz.id, p, this.now())) return this.sendTo(p, { t: 'error', message: `${sz.name} is booked right now` });
     for (const q of this.peers.values()) if (q.seat === seat.id && q !== p) return this.sendTo(p, { t: 'error', message: 'someone is sitting there' });
     p.seat = seat.id; p.x = seat.x; p.y = seat.y;
     p.dir = { down: 0, left: 1, right: 2, up: 3 }[seat.facing] ?? 0;

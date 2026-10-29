@@ -974,7 +974,7 @@ export function createRenderer(canvas) {
       if (small) pills.push({ text: state === 'busy' ? `${z.name} · busy` : state === 'soon' ? `${z.name} · ${fmtTime(next.start)}` : z.name, bg: PILL.dark, dot });
       else {
         pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, caps: true });
-        pills.push({ text: state === 'busy' ? `${current.lock ? '🔒 ' : ''}${current.title} · until ${fmtTime(current.end)}` : state === 'soon' ? `free until ${fmtTime(next.start)}` : room.av ? 'free · A/V' : 'free', bg: PILL.dark, dot });
+        pills.push({ text: state === 'busy' ? `🔒 ${current.title} · until ${fmtTime(current.end)}` : state === 'soon' ? `free until ${fmtTime(next.start)}` : room.av ? 'free · A/V' : 'free', bg: PILL.dark, dot });
       }
     } else pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, dot, caps: true });
     const fq = st.freeq?.[z.id];
