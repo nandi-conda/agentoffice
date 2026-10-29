@@ -45,7 +45,7 @@ async function check(names) {
         console.log(`  ${m.emoji || '🧩'} ${m.name}${m.prompt ? ` · "${m.prompt}"` : ''}${m.look ? ` · looks like ${m.look}` : ''}${m.glow ? ` · ${m.glow}` : ''}`);
         if (m.doc) console.log(`  ${m.doc}`);
         for (const [a, spec] of Object.entries(m.api)) console.log(`  action ${a}${spec.params?.input ? ' (+ input)' : ''}: ${spec.doc}`);
-      } else console.log('  no manifest (use #[plugin] to embed one): the upload form starts blank');
+      } else console.log('  no manifest (export_plugin! embeds one): the upload form starts blank');
       // Someone walks up: the same sandbox `just start` runs uploads in.
       const req = { object: { id: 'u-check', kind: 'upload', name: m?.name || p.pkg, zone: 'lobby' }, actor: { id: 'ada', did: null, handle: null, name: 'Ada', kind: 'human' }, action: 'use', input: null, state: null, nearby: [], now: Date.now(), inventory: [] };
       const r = sanitize(await new NodeSandbox({ timeoutMs: 2000 }).run({ id: 'u-check', version: 'check', lang: 'wasm', code: toBase64(bytes) }, req));
@@ -66,7 +66,7 @@ async function check(names) {
 const title = (n) => n.replace(/[-_]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 function template(name) {
-  const fn = name.replace(/-/g, '_');
+  const type = name.split(/[-_]+/).map((w) => w[0].toUpperCase() + w.slice(1)).join('');
   const kind = name.replace(/_/g, '-');
   return {
     'Cargo.toml': `[package]
@@ -88,37 +88,45 @@ serde = { version = "1", features = ["derive"] }
 
 use agentoffice_plugin::prelude::*;
 
-/// What the object remembers between uses (≤ 32 KB as JSON).
+/// The object is its own memory, kept between uses (≤ 32 KB as JSON).
 #[derive(Serialize, Deserialize, Default)]
-struct State {
+struct ${type} {
     presses: u32,
 }
 
-/// A button that counts presses and hands out a sticker every 10th one.
-#[plugin(
-    name = "${title(name)}",
-    prompt = "Press the button",
-    emoji = "🔘",
-    glow = "#a78bfa",
-    look = "plinth",
-    action("press", "Press the button"),
-)]
-fn ${fn}(mut req: Request<State>) -> Response<State> {
-    let mut res = Response::new();
-    if req.is("press") {
-        req.state.presses += 1;
-        res = res.say(format!("🔘 {} pressed the button", req.actor.name));
-        if req.state.presses % 10 == 0 {
-            res = res.give(Give::new("${kind}:sticker").name("Button sticker").emoji("🔘"));
+impl Plugin for ${type} {
+    const MANIFEST: Manifest = Manifest::new("${title(name)}")
+        .doc("A button that counts presses and hands out a sticker every 10th one.")
+        .prompt("Press the button")
+        .emoji("🔘")
+        .glow("#a78bfa")
+        .look(Look::Plinth)
+        .actions(&[Action::new("press", "Press the button")]);
+
+    fn on_action(&mut self, req: &Request) -> Response {
+        if !req.is("press") {
+            return Response::error("that's not a button");
         }
+        self.presses += 1;
+        let res = Response::new().say(format!("🔘 {} pressed the button", req.actor.name));
+        if self.presses % 10 == 0 {
+            return res.give(Give::new("${kind}:sticker").name("Button sticker").emoji("🔘"));
+        }
+        res
     }
-    let n = req.state.presses;
-    res.display(Display::label(format!("{n} presses")))
-        .ui(Ui::new("🔘 ${title(name)}")
-            .text(format!("Pressed **{n}** times. Every 10th press gets a sticker."))
+
+    fn panel(&self, _req: &Request) -> Option<Ui> {
+        Some(Ui::new("🔘 ${title(name)}")
+            .text(format!("Pressed **{}** times. Every 10th press gets a sticker.", self.presses))
             .primary("Press", "press"))
-        .state(req.state)
+    }
+
+    fn display(&self) -> Option<Display> {
+        Some(Display::label(format!("{} presses", self.presses)))
+    }
 }
+
+export_plugin!(${type});
 
 #[cfg(test)]
 mod tests {
@@ -127,7 +135,7 @@ mod tests {
 
     #[test]
     fn counts_presses_and_hands_out_stickers() {
-        let mut office = TestOffice::new(${fn}).with_manifest(MANIFEST);
+        let mut office = TestOffice::<${type}>::new();
         assert_eq!(office.use_as("Ada").ui.unwrap().buttons[0].action, "press");
         for _ in 0..10 {
             office.act("Ada", "press");

@@ -76,9 +76,10 @@ impl Item {
     }
 }
 
-/// One call of your plugin. `S` is your state; it starts as `S::default()`.
+/// One call of your plugin. Your state isn't in here: it's your plugin
+/// itself (`&mut self`).
 #[derive(Clone, Debug, Default)]
-pub struct Request<S = Value> {
+pub struct Request {
     pub object: Object,
     pub actor: Actor,
     /// `"use"` when someone walks up, `"tick"` for a wake-up call, else an
@@ -86,8 +87,6 @@ pub struct Request<S = Value> {
     pub action: String,
     /// Text typed into your panel's input box.
     pub input: Option<String>,
-    /// What you answered with as `state` last time, or `S::default()`.
-    pub state: S,
     /// True when there was no state yet (the first call ever).
     pub fresh: bool,
     pub nearby: Vec<Person>,
@@ -97,7 +96,7 @@ pub struct Request<S = Value> {
     pub now: f64,
 }
 
-impl<S> Request<S> {
+impl Request {
     /// `req.is("sign")`
     pub fn is(&self, action: &str) -> bool { self.action == action }
     /// Someone walked up and pressed E.
@@ -122,7 +121,7 @@ impl<S> Request<S> {
     pub fn item(&self, kind: &str) -> Option<&Item> { self.inventory.iter().find(|i| i.kind == kind) }
 }
 
-// The request as it arrives, before the state is typed.
+// The request as it arrives; the state is split off for the plugin.
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub(crate) struct RawRequest {
@@ -137,17 +136,12 @@ pub(crate) struct RawRequest {
 }
 
 impl RawRequest {
-    pub(crate) fn typed<S: DeserializeOwned + Default>(self) -> Result<Request<S>, String> {
+    pub(crate) fn split(self) -> (Value, Request) {
         let fresh = self.state.is_null();
-        let state = if fresh {
-            S::default()
-        } else {
-            serde_json::from_value(self.state).map_err(|e| format!("its saved state doesn't fit the plugin's State type ({e})"))?
-        };
-        Ok(Request {
+        (self.state, Request {
             object: self.object, actor: self.actor,
             action: self.action.unwrap_or_else(|| "use".into()),
-            input: self.input, state, fresh,
+            input: self.input, fresh,
             nearby: self.nearby, inventory: self.inventory, now: self.now,
         })
     }

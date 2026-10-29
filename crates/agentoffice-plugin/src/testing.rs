@@ -7,24 +7,30 @@
 //! use agentoffice_plugin::prelude::*;
 //! use agentoffice_plugin::testing::TestOffice;
 //!
-//! fn dice(req: Request<u32>) -> Response<u32> {
-//!     let n = req.state + u32::from(req.is("roll"));
-//!     Response::new().state(n).ui(Ui::new("🎲 Dice").text(format!("Rolled {n} times.")).primary("Roll", "roll"))
+//! #[derive(Serialize, Deserialize, Default)]
+//! struct Dice { rolls: u32 }
+//!
+//! impl Plugin for Dice {
+//!     const MANIFEST: Manifest = Manifest::new("Dice").actions(&[Action::new("roll", "Roll it")]);
+//!     fn on_action(&mut self, _req: &Request) -> Response { self.rolls += 1; Response::new() }
+//!     fn panel(&self, _req: &Request) -> Option<Ui> {
+//!         Some(Ui::new("🎲 Dice").text(format!("Rolled {} times.", self.rolls)).primary("Roll", "roll"))
+//!     }
 //! }
 //!
-//! let mut office = TestOffice::new(dice);
+//! let mut office = TestOffice::<Dice>::new();
 //! assert_eq!(office.use_as("Ada").ui.unwrap().title, "🎲 Dice");
 //! office.act("Ada", "roll");
-//! assert_eq!(office.state(), 1);
+//! assert_eq!(office.state().rolls, 1);
+//! office.assert_clean();
 //! ```
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 
-use crate::{handle_json, Actor, Display, IntoResponse, Item, Object, Person, Request, Response};
+use crate::{handle_json, Actor, Display, Item, Object, Person, Plugin, Response};
 
 /// The office's limits (server/plugins.js, server/sandbox.js, public/js/items.js).
 pub mod limits {
@@ -67,11 +73,8 @@ fn valid_kind(k: &str) -> bool {
         && c.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ":._-".contains(ch))
 }
 
-type Handler<S> = Box<dyn Fn(Request<S>) -> Response<S>>;
-
 /// A pretend office with one object: your plugin.
-pub struct TestOffice<S> {
-    handler: Handler<S>,
+pub struct TestOffice<P> {
     /// The object as the plugin sees it (`u-test`, kind `upload`).
     pub object: Object,
     /// The office clock, epoch ms. Moves on 1 s per call; set it or [`advance`](Self::advance) it.
@@ -84,17 +87,21 @@ pub struct TestOffice<S> {
     said: Vec<String>,
     logs: Vec<String>,
     warnings: Vec<String>,
-    manifest: Option<Value>,
+    manifest: Value,
     next_id: u32,
+    plugin: std::marker::PhantomData<P>,
 }
 
-impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
-    /// An office with `handler` as its only object, and nobody in it yet:
-    /// people are made up as you name them.
-    pub fn new<R: IntoResponse<S>>(handler: impl Fn(Request<S>) -> R + 'static) -> Self {
+impl<P: Plugin> Default for TestOffice<P> {
+    fn default() -> Self { Self::new() }
+}
+
+impl<P: Plugin> TestOffice<P> {
+    /// An office with your plugin as its only object (no state yet), and
+    /// nobody in it: people are made up as you name them.
+    pub fn new() -> Self {
         TestOffice {
-            handler: Box::new(move |r| handler(r).into_response()),
-            object: Object { id: "u-test".into(), kind: "upload".into(), name: "Test object".into(), zone: Some("lobby".into()) },
+            object: Object { id: "u-test".into(), kind: "upload".into(), name: P::MANIFEST.name.into(), zone: Some("lobby".into()) },
             now: 1_761_700_000_000.0,
             state: Value::Null,
             people: HashMap::new(),
@@ -104,23 +111,14 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
             said: Vec::new(),
             logs: Vec::new(),
             warnings: Vec::new(),
-            manifest: None,
+            manifest: serde_json::from_str(&P::MANIFEST.to_json()).expect("the manifest is JSON"),
             next_id: 0,
+            plugin: std::marker::PhantomData,
         }
     }
 
-    /// Check panels against your manifest (the `MANIFEST` that `#[plugin]`
-    /// makes): an action a panel offers that the manifest doesn't list is a
-    /// warning, since agents only learn your actions from it.
-    pub fn with_manifest(mut self, manifest: &str) -> Self {
-        let m: Value = serde_json::from_str(manifest).expect("the manifest is JSON");
-        if let Some(name) = m["name"].as_str() { self.object.name = name.into(); }
-        self.manifest = Some(m);
-        self
-    }
-
     /// Start from this state instead of none.
-    pub fn with_state(mut self, state: S) -> Self {
+    pub fn with_state(mut self, state: P) -> Self {
         self.state = serde_json::to_value(state).expect("state is JSON");
         self
     }
@@ -157,20 +155,20 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
     }
 
     /// `name` walks up and presses E.
-    pub fn use_as(&mut self, name: &str) -> Response<S> { self.call(name, "use", None) }
+    pub fn use_as(&mut self, name: &str) -> Response { self.call(name, "use", None) }
 
     /// `name` picks `action` on your panel.
-    pub fn act(&mut self, name: &str, action: &str) -> Response<S> { self.call(name, action, None) }
+    pub fn act(&mut self, name: &str, action: &str) -> Response { self.call(name, action, None) }
 
     /// `name` types `text` into your input box and sends `action`.
-    pub fn type_in(&mut self, name: &str, action: &str, text: &str) -> Response<S> {
+    pub fn type_in(&mut self, name: &str, action: &str, text: &str) -> Response {
         assert!(text.chars().count() <= limits::INPUT, "the office sends at most {} characters of input", limits::INPUT);
         self.call(name, action, Some(text))
     }
 
     /// Jump the clock to the `wake_at` you asked for and make the office's
     /// `tick` call. Panics if nothing asked to be woken.
-    pub fn tick(&mut self) -> Response<S> {
+    pub fn tick(&mut self) -> Response {
         let at = self.wake_at.take().expect("the plugin didn't ask for a wake-up (wake_at)");
         self.now = self.now.max(at);
         let system = Actor { id: "system".into(), did: None, handle: None, name: "the office".into(), kind: "system".into() };
@@ -179,13 +177,13 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
 
     pub fn advance(&mut self, ms: f64) -> &mut Self { self.now += ms; self }
 
-    fn call(&mut self, name: &str, action: &str, input: Option<&str>) -> Response<S> {
+    fn call(&mut self, name: &str, action: &str, input: Option<&str>) -> Response {
         assert!(valid_action(action), "the office only sends action ids like [\\w:.-]{{1,64}}, not {action:?}");
         let who = self.actor(name);
         self.run(who, action, input)
     }
 
-    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response<S> {
+    fn run(&mut self, who: Actor, action: &str, input: Option<&str>) -> Response {
         self.now += 1000.0;
         let nearby: Vec<Person> = self.people.values().map(|a| Person { id: a.id.clone(), name: a.name.clone(), handle: a.handle.clone() }).collect();
         let inventory = if who.is_system() { Vec::new() } else { self.inventory(&who.name).to_vec() };
@@ -193,11 +191,11 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
             "object": self.object, "actor": who, "action": action, "input": input,
             "state": self.state, "nearby": nearby, "now": self.now, "inventory": inventory,
         });
-        let out = handle_json(&serde_json::to_vec(&req).unwrap(), |r: Request<S>| (self.handler)(r));
+        let out = handle_json::<P>(&serde_json::to_vec(&req).unwrap());
         self.logs.extend(take_logs());
         assert!(out.len() <= limits::ANSWER_BYTES, "the answer is {} bytes; the office takes 64 KB at most", out.len());
         let raw: Value = serde_json::from_slice(&out).expect("the answer is JSON");
-        let mut r: Response<S> = serde_json::from_value(raw.clone()).expect("the answer fits Response");
+        let mut r: Response = serde_json::from_value(raw.clone()).expect("the answer fits Response");
         self.check(&r);
 
         // give: all or nothing, like the office.
@@ -250,7 +248,7 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
     }
 
     // What the office would clip, drop or refuse.
-    fn check(&mut self, r: &Response<S>) {
+    fn check(&mut self, r: &Response) {
         let long = |s: &str, max: usize| s.chars().count() > max;
         let mut w = Vec::new();
         if r.say.as_deref().is_some_and(|s| long(s, limits::SAY)) { w.push(format!("say is over {} characters and gets cut", limits::SAY)); }
@@ -278,10 +276,10 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
             if ui.items.len() > limits::ITEMS { w.push(format!("ui.items has {}; the office shows {}", ui.items.len(), limits::ITEMS)); }
             if ui.buttons.len() > limits::BUTTONS { w.push(format!("ui.buttons has {}; the office shows {}", ui.buttons.len(), limits::BUTTONS)); }
             if ui.list.as_ref().is_some_and(|l| l.rows.len() > limits::LIST_ROWS) { w.push(format!("ui.list has more than {} rows; the rest are dropped", limits::LIST_ROWS)); }
-            if let Some(api) = self.manifest.as_ref().and_then(|m| m["api"].as_object()) {
+            if let Some(api) = self.manifest["api"].as_object() {
                 for a in ui.actions() {
                     let listed = api.contains_key(a) || api.keys().any(|k| k.split_once(":<").is_some_and(|(p, _)| a.strip_prefix(p).is_some_and(|rest| rest.starts_with(':'))));
-                    if !listed && a != "use" { w.push(format!("panel action {a:?} isn't in the manifest: add action(\"{a}\", \"…\") to #[plugin] so agents know it")); }
+                    if !listed && a != "use" { w.push(format!("panel action {a:?} isn't in the manifest: add Action::new(\"{a}\", \"…\") to MANIFEST so agents know it")); }
                 }
             }
         }
@@ -290,8 +288,8 @@ impl<S: DeserializeOwned + Serialize + Default> TestOffice<S> {
 
     /// The state as the office has it saved now.
     /// Kept as JSON, like the office, and typed fresh each time.
-    pub fn state(&self) -> S {
-        if self.state.is_null() { S::default() } else { serde_json::from_value(self.state.clone()).expect("saved state fits S") }
+    pub fn state(&self) -> P {
+        if self.state.is_null() { P::default() } else { serde_json::from_value(self.state.clone()).expect("saved state fits the plugin") }
     }
 
     /// The raw saved state, as JSON.

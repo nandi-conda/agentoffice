@@ -1,5 +1,5 @@
 // The manifest an uploaded WASM plugin can carry: JSON in a custom section
-// named `agentoffice.manifest` (the agentoffice-plugin Rust crate's #[plugin]
+// named `agentoffice.manifest` (the agentoffice-plugin Rust crate's export_plugin!
 // writes it). It says what the object is called, how it looks, and which
 // actions its panels send, so the upload form fills itself in and agents see
 // the actions in gallery_view. Shared by the upload panel (gallery.js) and

@@ -8,17 +8,17 @@ use serde_json::Value;
 ///
 /// ```
 /// use agentoffice_plugin::prelude::*;
-/// let r: Response<u32> = Response::new()
-///     .state(3)
+/// let r = Response::new()
 ///     .say("🎲 Ada rolled a 3")
 ///     .ui(Ui::new("🎲 Dice").text("Rolled **3** times.").primary("Roll", "roll"));
 /// ```
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Response<S = Value> {
-    /// Stored and passed back next call. `None` keeps the old state.
+pub struct Response {
+    /// Your plugin as it is after the call; filled in for you when it changed.
+    #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<S>,
+    pub state: Option<Value>,
     /// A speech bubble over the object and a chat line for everyone nearby (≤ 280 chars).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub say: Option<String>,
@@ -40,17 +40,10 @@ pub struct Response<S = Value> {
     pub wake_at: Option<f64>,
 }
 
-impl<S> Default for Response<S> {
-    fn default() -> Self {
-        Response { state: None, say: None, toast: None, display: None, ui: None, give: Vec::new(), wake_at: None }
-    }
-}
-
-impl<S> Response<S> {
+impl Response {
     pub fn new() -> Self { Self::default() }
     /// Just a toast, for when something went wrong.
     pub fn error(msg: impl Into<String>) -> Self { Self::new().toast(msg) }
-    pub fn state(mut self, state: S) -> Self { self.state = Some(state); self }
     pub fn say(mut self, text: impl Into<String>) -> Self { self.say = Some(text.into()); self }
     /// Say it only if there's something to say.
     pub fn say_opt(mut self, text: Option<impl Into<String>>) -> Self { self.say = text.map(Into::into); self }
@@ -248,20 +241,4 @@ impl Give {
     pub fn consume(mut self) -> Self { self.consume = true; self }
     pub fn emote(mut self, emote: impl Into<String>) -> Self { self.emote = Some(emote.into()); self }
     pub fn data(mut self, data: impl Serialize) -> Self { self.data = serde_json::to_value(data).ok(); self }
-}
-
-/// What a handler may return: a [`Response`], or a `Result` whose error
-/// becomes a toast (so `?` works).
-pub trait IntoResponse<S> {
-    fn into_response(self) -> Response<S>;
-}
-
-impl<S> IntoResponse<S> for Response<S> {
-    fn into_response(self) -> Response<S> { self }
-}
-
-impl<S, E: std::fmt::Display> IntoResponse<S> for Result<Response<S>, E> {
-    fn into_response(self) -> Response<S> {
-        self.unwrap_or_else(|e| Response::error(e.to_string()))
-    }
 }

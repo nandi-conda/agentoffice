@@ -69,12 +69,12 @@ uploads work in local dev.
 
 ## Writing a WASM plugin in Rust
 
-The `agentoffice-plugin` crate (`crates/agentoffice-plugin`) hides the ABI:
-you write one function from a typed request to a typed answer, and
-`#[plugin]` exports it and embeds a **manifest** (name, prompt, emoji, look,
-and the actions your panels send). Rust comes from pixi (conda-forge's
-`rust` plus the `wasm32-unknown-unknown` std, in pixi's `rust` environment),
-so there's nothing to install by hand.
+The `agentoffice-plugin` crate (`crates/agentoffice-plugin`) hides the ABI.
+An object is a type that implements the `Plugin` trait, and the type *is*
+the object's memory: the office keeps it between calls, and every method
+gets it as `self`. Rust comes from pixi (conda-forge's `rust` plus the
+`wasm32-unknown-unknown` std, in pixi's `rust` environment), so there's
+nothing to install by hand.
 
 ```sh
 just plugin-new dice        # plugins/wasm-dice, from a template with a test
@@ -86,73 +86,108 @@ Then press **U** in the office and upload the `.wasm`: the form fills itself
 in from the manifest. `just plugin-build` with no name builds every
 `plugins/wasm-*` and refreshes `public/plugins/guestbook.wasm`.
 
-The guestbook (`plugins/wasm-guestbook/src/lib.rs`, trimmed a little here) is the whole pattern:
+The guestbook (`plugins/wasm-guestbook/src/lib.rs`) is the whole pattern:
 
 ```rust
 use agentoffice_plugin::prelude::*;
 
 #[derive(Serialize, Deserialize, Default)]
-struct State { entries: Vec<Entry> }
+struct Guestbook { entries: Vec<Entry> }
 
 #[derive(Serialize, Deserialize)]
 struct Entry { name: String, text: String, at: f64 }
 
-/// Leave a note for the office; the last 20 stay up.
-#[plugin(
-    name = "Guestbook", prompt = "Sign the guestbook", emoji = "📖", glow = "#f59e0b", look = "plinth",
-    action("sign", "Sign the guestbook with a note", input = "Your note, up to 120 characters"),
-)]
-fn guestbook(mut req: Request<State>) -> Response<State> {
-    let note = req.text_clipped(120);
-    let mut say = None;
-    if req.is("sign") && !note.is_empty() {
-        say = Some(format!("✍️ {} signed the guestbook: “{note}”", req.actor.name));
-        req.state.entries.insert(0, Entry { name: req.actor.name.clone(), text: note, at: req.now });
-        req.state.entries.truncate(20);
+impl Plugin for Guestbook {
+    const MANIFEST: Manifest = Manifest::new("Guestbook")
+        .doc("Leave a note for the office; the last 20 stay up.")
+        .prompt("Sign the guestbook")
+        .emoji("📖")
+        .glow("#f59e0b")
+        .look(Look::Plinth)
+        .actions(&[Action::new("sign", "Sign the guestbook with a note").input("Your note, up to 120 characters")]);
+
+    fn on_action(&mut self, req: &Request) -> Response {
+        let note = req.text_clipped(120);
+        if !req.is("sign") || note.is_empty() {
+            return Response::new();
+        }
+        let say = format!("✍️ {} signed the guestbook: “{note}”", req.actor.name);
+        self.entries.insert(0, Entry { name: req.actor.name.clone(), text: note, at: req.now });
+        self.entries.truncate(20);
+        Response::new().say(say)
     }
-    let rows: Vec<String> = req.state.entries.iter().map(|e| format!("{}: {}", e.name, e.text)).collect();
-    Response::new()
-        .say_opt(say)
-        .display(Display::label(format!("{} signatures", rows.len())).glow("#f59e0b"))
-        .ui(Ui::new("📖 Guestbook")
-            .list("Latest", rows)
+
+    fn panel(&self, _req: &Request) -> Option<Ui> {
+        Some(Ui::new("📖 Guestbook")
+            .list("Latest", self.entries.iter().map(|e| format!("{}: {}", e.name, e.text)))
             .input(Input::new("sign").placeholder("Leave a note…").button("Sign").max_length(120)))
-        .state(req.state)
+    }
+
+    fn display(&self) -> Option<Display> {
+        Some(Display::label(format!("{} signatures", self.entries.len())).glow("#f59e0b"))
+    }
 }
+
+export_plugin!(Guestbook);
 ```
+
+### The `Plugin` trait
+
+Your type derives `Serialize`, `Deserialize` and `Default` (`Default` is
+the state a new object starts with). Before each call it's loaded from the
+saved JSON; after the call it's saved again if it changed. Keep it under
+32 KB, and add new fields with `#[serde(default)]` so an older object's
+saved state still loads (if it doesn't, the person gets a toast and
+nothing changes).
+
+| Method | Called when | Default |
+| --- | --- | --- |
+| `const MANIFEST: Manifest` | (required) what it's called, how it looks, its actions | |
+| `on_use(&mut self, req) -> Response` | someone walks up and presses E | nothing |
+| `on_action(&mut self, req) -> Response` | someone picks an action on your panel (`req.action`, `req.input`) | a toast: unknown action |
+| `on_tick(&mut self, req) -> Response` | the wake-up call you asked for with `.wake_at(ms)` (`actor.kind` is `system`; no panel goes out) | nothing |
+| `panel(&self, req) -> Option<Ui>` | after `on_use` / `on_action`, when the answer has no `ui` | none |
+| `display(&self) -> Option<Display>` | after every call, when the answer has no `display` | none |
+| `interact(&mut self, req) -> Response` | every call: does the dispatch above | override it to dispatch yourself |
+
+`export_plugin!(MyPlugin)` exports `alloc` and `interact` for it and embeds
+its manifest. One per crate. It only exports on `wasm32`, so the same crate
+builds natively for `cargo test`.
 
 | Piece | What it gives you |
 | --- | --- |
-| `Request<S>` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `state: S` (`S::default()` the first time; `fresh` says so), `nearby`, `inventory` (`count`, `has`, `item`), `now`. |
-| `Response<S>` | Builder: `.state()`, `.say()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`. Leave out `.state()` to keep the old state. `Response::error(msg)` is just a toast. A handler can also return `Result<Response<S>, E>`: the error becomes a toast, so `?` works. |
+| `Request` | `object`, `actor` (`is_human`, `is_agent`, `is_system`, `mention`), `action` (`is`, `is_use`, `is_tick`, `arg("play")` for `play:rain`), `input` (`text`, `text_clipped`), `fresh` (first call ever), `nearby`, `inventory` (`count`, `has`, `item`), `now`. |
+| `Response` | Builder: `.say()`, `.say_opt()`, `.toast()`, `.display(Display::label(…).glow(…).until(…).music(…))`, `.ui(…)`, `.give(…)`, `.wake_at()`. `Response::error(msg)` is just a toast. |
 | `Ui` | `Ui::new(title).text(…).item(Row::new(label, action).detail(…).disabled(…)).list(title, rows).input(Input::new(action)…).button(label, action).primary(label, action)`. |
 | `Give` | `Give::new("cookie")` (kinds the office knows fill in the rest) or your own `Give::new("dice:token").name(…).emoji(…).verb("plays").consume().data(…)`. Uploads can't `take`, so there's no `Take`. |
 | `log("…")` | A line in the office log (`office.log`); `cargo test` prints it. |
-| `#[plugin(…)]` | Exports `alloc` and `interact`, and puts the manifest in the module's `agentoffice.manifest` custom section. Keys: `name` (default: the function's name), `prompt`, `doc` (default: the `///` comment), `emoji`, `glow`, `look` (`plinth`, `kiosk`, `jukebox`, `vending`, `eightball`), and `action("id", "what it does", input = "what to type")` for each action. Bad values are compile errors. Also defines `MANIFEST`, the same JSON. |
-| `export_plugin!(handler)` | The ABI without a manifest, if you'd rather not use the attribute. |
-
-Your state is typed: if a new version's `State` can't read what an older
-one saved, the person gets a toast saying so and nothing changes. Add new
-fields with `#[serde(default)]` to keep old state working.
 
 ### The manifest
 
-The office reads the manifest on upload without running anything:
+`Manifest::new(name)` with `.doc()`, `.prompt()`, `.emoji()`, `.glow()`,
+`.look(Look::Plinth | Kiosk | Jukebox | Vending | EightBall)` and
+`.actions(&[Action::new("id", "what it does").input("what to type")])`. It's
+a `const`, checked when you compile: a name over 40 characters, a glow that
+isn't a colour or an action listed twice is a build error, not a surprise
+on upload.
+
+`export_plugin!` writes it as JSON into the module's `agentoffice.manifest`
+custom section. The office reads it on upload without running anything:
 whatever the uploader leaves blank (name, prompt, doc, emoji, colour, look)
 comes from it, the upload panel fills its form from it, and the declared
 actions are stored with the object as `api`. Agents see that `api` in
 `gallery_view`, so they know what to send to `uobj_interact`, and the
 example uploads in `public/plugins/` get an API reference page of their own
-(`just docs`, e.g. [upload: Guestbook](api/upload-guestbook.md)). It's
-optional: a module without one works as before.
+(`just docs`, e.g. [upload: Guestbook](api/upload-guestbook.md)).
 
 ### Testing without the office
 
-`agentoffice_plugin::testing::TestOffice` calls your handler the way the
+`agentoffice_plugin::testing::TestOffice` calls your plugin the way the
 office does: the request goes in as JSON and the answer comes out as JSON,
 state is kept between calls, `give` lands in the person's inventory (or
 bounces, all or nothing, when their hands are full), and anything the
-office would clip or drop is a warning.
+office would clip or drop is a warning, as is a panel action your manifest
+doesn't list.
 
 ```rust
 #[cfg(test)]
@@ -162,21 +197,22 @@ mod tests {
 
     #[test]
     fn signing() {
-        let mut office = TestOffice::new(guestbook).with_manifest(MANIFEST);
-        assert!(office.use_as("Ada").ui.unwrap().text.contains("Nobody"));
+        let mut office = TestOffice::<Guestbook>::new();
+        assert!(office.use_as("Ada").ui.unwrap().list.unwrap().rows.is_empty());
         office.type_in("Ada", "sign", "hello");
         assert_eq!(office.state().entries.len(), 1);
         assert_eq!(office.said().len(), 1);
-        office.assert_clean(); // no text over the office's limits, panel actions all in the manifest
+        office.assert_clean();
     }
 }
 ```
 
 It also has `act(who, action)`, `sign_in(who, handle)`, `agent(who)`,
-`carry(who, kind, qty)`, `inventory(who)`, `display()`, `logs()`,
-`advance(ms)` and `tick()` (jump to your `wake_at` and make the office's
-`tick` call). `just plugin-build` then runs the built module once in the
-same Node sandbox `just start` uses, so you see the real thing answer.
+`carry(who, kind, qty)`, `with_state(…)`, `inventory(who)`, `display()`,
+`logs()`, `advance(ms)` and `tick()` (jump to your `wake_at` and make the
+office's `tick` call). `just plugin-build` then runs the built module once
+in the same Node sandbox `just start` uses, so you see the real thing
+answer.
 
 ## The raw ABI (any language)
 
@@ -196,7 +232,7 @@ TinyGo, AssemblyScript. The ABI is JSON in, JSON out:
 
 | Custom section (optional) | What it holds |
 | --- | --- |
-| `agentoffice.manifest` | UTF-8 JSON, ≤ 8 KB: `{ "name", "prompt", "doc", "emoji", "glow", "look", "api": { "<action>": { "doc", "params": { "input": { "type": "string", "description" } } } } }` (the shape `#[plugin]` writes; read by `public/js/manifest.js`) |
+| `agentoffice.manifest` | UTF-8 JSON, ≤ 8 KB: `{ "name", "prompt", "doc", "emoji", "glow", "look", "api": { "<action>": { "doc", "params": { "input": { "type": "string", "description" } } } } }` (the shape the crate's `export_plugin!` writes; read by `public/js/manifest.js`) |
 
 Each call gets a fresh instance, so keep nothing in globals: the request
 carries the object's `state`, and the `state` you answer with is what the
@@ -216,7 +252,7 @@ next call gets. The request and answer are exactly the
           "input": { "placeholder": "Leave a note…", "action": "sign", "button": "Sign" } } }
 ```
 
-Without the crate, the Rust glue is two functions (it's what
+Without the crate, the Rust glue is two functions (roughly what
 `export_plugin!` expands to):
 
 ```rust
@@ -241,7 +277,7 @@ pub extern "C" fn interact(ptr: *mut u8, len: usize) -> u64 {
 
 `opt-level = "z"`, `lto = true` and `panic = "abort"` (the workspace
 `Cargo.toml`'s release profile) keep modules small: the guestbook is about
-110 KB.
+115 KB.
 
 ## Writing a JS plugin (Cloudflare only)
 

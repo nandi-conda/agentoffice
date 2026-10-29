@@ -1,13 +1,12 @@
 [package]
 name = "agentoffice-plugin"
 version = "0.1.0"
-description = "Write Agent Office objects in Rust: typed requests and answers, a panel builder, inventory helpers, the WASM ABI glue, a manifest and a test harness."
+description = "Write Agent Office objects in Rust: a Plugin trait, typed requests and answers, a panel builder, inventory helpers, the WASM ABI glue, a manifest and a test harness."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords = ["agentoffice", "wasm", "plugin"]
 
 [dependencies]
-agentoffice-plugin-macros = { path = "../agentoffice-plugin-macros", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

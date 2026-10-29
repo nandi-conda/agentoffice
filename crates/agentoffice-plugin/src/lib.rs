@@ -1,51 +1,59 @@
 //! Write [Agent Office](https://github.com/nandi-conda/agentoffice) objects
 //! in Rust. People upload the `.wasm` you build (press **U** in the office),
-//! put it on the floor, walk up and press **E**; your handler gets a typed
-//! [`Request`] and answers with a [`Response`].
+//! put it on the floor, walk up and press **E**.
 //!
-//! ```ignore
+//! An object is a type that implements [`Plugin`]. The type *is* the
+//! object's memory: the office keeps it between calls (as JSON), and every
+//! method gets it as `self`.
+//!
+//! ```
 //! use agentoffice_plugin::prelude::*;
 //!
-//! #[derive(Serialize, Deserialize, Default)]
-//! struct State { count: u32 }
-//!
 //! /// A button that counts how often it was pressed.
-//! #[plugin(name = "Counter", prompt = "Press the button", emoji = "🔢",
-//!          action("press", "Press it"))]
-//! fn counter(mut req: Request<State>) -> Response<State> {
-//!     if req.is("press") {
-//!         req.state.count += 1;
+//! #[derive(Serialize, Deserialize, Default)]
+//! struct Counter { presses: u32 }
+//!
+//! impl Plugin for Counter {
+//!     const MANIFEST: Manifest = Manifest::new("Counter")
+//!         .prompt("Press the button")
+//!         .emoji("🔢")
+//!         .actions(&[Action::new("press", "Press it")]);
+//!
+//!     fn on_action(&mut self, req: &Request) -> Response {
+//!         if req.is("press") { self.presses += 1; }
+//!         Response::new()
 //!     }
-//!     let n = req.state.count;
-//!     Response::new()
-//!         .ui(Ui::new("🔢 Counter").text(format!("Pressed **{n}** times.")).primary("Press", "press"))
-//!         .display(Display::label(format!("{n}")))
-//!         .state(req.state)
+//!
+//!     fn panel(&self, _req: &Request) -> Option<Ui> {
+//!         Some(Ui::new("🔢 Counter").text(format!("Pressed **{}** times.", self.presses)).primary("Press", "press"))
+//!     }
 //! }
+//!
+//! export_plugin!(Counter);
 //! ```
 //!
 //! What this crate does for you:
 //!
-//! - the ABI (`memory`, `alloc`, `interact`, JSON in and out) via
-//!   [`#[plugin]`](macro@plugin) or [`export_plugin!`];
-//! - your `state` typed and (de)serialized for you;
+//! - the ABI (`memory`, `alloc`, `interact`, JSON in and out) via [`export_plugin!`];
+//! - your state loaded before each call and saved after it when it changed;
 //! - a panel builder ([`Ui`]), inventory helpers ([`Request::count`], [`Give`]);
-//! - a manifest embedded in the module, which the office reads on upload so
-//!   the form fills itself in and agents see your actions in `gallery_view`;
+//! - a [`Manifest`], checked at compile time and embedded in the module, which
+//!   the office reads on upload so the form fills itself in and agents see
+//!   your actions in `gallery_view`;
 //! - [`testing::TestOffice`], to try it with `cargo test` the way the
 //!   office would call it.
 //!
-//! Build with `just plugin-build <name>` (or `cargo build --release --target
-//! wasm32-unknown-unknown`). See docs/uploads.md.
+//! Build with `just plugin-build <name>`. See docs/uploads.md.
 
+pub mod manifest;
 mod request;
 mod response;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod testing;
 
-pub use agentoffice_plugin_macros::plugin;
+pub use manifest::{Action, Look, Manifest};
 pub use request::{Actor, Item, Object, Person, Request};
-pub use response::{Button, Display, Give, Input, IntoResponse, List, Music, Response, Row, Ui};
+pub use response::{Button, Display, Give, Input, List, Music, Response, Row, Ui};
 #[doc(hidden)]
 pub use serde;
 #[doc(hidden)]
@@ -53,27 +61,93 @@ pub use serde_json;
 
 /// Everything a plugin usually needs, including serde's derives.
 pub mod prelude {
-    pub use crate::{log, plugin, Actor, Display, Give, Input, Item, Request, Response, Row, Ui};
+    pub use crate::{export_plugin, log, Action, Actor, Display, Give, Input, Item, Look, Manifest, Plugin, Request, Response, Row, Ui};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json, Value};
 }
 
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
+
+/// An object in the office. The type is its memory: derive `Serialize`,
+/// `Deserialize` and `Default` (the state it starts with). It's kept as JSON
+/// (32 KB at most); add new fields with `#[serde(default)]` so older saved
+/// state still loads.
+///
+/// Override what you need. [`interact`](Plugin::interact) sends `use` to
+/// [`on_use`](Plugin::on_use), `tick` to [`on_tick`](Plugin::on_tick) and
+/// every other action to [`on_action`](Plugin::on_action), then fills in
+/// the panel from [`panel`](Plugin::panel) and the label from
+/// [`display`](Plugin::display) when the answer left them out.
+pub trait Plugin: Serialize + DeserializeOwned + Default {
+    /// What the object is called, how it looks, which actions it takes.
+    const MANIFEST: Manifest;
+
+    /// Someone walked up and pressed E. Usually nothing to do: the panel
+    /// comes from [`panel`](Plugin::panel).
+    fn on_use(&mut self, _req: &Request) -> Response {
+        Response::new()
+    }
+
+    /// Someone picked an action on your panel (`req.action`, with `req.input`
+    /// for an input box). Unknown actions get a toast by default.
+    fn on_action(&mut self, req: &Request) -> Response {
+        Response::error(format!("{} doesn't know how to {}", Self::MANIFEST.name, req.action))
+    }
+
+    /// The office's wake-up call, at the `wake_at` you asked for. No one is
+    /// looking: `say` and `display` go out, the panel doesn't.
+    fn on_tick(&mut self, _req: &Request) -> Response {
+        Response::new()
+    }
+
+    /// The panel for whoever is using it, after on_use or on_action.
+    fn panel(&self, _req: &Request) -> Option<Ui> {
+        None
+    }
+
+    /// What everyone sees on the object: a label, a glow. The office only
+    /// sends it on when it changes.
+    fn display(&self) -> Option<Display> {
+        None
+    }
+
+    /// The whole call. Override it to do your own dispatch.
+    fn interact(&mut self, req: &Request) -> Response {
+        let mut res = match req.action.as_str() {
+            "use" => self.on_use(req),
+            "tick" => self.on_tick(req),
+            _ => self.on_action(req),
+        };
+        if res.ui.is_none() && !req.is_tick() {
+            res.ui = self.panel(req);
+        }
+        if res.display.is_none() {
+            res.display = self.display();
+        }
+        res
+    }
+}
 
 /// Run one call: request JSON in, answer JSON out. What `interact` does
 /// inside the module, and what [`testing::TestOffice`] calls natively.
-pub fn handle_json<S, R, F>(input: &[u8], handler: F) -> Vec<u8>
-where
-    S: DeserializeOwned + Serialize + Default,
-    R: IntoResponse<S>,
-    F: FnOnce(Request<S>) -> R,
-{
+pub fn handle_json<P: Plugin>(input: &[u8]) -> Vec<u8> {
     let answer = match serde_json::from_slice::<request::RawRequest>(input) {
-        Err(e) => Response::<S>::error(format!("bad request ({e})")),
-        Ok(raw) => match raw.typed::<S>() {
-            Ok(req) => handler(req).into_response(),
-            Err(e) => Response::error(e),
-        },
+        Err(e) => Response::error(format!("bad request ({e})")),
+        Ok(raw) => {
+            let (saved, req) = raw.split();
+            let loaded = if saved.is_null() { Ok(P::default()) } else { serde_json::from_value::<P>(saved.clone()) };
+            match loaded {
+                Err(e) => Response::error(format!("{}: its saved state doesn't fit ({e})", P::MANIFEST.name)),
+                Ok(mut plugin) => {
+                    let mut res = plugin.interact(&req);
+                    // Save the plugin when it changed (or on the first call).
+                    let now = serde_json::to_value(&plugin).unwrap_or(Value::Null);
+                    res.state = (now != saved || req.fresh).then_some(now);
+                    res
+                }
+            }
+        }
     };
     serde_json::to_vec(&answer).unwrap_or_else(|e| format!("{{\"toast\":\"couldn't encode the answer: {e}\"}}").into_bytes())
 }
@@ -114,43 +188,47 @@ pub mod abi {
     ///
     /// # Safety
     /// `ptr` must come from [`alloc`] with this `len`, filled by the office.
-    pub unsafe fn interact<S, R, F>(ptr: *mut u8, len: usize, handler: F) -> u64
-    where
-        S: DeserializeOwned + Serialize + Default,
-        R: IntoResponse<S>,
-        F: FnOnce(Request<S>) -> R,
-    {
+    pub unsafe fn interact<P: Plugin>(ptr: *mut u8, len: usize) -> u64 {
         let input = Vec::from_raw_parts(ptr, len, len);
-        let out = handle_json(&input, handler).into_boxed_slice();
+        let out = handle_json::<P>(&input).into_boxed_slice();
         let (p, n) = (out.as_ptr() as u64, out.len() as u64);
         std::mem::forget(out);
         (p << 32) | n
     }
 }
 
-/// Export `handler` as the plugin, without a manifest (prefer
-/// [`#[plugin]`](macro@plugin), which also embeds one). `handler` is a
-/// `fn(Request<S>) -> impl IntoResponse<S>`. Only exports on `wasm32`, so the
-/// same crate builds natively for `cargo test`.
+/// Make a [`Plugin`] the module's object: exports `alloc` and `interact`,
+/// and embeds its [`Manifest`] in the `agentoffice.manifest` custom section.
+/// One per crate. The manifest is checked at compile time, so a bad one
+/// fails `cargo build` and `cargo test` alike.
 #[macro_export]
 macro_rules! export_plugin {
-    ($handler:path) => {
+    ($plugin:ty) => {
         #[cfg(target_arch = "wasm32")]
-        #[unsafe(no_mangle)]
-        pub extern "C" fn alloc(len: usize) -> *mut u8 {
-            $crate::abi::alloc(len)
-        }
+        const _: () = {
+            const LEN: usize = $crate::manifest::encode::<0>(&<$plugin as $crate::Plugin>::MANIFEST).len;
 
-        #[cfg(target_arch = "wasm32")]
-        #[unsafe(no_mangle)]
-        pub extern "C" fn interact(ptr: *mut u8, len: usize) -> u64 {
-            unsafe { $crate::abi::interact(ptr, len, $handler) }
-        }
+            #[unsafe(link_section = "agentoffice.manifest")]
+            #[used]
+            static MANIFEST: [u8; LEN] = $crate::manifest::encode::<LEN>(&<$plugin as $crate::Plugin>::MANIFEST).buf;
 
-        // Natively the handler is only called from tests: that's not dead code.
+            #[unsafe(no_mangle)]
+            pub extern "C" fn alloc(len: usize) -> *mut u8 {
+                $crate::abi::alloc(len)
+            }
+
+            #[unsafe(no_mangle)]
+            pub extern "C" fn interact(ptr: *mut u8, len: usize) -> u64 {
+                unsafe { $crate::abi::interact::<$plugin>(ptr, len) }
+            }
+        };
+
+        // Natively (cargo test) there's nothing to export: check the
+        // manifest, and keep the plugin from looking unused.
         #[cfg(not(target_arch = "wasm32"))]
         const _: () = {
-            let _ = $handler;
+            let _ = $crate::manifest::encode::<0>(&<$plugin as $crate::Plugin>::MANIFEST).len;
+            let _ = $crate::handle_json::<$plugin>;
         };
     };
 }

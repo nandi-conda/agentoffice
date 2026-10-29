@@ -7,8 +7,9 @@ use agentoffice_plugin::prelude::*;
 const MAX_NOTE: usize = 120;
 const KEEP: usize = 20;
 
+/// The guestbook is its own memory: the notes, newest first.
 #[derive(Serialize, Deserialize, Default)]
-struct State {
+struct Guestbook {
     entries: Vec<Entry>,
 }
 
@@ -19,55 +20,56 @@ struct Entry {
     at: f64,
 }
 
-/// Leave a note for the office; the last 20 stay up.
-#[plugin(
-    name = "Guestbook",
-    prompt = "Sign the guestbook",
-    emoji = "📖",
-    glow = "#f59e0b",
-    look = "plinth",
-    action("sign", "Sign the guestbook with a note", input = "Your note, up to 120 characters"),
-)]
-fn guestbook(mut req: Request<State>) -> Response<State> {
-    let mut say = None;
-    let note = req.text_clipped(MAX_NOTE);
-    if req.is("sign") && !note.is_empty() {
-        say = Some(format!("✍️ {} signed the guestbook: “{note}”", req.actor.name));
-        req.state.entries.insert(0, Entry { name: req.actor.name.clone(), text: note, at: req.now });
-        req.state.entries.truncate(KEEP);
+impl Plugin for Guestbook {
+    const MANIFEST: Manifest = Manifest::new("Guestbook")
+        .doc("Leave a note for the office; the last 20 stay up.")
+        .prompt("Sign the guestbook")
+        .emoji("📖")
+        .glow("#f59e0b")
+        .look(Look::Plinth)
+        .actions(&[Action::new("sign", "Sign the guestbook with a note").input("Your note, up to 120 characters")]);
+
+    fn on_action(&mut self, req: &Request) -> Response {
+        let note = req.text_clipped(MAX_NOTE);
+        if !req.is("sign") || note.is_empty() {
+            return Response::new();
+        }
+        let say = format!("✍️ {} signed the guestbook: “{note}”", req.actor.name);
+        self.entries.insert(0, Entry { name: req.actor.name.clone(), text: note, at: req.now });
+        self.entries.truncate(KEEP);
+        Response::new().say(say)
     }
 
-    let rows: Vec<String> = req.state.entries.iter().map(|e| format!("{}: {}", e.name, e.text)).collect();
-    let text = match rows.len() {
-        0 => "Nobody has signed yet. Be the first!".to_string(),
-        n => format!("**{n}** signed so far."),
-    };
-    let label = match rows.len() {
-        1 => "1 signature".to_string(),
-        n => format!("{n} signatures"),
-    };
-    Response::new()
-        .say_opt(say)
-        .display(Display::label(label).glow("#f59e0b"))
-        .ui(Ui::new("📖 Guestbook")
+    fn panel(&self, _req: &Request) -> Option<Ui> {
+        let text = match self.entries.len() {
+            0 => "Nobody has signed yet. Be the first!".to_string(),
+            n => format!("**{n}** signed so far."),
+        };
+        Some(Ui::new("📖 Guestbook")
             .text(text)
-            .list("Latest", rows)
+            .list("Latest", self.entries.iter().map(|e| format!("{}: {}", e.name, e.text)))
             .input(Input::new("sign").placeholder("Leave a note…").button("Sign").max_length(MAX_NOTE as u32)))
-        .state(req.state)
+    }
+
+    fn display(&self) -> Option<Display> {
+        let label = match self.entries.len() {
+            1 => "1 signature".to_string(),
+            n => format!("{n} signatures"),
+        };
+        Some(Display::label(label).glow("#f59e0b"))
+    }
 }
+
+export_plugin!(Guestbook);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agentoffice_plugin::testing::TestOffice;
 
-    fn office() -> TestOffice<State> {
-        TestOffice::new(guestbook).with_manifest(MANIFEST)
-    }
-
     #[test]
     fn opens_empty() {
-        let mut office = office();
+        let mut office = TestOffice::<Guestbook>::new();
         let ui = office.use_as("Ada").ui.unwrap();
         assert_eq!(ui.title, "📖 Guestbook");
         assert!(ui.text.contains("Nobody"));
@@ -77,20 +79,20 @@ mod tests {
 
     #[test]
     fn signing_keeps_the_newest_first() {
-        let mut office = office();
+        let mut office = TestOffice::<Guestbook>::new();
         let r = office.type_in("Ada", "sign", "hello office");
         assert_eq!(r.say.as_deref(), Some("✍️ Ada signed the guestbook: “hello office”"));
         office.type_in("Grace", "sign", "  hi  ");
-        let state = office.state();
-        assert_eq!(state.entries.len(), 2);
-        assert_eq!(state.entries[0].text, "hi");
+        let book = office.state();
+        assert_eq!(book.entries.len(), 2);
+        assert_eq!(book.entries[0].text, "hi");
         assert_eq!(office.display().unwrap().label.as_deref(), Some("2 signatures"));
         office.assert_clean();
     }
 
     #[test]
     fn empty_notes_and_long_ones() {
-        let mut office = office();
+        let mut office = TestOffice::<Guestbook>::new();
         assert!(office.type_in("Ada", "sign", "   ").say.is_none());
         office.type_in("Ada", "sign", &"x".repeat(300));
         assert_eq!(office.state().entries[0].text.len(), MAX_NOTE);
@@ -103,9 +105,9 @@ mod tests {
 
     #[test]
     fn manifest_describes_it() {
-        let m: Value = serde_json::from_str(MANIFEST).unwrap();
+        let m: Value = serde_json::from_str(&Guestbook::MANIFEST.to_json()).unwrap();
         assert_eq!(m["name"], "Guestbook");
-        assert_eq!(m["doc"], "Leave a note for the office; the last 20 stay up.");
+        assert_eq!(m["look"], "plinth");
         assert!(m["api"]["sign"]["params"]["input"].is_object());
     }
 }

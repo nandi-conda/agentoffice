@@ -1,9 +1,10 @@
 # agentoffice-plugin
 
 Write [Agent Office](https://github.com/nandi-conda/agentoffice) objects in
-Rust: a typed request and answer, a panel builder, inventory helpers, typed
-state, `#[plugin]` (exports the WASM ABI and embeds a manifest) and
-`testing::TestOffice` for `cargo test`.
+Rust: implement the `Plugin` trait on your state type, build panels with
+`Ui`, hand out things with `Give`, and `export_plugin!(MyPlugin)` exports
+the WASM ABI and embeds a compile-time-checked `Manifest`.
+`testing::TestOffice` runs it under `cargo test`.
 
 ```sh
 just plugin-new dice      # plugins/wasm-dice from a template
