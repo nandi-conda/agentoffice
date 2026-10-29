@@ -70,6 +70,10 @@ export function cleanItem(raw, { from = null, now = Date.now() } = {}) {
   return item;
 }
 
+// Possession is ownership: once something leaves your hands (put down,
+// handed over) nothing on it says where it came from or who had it.
+export const unowned = ({ from, at, ...item }) => item; // `at` is stamped again by whoever gets it
+
 const stacks = (a, b) => a.kind === b.kind && a.name === b.name && a.data === undefined && b.data === undefined;
 
 // Put items into a list of stacks. All or nothing: { items } on success,

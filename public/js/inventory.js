@@ -51,7 +51,7 @@ export function openInventory(modal, ctx) {
       ${near.length ? `<h3>On the floor nearby</h3><ul class="inv-list">${near.map(({ e, d }) => `
         <li class="inv-row" data-floor="${esc(e.id)}">
           <span class="inv-emoji" aria-hidden="true">${esc(e.item.emoji)}</span>
-          <span class="inv-name"><b>${esc(e.item.name)}</b>${e.item.qty > 1 ? ` <span class="muted">×${e.item.qty}</span>` : ''}<small class="muted">left by ${esc(e.by || 'someone')}</small></span>
+          <span class="inv-name"><b>${esc(e.item.name)}</b>${e.item.qty > 1 ? ` <span class="muted">×${e.item.qty}</span>` : ''}<small class="muted">anyone's to take</small></span>
           <span class="inv-acts"><button class="btn inv-pick">${d <= PICKUP_RANGE ? 'Pick up' : 'Walk & pick up'}</button></span>
         </li>`).join('')}</ul>` : ''}
       <p class="muted tiny">${ctx.keeps() ? 'Your things stay with you between visits.' : 'As a guest you carry a few things for this visit only. Sign in to keep them.'}${matchMedia('(pointer: coarse)').matches ? '' : ' Press <kbd>I</kbd> to open this, <kbd>E</kbd> to pick up what\'s at your feet.'}</p>`;

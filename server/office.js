@@ -16,7 +16,7 @@ import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM } from './entities/kinds.js';
 import { str, int, num as numS, bool, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
-import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace, holdsKey, SKELETON_KEY } from '../public/js/items.js';
+import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, unowned, label, useLine, placeError, nearestPlace, holdsKey, SKELETON_KEY } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
@@ -1141,7 +1141,8 @@ export class Office {
     const r = await this.invApply(p, { take: [{ id, qty: n }] });
     if (r.error) return r;
     const at = { x: tile.x + 0.5, y: tile.y + 0.5 };
-    const floor = await this.ref('floor:main').place({ item: { ...s, qty: n }, ...at, by: p.name });
+    // Put down, it's nobody's: the floor doesn't know who left it.
+    const floor = await this.ref('floor:main').place({ item: unowned({ ...s, qty: n }), ...at });
     this.act(p, `puts down ${label({ ...s, qty: n })}`);
     return { items: r.items, floor, ...at };
   }
@@ -1153,6 +1154,8 @@ export class Office {
     const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || s.qty));
     const r = await this.invApply(p, { take: [{ id, qty: n }] });
     if (r.error) return r;
+    // A carried upload (a Skeleton Key) is the item: throwing it away removes it.
+    if (s.data?.upload && !r.items.some((i) => i.data?.upload === s.data.upload)) await this.ref('gallery:main').discard(s.data.upload).catch(() => {});
     this.act(p, `throws away ${label({ ...s, qty: n })}`);
     return { items: r.items };
   }
@@ -1166,7 +1169,8 @@ export class Office {
     const n = Math.max(1, Math.min(s.qty, Math.floor(+qty) || 1));
     const r = await this.invApply(p, { take: [{ id, qty: n }] });
     if (r.error) return r;
-    const got = await this.invApply(q, { give: r.taken.map(({ id: _, ...i }) => i) });
+    // Handed over, it's theirs: nothing on it points back at the giver.
+    const got = await this.invApply(q, { give: r.taken.map(({ id: _, ...i }) => unowned(i)) });
     if (got.error) {
       // Their hands are full: it goes back to the giver.
       const back = await this.invApply(p, { give: r.taken });
@@ -1185,7 +1189,7 @@ export class Office {
     if (!got) return { error: 'someone got there first' };
     const r = await this.invApply(p, { give: [got.item] });
     if (r.error) {
-      await this.ref('floor:main').place({ item: got.item, x: got.x, y: got.y, by: got.by });
+      await this.ref('floor:main').place({ item: got.item, x: got.x, y: got.y });
       return r;
     }
     this.act(p, `picks up ${label(got.item)}`);
@@ -1385,6 +1389,7 @@ export class Office {
     }
     if (method === 'removeItem') {
       const got = await this.ref('floor:main').remove(clip(a, 16));
+      if (got?.item.data?.upload) await this.ref('gallery:main').discard(got.item.data.upload).catch(() => {});
       return got ? { ok: true } : { error: 'that isn\'t on the floor any more' };
     }
     if (method === 'grant') {

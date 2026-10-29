@@ -33,7 +33,7 @@ export function syncGallery(items = []) {
 const perms = (list) => list.map((p) => PERMISSIONS[p]?.label || p).join(', ');
 const levelTag = (it) => (it.level && it.level !== 'basic' ? ` · ${LEVELS[it.level].label.toLowerCase()}: ${esc(perms(it.permissions || []))}` : '');
 
-const by = (it) => (it.owner.handle ? `@${it.owner.handle}` : it.owner.name);
+const by = (it) => (!it.owner ? '' : it.owner.handle ? `@${it.owner.handle}` : it.owner.name);
 
 function toBase64(buf) {
   const bytes = new Uint8Array(buf);
@@ -46,12 +46,13 @@ function toBase64(buf) {
 // request(op, req) → Promise of the server's answer ({ ok } or { error }).
 export function openGallery(modal, { me, items, request, toast, walkTo, moderator = false }) {
   // Moderators can remove anyone's (the office checks again).
-  const mine = (it) => (me.did && it.owner.did === me.did) || moderator;
+  // A carried one is whoever holds it's: they throw it away from the 🎒.
+  const mine = (it) => (me.did && it.owner?.did === me.did) || moderator;
   const list = items.length
     ? `<div class="obj-items">${items.map((it) => `
         <div class="obj-item gal-item" data-id="${esc(it.id)}">
           <span><b>${esc(it.emoji)} ${esc(it.name)}</b><br><small class="muted">${esc(it.doc || it.prompt)}</small></span>
-          <span class="gal-acts"><small class="muted">by ${esc(by(it))} · ${it.lang} ${Math.ceil(it.size / 1024)} KB${levelTag(it)}</small>
+          <span class="gal-acts"><small class="muted">${it.owner ? `by ${esc(by(it))} · ` : ''}${it.lang} ${Math.ceil(it.size / 1024)} KB${levelTag(it)}</small>
             ${it.carried ? '<small class="muted">carried</small>' : '<button class="btn ghost gal-go">Walk there</button>'}${mine(it) ? '<button class="btn ghost gal-rm">Remove</button>' : ''}</span>
         </div>`).join('')}</div>`
     : '<p class="muted small">Nothing uploaded yet.</p>';

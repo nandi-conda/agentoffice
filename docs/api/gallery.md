@@ -38,7 +38,7 @@ Returns `object`
 
 `mutates` · `caller filled in by the World` · `moderators may for anyone (uploads.remove)` · MCP tool **`gallery_remove`**
 
-Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can.
+Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can. A carried one (look item) belongs to whoever holds it: they throw it away with inventory_destroy; only a moderator can remove it here.
 
 | Param | Type | |
 | --- | --- | --- |
@@ -46,3 +46,15 @@ Take an uploaded object off the map and delete its code and memory. Only its upl
 | &nbsp;&nbsp;&nbsp;`req.id` | `string ≤ 20` | Object id (u-…) |
 
 Returns `object`
+
+## `discard(id)`
+
+`mutates` · `internal (entity to entity)`
+
+A carried upload's item is gone (thrown away, swept off the floor): delete its code and memory.
+
+| Param | Type | |
+| --- | --- | --- |
+| `id` | `string ≤ 20` | Object id (u-…) |
+
+Returns `boolean`

@@ -7,7 +7,7 @@ import { str, int, num as numS, bool, arr, obj, opt } from './schema.js';
 import { DESKS, ZONES, PLUGIN_OBJECTS } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
-import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
+import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem, unowned } from '../../public/js/items.js';
 import { Workstation } from './workstation.js';
 import { MIN } from '../../public/js/rooms.js';
 import { Wing, ChannelRoom } from './channels.js';
@@ -378,17 +378,19 @@ export class Room extends Entity {
 }
 
 // ---- the floor --------------------------------------------------------------------------
-// Things people put down, wherever they stood. Anyone can pick them up (the
-// World checks they're close enough); the cleaners take anything left a day.
+// Things people put down, wherever they stood. They belong to nobody: no
+// record of who put them down, and anyone can pick them up (the World checks
+// they're close enough); the cleaners take anything left a day.
 export class Floor extends Entity {
-  static doc = 'Things people dropped, where they dropped them: at most 40, each cleared away after a day. The World places and removes them (picking up needs you within 1.5 tiles); read it with floor_view.';
+  static doc = 'Things put down, where they lie, belonging to nobody (no record of who dropped them, anyone can pick them up): at most 40, each cleared away after a day. The World places and removes them (picking up needs you within 1.5 tiles); read it with floor_view.';
   static api = {
-    view: { doc: 'Everything lying on the floor.', returns: arr(obj({ id: str('Floor id'), item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32), by: str('Who put it down'), at: int('When, ms since epoch', 0) }), 'Things on the floor') },
-    place: { doc: 'Put an item down at x, y. The oldest thing goes when the floor is full.', params: { entry: obj({ item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32), by: str('Who put it down', 32) }) }, returns: str('Floor id'), mutates: true, internal: true },
+    view: { doc: 'Everything lying on the floor.', returns: arr(obj({ id: str('Floor id'), item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32), at: int('When, ms since epoch', 0) }), 'Things on the floor') },
+    place: { doc: 'Put an item down at x, y. The oldest thing goes when the floor is full.', params: { entry: obj({ item: ITEM, x: numS('Tile x', 0, 48), y: numS('Tile y', 0, 32) }) }, returns: str('Floor id'), mutates: true, internal: true },
     remove: { doc: 'Take something off the floor (first come, first served).', params: { id: str('Floor id', 16) }, returns: { type: ['object', 'null'], description: 'The entry, or null if someone got there first' }, mutates: true, internal: true },
   };
 
-  view() { return this.state.items || []; }
+  // (Entries from before the floor forgot who dropped things lose their `by` here.)
+  view() { return (this.state.items || []).map(({ by, ...e }) => (e.item?.from ? { ...e, item: unowned(e.item) } : e)); }
 
   async changed() {
     await this.save();
@@ -397,10 +399,10 @@ export class Floor extends Entity {
     await this.setAlarm(items.length ? Math.min(...items.map((e) => e.at)) + FLOOR_TTL : null);
   }
 
-  async place({ item, x, y, by }) {
-    const clean = cleanItem(item, { now: this.now() });
+  async place({ item, x, y }) {
+    const clean = cleanItem(unowned(item), { now: this.now() });
     if (!clean) return null;
-    const e = { id: shortId(), item: { ...clean, id: item.id || shortId() }, x: num(x, 0, 48), y: num(y, 0, 32), by: clip(by, 32), at: this.now() };
+    const e = { id: shortId(), item: { ...clean, id: item.id || shortId() }, x: num(x, 0, 48), y: num(y, 0, 32), at: this.now() };
     this.state.items = [...this.view(), e].slice(-FLOOR_MAX);
     await this.changed();
     return e.id;
@@ -409,7 +411,7 @@ export class Floor extends Entity {
   async remove(id) {
     const e = this.view().find((x) => x.id === id);
     if (!e) return null;
-    this.state.items = this.view().filter((x) => x !== e);
+    this.state.items = this.view().filter((x) => x.id !== id);
     await this.changed();
     return e;
   }
@@ -418,6 +420,8 @@ export class Floor extends Entity {
     const now = this.now();
     const keep = this.view().filter((e) => now - e.at < FLOOR_TTL);
     if (keep.length === this.view().length) return this.setAlarm(keep.length ? Math.min(...keep.map((e) => e.at)) + FLOOR_TTL : null);
+    // A carried upload (a Skeleton Key) swept up nobody's: its code goes too.
+    for (const e of this.view()) if (!keep.includes(e) && e.item.data?.upload) await this.ref('gallery:main').discard(e.item.data.upload).catch(() => {});
     this.state.items = keep;
     await this.changed();
   }

@@ -10,6 +10,10 @@
 //                  same contract as the office's own WASM objects.
 //
 // The uploader (or a moderator, see public/js/roles.js) can remove an object again.
+// A carried upload (look `item`, e.g. the Skeleton Key) is different: it's an
+// item, and possession is ownership. It has no owner here, doesn't count
+// against its uploader, and goes when whoever holds it throws it away (or
+// the floor's cleaners sweep it up), not when its uploader says so.
 
 import { Entity } from './runtime.js';
 import { str, num, obj, opt, arr, WHO } from './schema.js';
@@ -41,7 +45,7 @@ const ITEM = obj({
   lang: str('wasm or js'), size: num('Code size in bytes', 0), version: str('First bytes of the code\'s SHA-256'),
   x: { type: ['number', 'null'], description: 'Tile x (null: carried)' }, y: { type: ['number', 'null'], description: 'Tile y (null: carried)' }, zone: { type: ['string', 'null'], description: 'Zone it stands in' },
   carried: opt({ type: 'boolean', description: 'Look `item`: not on the map, one item in its uploader\'s inventory instead (with unlock, a skeleton key)' }),
-  owner: obj({ did: str('Uploader DID'), handle: { type: ['string', 'null'] }, name: str('Uploader name') }, 'Who uploaded it'),
+  owner: { type: ['object', 'null'], description: 'Who uploaded it: { did, handle, name }. Null for a carried one: it belongs to whoever holds it' },
   createdAt: num('When, epoch ms', 0),
   permissions: arr({ type: 'string', enum: Object.keys(PERMISSIONS) }, 'What its manifest asked for beyond the basics and was granted: ' + Object.entries(PERMISSIONS).map(([p, v]) => `${p} (${v.level})`).join(', ')),
   level: { type: 'string', enum: Object.keys(LEVELS), description: 'basic, trusted (moderators upload it) or privileged (admins upload it)' },
@@ -84,15 +88,17 @@ export class Gallery extends Entity {
       returns: { type: 'object', description: '{ ok, object } with the placed object (carried: the item is in your inventory), or { error }' },
     },
     remove: {
-      doc: 'Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can.',
+      doc: 'Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can. A carried one (look item) belongs to whoever holds it: they throw it away with inventory_destroy; only a moderator can remove it here.',
       who: true, cap: 'uploads.remove',
       mutates: true,
       params: { req: obj({ id: str('Object id (u-…)', 20) }, 'Which object') },
       returns: { type: 'object', description: '{ ok } or { error }' },
     },
+    discard: { doc: 'A carried upload\'s item is gone (thrown away, swept off the floor): delete its code and memory.', params: { id: str('Object id (u-…)', 20) }, returns: { type: 'boolean', description: 'Whether there was one' }, mutates: true, internal: true },
   };
 
-  get items() { return this.state.items || []; }
+  // (Carried ones saved before they stopped having owners lose theirs here.)
+  get items() { return (this.state.items || []).map((i) => (i.carried && i.owner ? { ...i, owner: null } : i)); }
   view() { return this.items; }
 
   async upload(who, req = {}) {
@@ -101,7 +107,7 @@ export class Gallery extends Entity {
     const lang = req.lang === 'js' ? 'js' : 'wasm';
     if (!sandbox) return { error: 'this office can\'t run uploaded plugins: it was deployed without the Worker Loader binding (LOADER in wrangler.toml), which needs the Workers Paid plan (docs/uploads.md)' };
     if (!sandbox.langs.includes(lang)) return { error: `this office runs ${sandbox.langs.join(' and ')} uploads, not ${lang}` };
-    if (this.items.filter((i) => i.owner.did === who.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: remove one first` };
+    if (this.items.filter((i) => i.owner?.did === who.did).length >= MAX_PER_OWNER) return { error: `you have ${MAX_PER_OWNER} objects out already: remove one first` };
     if (this.items.length >= MAX_OBJECTS) return { error: 'the office is full of uploaded objects right now' };
     let bytes, info;
     try {
@@ -134,7 +140,7 @@ export class Gallery extends Entity {
       api: m.api || {},
       x: spot.x, y: spot.y, zone: carried ? null : zoneAt(spot.x + 0.5, spot.y + 0.5)?.id || null,
       ...(carried ? { carried: true } : {}),
-      owner: { did: who.did, handle: who.handle || null, name: who.name },
+      owner: carried ? null : { did: who.did, handle: who.handle || null, name: who.name },
       createdAt: this.now(),
     };
     await this.ref(`uobj:${id}`).install(item, req.code.replace(/\s+/g, ''));
@@ -142,7 +148,7 @@ export class Gallery extends Entity {
     // which is what it does when used (a key: the office asks it to open doors).
     if (carried) {
       const thing = { kind: permissions.includes('unlock') ? SKELETON_KEY : 'upload', name, emoji: item.emoji, data: { upload: id } };
-      const r = await this.world.invApply(who.id, { give: [thing], from: who.name }).catch((e) => ({ error: e.message }));
+      const r = await this.world.invApply(who.id, { give: [thing] }).catch((e) => ({ error: e.message }));
       if (r?.error) { await this.ref(`uobj:${id}`).uninstall(); return { error: `couldn't put ${name} in your inventory: ${r.error}` }; }
     }
     this.state.items = [...this.items, item];
@@ -155,12 +161,19 @@ export class Gallery extends Entity {
     const item = this.items.find((i) => i.id === id);
     if (!item) return { error: `no uploaded object ${id}` };
     const mod = can(who?.role, 'uploads.remove');
-    if ((!who?.did || item.owner.did !== who.did) && !mod) return { error: `only ${item.owner.handle ? `@${item.owner.handle}` : item.owner.name} can remove ${item.name}` };
+    if (!item.owner && !mod) return { error: `${item.name} belongs to whoever holds it: they can throw it away from their inventory` };
+    if (item.owner && (!who?.did || item.owner.did !== who.did) && !mod) return { error: `only ${item.owner.handle ? `@${item.owner.handle}` : item.owner.name} can remove ${item.name}` };
+    await this.discard(id);
+    return { ok: true };
+  }
+
+  async discard(id) {
+    if (!this.items.some((i) => i.id === id)) return false;
     await this.ref(`uobj:${id}`).uninstall();
     this.state.items = this.items.filter((i) => i.id !== id);
     await this.save();
     await this.mirror(this.items);
-    return { ok: true };
+    return true;
   }
 }
 

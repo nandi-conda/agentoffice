@@ -286,6 +286,30 @@ test('the Skeleton Key is admins only, one key in their inventory, and booked ro
   rt.stop();
 });
 
+test('a carried upload is whoever holds it\'s: the uploader can\'t take it back, and it goes when its holder throws it away', async () => {
+  const { o, rt } = office();
+  await o.ready;
+  const ada = await join(o, 'ada', 'did:plc:ada'), bob = await join(o, 'bob', 'did:plc:bob');
+  ada.msg({ t: 'gallery', op: 'upload', rid: 1, req: { ...upload, look: 'item' } });
+  await settle(50);
+  const item = ada.last('galleryres').result.object;
+  assert.equal(item.owner, null);
+  const mine = (who) => (who.last('inv')?.items || []).filter((i) => i.data?.upload === item.id);
+  assert.equal(mine(ada)[0].from, undefined, 'nothing on it names ada');
+  // It doesn't count against her: she can still put out her full share.
+  for (let i = 0; i < MAX_PER_OWNER; i++) { ada.msg({ t: 'gallery', op: 'upload', rid: 10 + i, req: upload }); await settle(20); assert.equal(ada.last('galleryres').result.ok, true); }
+  ada.msg({ t: 'inv', op: 'give', id: mine(ada)[0].id, to: 'bob' });
+  await until(() => mine(bob).length);
+  assert.ok(!JSON.stringify(mine(bob)).includes('ada'));
+  ada.msg({ t: 'gallery', op: 'remove', rid: 2, req: { id: item.id } });
+  await settle();
+  assert.match(ada.last('galleryres').result.error, /belongs to whoever holds it/);
+  bob.msg({ t: 'inv', op: 'destroy', id: mine(bob)[0].id });
+  await until(() => !bob.last('gallery').items.some((i) => i.id === item.id));
+  assert.equal(await rt.host(`uobj:${item.id}`).storage.get('code'), undefined);
+  rt.stop();
+});
+
 test('without a sandbox the office refuses uploads and says why', async () => {
   const o = new Office();
   await o.ready;

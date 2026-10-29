@@ -118,7 +118,8 @@ test('place on a spot in reach, pick up (up close only), and the floor everyone 
   assert.equal(lying.length, 1);
   assert.deepEqual([lying[0].x, lying[0].y], [ok.x + 0.5, ok.y + 0.5], 'it lands in the middle of the tile');
   assert.equal(lying[0].item.kind, 'coffee');
-  assert.equal(lying[0].by, 'ada');
+  // Possession is ownership: put down, nothing on it says it was ada's.
+  assert.ok(!JSON.stringify(lying[0]).includes('ada'), JSON.stringify(lying[0]));
   // One thing per tile; one at a time from a stack.
   a.ws.msg({ t: 'inv', op: 'place', id: cookie.id, x: ok.x + 0.5, y: ok.y + 0.5, qty: 1 }); await settle();
   assert.match(a.ws.last('error').message, /already lying there/);

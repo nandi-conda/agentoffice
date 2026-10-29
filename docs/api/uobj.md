@@ -69,7 +69,7 @@ Store the code and manifest of a new upload (from gallery:main).
 | &nbsp;&nbsp;&nbsp;`item.y` | `number \| null` | Tile y (null: carried) |
 | &nbsp;&nbsp;&nbsp;`item.zone` | `string \| null` | Zone it stands in |
 | &nbsp;&nbsp;&nbsp;`item.carried` *(optional)* | `boolean` | Look `item`: not on the map, one item in its uploader's inventory instead (with unlock, a skeleton key) |
-| &nbsp;&nbsp;&nbsp;`item.owner` | `{ did, handle, name }` | Who uploaded it |
+| &nbsp;&nbsp;&nbsp;`item.owner` | `object \| null` | Who uploaded it: { did, handle, name }. Null for a carried one: it belongs to whoever holds it |
 | &nbsp;&nbsp;&nbsp;`item.createdAt` | `number ≥ 0` | When, epoch ms |
 | &nbsp;&nbsp;&nbsp;`item.permissions` | `"take" \| "feed" \| "notify" \| "unlock"[]` | What its manifest asked for beyond the basics and was granted: take (trusted), feed (trusted), notify (trusted), unlock (privileged) |
 | &nbsp;&nbsp;&nbsp;`item.level` | `"basic" \| "trusted" \| "privileged"` | basic, trusted (moderators upload it) or privileged (admins upload it) |

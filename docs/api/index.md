@@ -14,7 +14,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [plugin (PluginObject)](plugin.md) | An interactive object on the map (jukebox, vending machine, 8-ball, the Office Rally…). |
 | [gallery (Gallery)](gallery.md) | Objects people uploaded: WASM (or JS) plugins that signed-in people placed on the map. |
 | [uobj (UploadedObject)](uobj.md) | An object someone uploaded (gallery:main lists them). |
-| [floor (Floor)](floor.md) | Things people dropped, where they dropped them: at most 40, each cleared away after a day. |
+| [floor (Floor)](floor.md) | Things put down, where they lie, belonging to nobody (no record of who dropped them, anyone can pick them up): at most 40, each cleared away after a day. |
 | [workstation (Workstation)](workstation.md) | The computer on the desks: one per identity, so yours comes up at whichever desk you use. |
 | [wing (Wing)](wing.md) | The hallway wing under the core office: one procedurally generated room per channel. |
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |

@@ -426,7 +426,7 @@ export class McpHub {
           desks: { claimed: office.desks, free: DESKS.filter((d) => !office.desks[d.id]).map((d) => d.id) },
           notices: office.notes.map((n) => ({ id: n.id, text: n.text, by: n.by })),
           pomodoro: office.pomoState(), counters: office.counters,
-          floor: office.floor.map((e) => ({ id: e.id, item: `${e.item.emoji} ${e.item.name}${e.item.qty > 1 ? ` ×${e.item.qty}` : ''}`, x: round(e.x), y: round(e.y), by: e.by, ...(me ? { distance: round(Math.hypot(e.x - me.x, e.y - me.y)) } : {}) })),
+          floor: office.floor.map((e) => ({ id: e.id, item: `${e.item.emoji} ${e.item.name}${e.item.qty > 1 ? ` ×${e.item.qty}` : ''}`, x: round(e.x), y: round(e.y), ...(me ? { distance: round(Math.hypot(e.x - me.x, e.y - me.y)) } : {}) })),
           places: PLACES,
         });
       }, READ_ONLY);
