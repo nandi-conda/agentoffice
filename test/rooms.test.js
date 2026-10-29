@@ -125,6 +125,19 @@ test('a booking keeps others out, shows them out at the start, and holders can a
   assert.match(bob.ws.last('roomnote').text, /let you in/);
 });
 
+test("a booked room's doorway is shut too: nobody can stand half inside", async () => {
+  const { o } = office();
+  const ada = await join(o, 'ada', { did: 'did:plc:ada' });
+  const guest = await join(o, 'guest');
+  await book(ada, { room: 'board', start: T0, minutes: 30, title: 'Review' });
+  await place(guest, 33.5, 6.5);
+  guest.ws.msg({ t: 'move', x: 34.4, y: 6.5, dir: 2, moving: true }); await tick();
+  assert.equal(o.peers.get(guest.p.id).x, 33.5, 'stays out of the door tile');
+  assert.match(guest.ws.last('bounce').text, /restricted: booked by ada/);
+  await place(ada, 34.4, 6.5);
+  assert.equal(o.peers.get(ada.p.id).x, 34.4, 'the booker walks through');
+});
+
 test('a guest who slips into a booked booth any other way is shown out on the next tick, and cannot sit there', async () => {
   const { o, clock } = office();
   const ada = await join(o, 'ada', { did: 'did:plc:ada' });

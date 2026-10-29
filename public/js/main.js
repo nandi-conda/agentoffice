@@ -14,7 +14,7 @@ import { createMusic } from './music.js';
 import { syncGallery, openGallery } from './gallery.js';
 import { openInventory, nearestFloorItem } from './inventory.js';
 import { label as itemLabel, placeTiles } from './items.js';
-import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
+import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, restrictedAt, doorTiles, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 import { fmtHour, fmtClock, localize } from './time.js';
 import { can, rank, roleBadge, ROLES } from './roles.js';
 import { openAdmin, roleTag } from './admin.js';
@@ -1941,10 +1941,56 @@ let pendingUse = null;
 // (click or tap to walk, walk-to buttons, following someone).
 const SPEED = 6.5, RUN = 11, RAD = 0.26;
 function free(x, y) {
-  const z = zoneAt(x, y);
-  if (z?.bookable && z !== zoneAt(me.x, me.y) && lockedOut(bookings, z.id, me, serverNow())) return false;
-  return !isBlocked(Math.floor(x - RAD), Math.floor(y - RAD * 0.6)) && !isBlocked(Math.floor(x + RAD), Math.floor(y - RAD * 0.6))
-    && !isBlocked(Math.floor(x - RAD), Math.floor(y + RAD * 0.6)) && !isBlocked(Math.floor(x + RAD), Math.floor(y + RAD * 0.6));
+  const now = serverNow();
+  // A booked room you're not part of is a wall, doorway included, for every
+  // part of you; if you're already in there you can still walk out.
+  const here = restrictedAt(bookings, me.x, me.y, me, now);
+  for (const [cx, cy] of [[x - RAD, y - RAD * 0.6], [x + RAD, y - RAD * 0.6], [x - RAD, y + RAD * 0.6], [x + RAD, y + RAD * 0.6]]) {
+    if (isBlocked(Math.floor(cx), Math.floor(cy))) return false;
+    const shut = restrictedAt(bookings, cx, cy, me, now);
+    if (shut && shut !== here) { bumped(shut); return false; }
+  }
+  return true;
+}
+
+// Walking into a booked room's door stops you there and puts up its sign.
+function bumped(room) {
+  doorSign.bump = { room: room.id, at: performance.now() };
+  if (path) { path = null; walkTarget = null; pendingUse = null; }
+}
+
+// The "Restricted" sign: pops up over a booked room's door when someone who
+// isn't in the meeting comes close or bumps into it, with a Knock button.
+const doorSign = { el: document.createElement('div'), key: '', bump: null };
+doorSign.el.className = 'door-sign';
+doorSign.el.hidden = true;
+$('#hud').append(doorSign.el);
+doorSign.el.addEventListener('click', (e) => { if (e.target.closest('.knock')) knock(doorSign.el.dataset.room); });
+function updateDoorSign(t) {
+  const now = serverNow();
+  let best = null;
+  if (!restrictedAt(bookings, me.x, me.y, me, now)) {
+    for (const r of ROOMS) {
+      if (!lockedOut(bookings, r.id, me, now)) continue;
+      const bumpedHere = doorSign.bump?.room === r.id && t - doorSign.bump.at < 3000;
+      for (const d of doorTiles(r)) {
+        const dist = Math.hypot(d.x + 0.5 - me.x, d.y + 0.5 - me.y);
+        if ((dist < 2.2 || bumpedHere) && (!best || dist < best.dist)) best = { r, d, dist };
+      }
+    }
+  }
+  if (!best) { doorSign.el.hidden = true; doorSign.key = ''; return; }
+  const b = activeBooking(bookings, best.r.id, now);
+  const key = `${best.r.id}:${b.id}:${b.end}`;
+  if (key !== doorSign.key) {
+    doorSign.key = key;
+    doorSign.el.dataset.room = best.r.id;
+    doorSign.el.innerHTML = `<b>🔒 Restricted</b><span>${esc(best.r.name)} is booked by ${esc(b.name)} until ${fmtTime(b.end)}</span><span class="muted">“${esc(b.title)}”</span><button type="button" class="knock">🚪 Knock</button>`;
+  }
+  const c = canvas.getBoundingClientRect();
+  const s = R.toScreen(best.d.x + 0.5, best.d.y - 0.6);
+  doorSign.el.hidden = false;
+  doorSign.el.style.transform = `translate(${Math.round(c.left + s.x)}px, ${Math.round(c.top + s.y)}px) translate(-50%, -100%)`;
 }
 
 let lastSent = 0, sentMoving = false, lastSentPos = { x: 0, y: 0 };
@@ -2208,6 +2254,8 @@ function loop(t) {
       promptEl.style.transform = `translate(${Math.round(c.left + at.x)}px, ${Math.round(c.top + at.y)}px)`;
       promptEl.style.setProperty('--tail', `${Math.round(at.tail)}px`);
     } else promptEl.style.transform = '';
+    updateDoorSign(t);
+    if (!doorSign.el.hidden) promptEl.hidden = true;
     if (t - miniT > 150) { miniT = t; drawMinimap(); }
   }
   requestAnimationFrame(loop);

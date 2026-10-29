@@ -11,7 +11,7 @@ import { mentionTags, mentionsPeer } from '../public/js/mentions.js';
 import { SPAWN, openSpot, DESKS, SEATS, FURNITURE, PLUGIN_OBJECTS, zoneAt, canHear, isBlocked, applyWing } from '../public/js/map.js';
 import * as map from '../public/js/map.js';
 import { cleanRequest } from './plugins.js';
-import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js';
+import { ROOMS, roomById, lockedOut, activeBooking, restrictedAt } from '../public/js/rooms.js';
 import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
@@ -694,11 +694,13 @@ export class Office {
     if (isBlocked(Math.floor(x), Math.floor(y)) && !p.seat) return;
     // Guard against teleport hacks beyond a generous per-message step.
     if (Math.hypot(x - p.x, y - p.y) > 6 && !m.teleport) return;
-    // A booking keeps everyone but its holders out of the room while it runs.
+    // A booking keeps everyone but its holders out of the room, doorway
+    // included, while it runs. Someone already in there can still walk out.
     const from = zoneAt(p.x, p.y), to = zoneAt(x, y);
-    if (to?.bookable && to !== from && lockedOut(this.bookings, to.id, p, this.now())) {
-      const b = activeBooking(this.bookings, to.id, this.now());
-      return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: to.id, text: `🔒 ${to.name} is booked for “${b.title}” until ${stamp(b.end)}. Knock to be let in.` });
+    const shut = restrictedAt(this.bookings, x, y, p, this.now());
+    if (shut && shut !== restrictedAt(this.bookings, p.x, p.y, p, this.now())) {
+      const b = activeBooking(this.bookings, shut.id, this.now());
+      return this.sendTo(p, { t: 'bounce', x: p.x, y: p.y, room: shut.id, text: `🔒 ${shut.name} is restricted: booked by ${b.name} for “${b.title}” until ${stamp(b.end)}. Knock to be let in.` });
     }
     // A channel room's access policy: the door stays shut to whoever doesn't meet it.
     if (to?.channel && to !== from) {

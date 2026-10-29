@@ -9,7 +9,7 @@ import { PluginObject } from './plugin.js';
 import { Gallery, UploadedObject } from './gallery.js';
 import { MAX_SLOTS, FLOOR_MAX, FLOOR_TTL, applyChange, cleanItem } from '../../public/js/items.js';
 import { Workstation } from './workstation.js';
-import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf } from '../../public/js/rooms.js';
+import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf, inRoomOrDoor } from '../../public/js/rooms.js';
 import { stamp, stampRange } from '../../public/js/time.js';
 import { Wing, ChannelRoom } from './channels.js';
 import { ROLES, GRANTABLE, effectiveRole, grantError, can } from '../../public/js/roles.js';
@@ -589,7 +589,7 @@ export class Room extends Entity {
     presence ||= await this.world.presence();
     const effects = [], owners = [];
     let changed = false;
-    const inside = presence.filter((q) => q.zone === room.id);
+    const inside = presence.filter((q) => q.zone === room.id || inRoomOrDoor(room, q.x, q.y));
     for (const b of [...this.bookings]) {
       const sent = (b.sent ||= {});
       if (b.end <= now) {

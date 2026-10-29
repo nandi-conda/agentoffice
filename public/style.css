@@ -630,3 +630,11 @@ input, select, textarea { font: inherit; color: inherit; }
 .ws-focus-label { position: absolute; top: 140px; left: 30px; right: 30px; font: 500 14px Inter, system-ui; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-focus:hover .ws-ring-bg { fill: rgba(15, 23, 42, 0.3); }
 .ws.small .ws-focus { display: none; }
+
+/* ---- booked room door sign ---- */
+.door-sign { position: fixed; left: 0; top: 0; z-index: 3; display: grid; gap: 2px; justify-items: center; text-align: center; max-width: 240px; background: #fff7ed; color: #7c2d12; border: 2px solid #ea580c; border-radius: 12px; padding: 8px 12px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); font-size: 12.5px; animation: sign-in 0.2s ease-out; }
+@keyframes sign-in { from { opacity: 0; } }
+.door-sign b { font-size: 14px; letter-spacing: 0.02em; }
+.door-sign .muted { color: #9a3412; opacity: 0.8; }
+.door-sign .knock { margin-top: 4px; font: 600 12px Inter, system-ui; border: 0; border-radius: 8px; padding: 5px 12px; cursor: pointer; background: #ea580c; color: #fff; }
+.door-sign::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -7px; border: 7px solid transparent; border-bottom: 0; border-top-color: #ea580c; }

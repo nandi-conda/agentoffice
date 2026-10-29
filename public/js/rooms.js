@@ -6,7 +6,7 @@
 // is the booker's key (their DID, or `agent:<name>`); `invitees` are handles,
 // DIDs or agent names; `admitted` holds keys let in at the door on the day.
 
-import { ZONES } from './map.js';
+import { ZONES, isWall, grid } from './map.js';
 import { stampRange } from './time.js';
 
 export const MIN = 60000;
@@ -66,10 +66,37 @@ export function lockedOut(list, room, p, now) {
   return !!(b && !isHolder(b, p));
 }
 
+// A room's doorways: the floor tiles in its walls. They count as part of the
+// room for keeping people out, so nobody can stand half inside a booked room.
+let doorCache = new Map(), doorGrid = null;
+export function doorTiles(room) {
+  if (doorGrid !== grid) { doorCache = new Map(); doorGrid = grid; }
+  if (doorCache.has(room.id)) return doorCache.get(room.id);
+  const out = [];
+  for (let x = room.x0; x <= room.x1; x++) for (const y of [room.y0 - 1, room.y1 + 1]) if (!isWall(x, y)) out.push({ x, y });
+  for (let y = room.y0; y <= room.y1; y++) for (const x of [room.x0 - 1, room.x1 + 1]) if (!isWall(x, y)) out.push({ x, y });
+  doorCache.set(room.id, out);
+  return out;
+}
+
+export function inRoomOrDoor(room, x, y) {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  if (tx >= room.x0 && tx <= room.x1 && ty >= room.y0 && ty <= room.y1) return true;
+  return doorTiles(room).some((d) => d.x === tx && d.y === ty);
+}
+
+// The booked room whose floor or doorway (x, y) is in, if it keeps p out now.
+export function restrictedAt(list, x, y, p, now) {
+  for (const r of ROOMS) if (inRoomOrDoor(r, x, y) && lockedOut(list, r.id, p, now)) return r;
+  return null;
+}
+
 // Check a booking request. Returns { error } or { start, end }.
 export function checkSlot(list, { room, start, end, owner, id = null }, now) {
   if (!roomById(room)) return { error: 'no such room' };
-  start = snap(+start); end = snap(+end);
+  // A start that's already here rounds down, so "book it now" starts now
+  // rather than at the next 5 minutes.
+  start = +start <= now ? Math.floor(+start / RULES.step) * RULES.step : snap(+start); end = snap(+end);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return { error: 'start and end must be times' };
   if (end - start < RULES.minLen) return { error: 'bookings are at least 15 minutes' };
   if (end - start > RULES.maxLen) return { error: 'bookings are at most 4 hours' };
