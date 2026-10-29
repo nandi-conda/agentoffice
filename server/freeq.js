@@ -333,6 +333,7 @@ export class FreeqBridge {
     this.listener = null;
     this.people = new Map(); // lower(nick) -> { nick, channels, active, peer }
     this.users = new Map(); // keyOf(peer) -> { irc, ready, used }
+    this.dids = new Map(); // lower(nick) -> { did, at } from freeq's user lookup
     this.relayed = []; // { channel, text, at } lines our per-person connections sent, to skip their echo
     this.agentTokens = new Map(); // agent DID -> { did, token, pds }, memory only
     this.calls = new Map(); // lower(channel) -> freeq's call there: { channel, id, count, roster, token }
@@ -719,6 +720,12 @@ export class FreeqBridge {
     return true;
   }
 
+  // freeq nicks of AT Protocol accounts are usually their handle.
+  handleInOffice(nick) {
+    for (const q of this.office.peers.values()) if (q.kind !== 'freeq' && q.ready && q.handle && lower(q.handle) === lower(nick)) return true;
+    return false;
+  }
+
   inOffice(did) {
     for (const q of this.office.peers.values()) if (q.kind !== 'freeq' && q.ready && q.did === did) return true;
     return false;
@@ -737,7 +744,9 @@ export class FreeqBridge {
   dedupe() {
     const ours = new Set([...this.users.values()].map((u) => lower(u.irc.nick)));
     for (const f of [...this.people.values()]) {
-      if (ours.has(lower(f.nick)) || (f.peer?.did && this.inOffice(f.peer.did))) this.forget(f.nick);
+      const did = f.peer?.did || this.dids.get(lower(f.nick))?.did;
+      if (ours.has(lower(f.nick)) || (did && this.inOffice(did)) || this.handleInOffice(f.nick)) this.forget(f.nick);
+      else if (!did) this.lookup(f.nick);
     }
   }
 
@@ -755,7 +764,7 @@ export class FreeqBridge {
     const zoneId = this.zoneFor(channel);
     if (!zoneId || !nick || this.isOurs(nick, account)) return null;
     // Someone who's in the office already (any client, same DID) is drawn once: the office one.
-    if (account && this.inOffice(account)) { this.forget(nick); return null; }
+    if ((account && this.inOffice(account)) || this.handleInOffice(nick)) { this.forget(nick); return null; }
     let f = this.people.get(lower(nick));
     if (!f) this.people.set(lower(nick), f = { nick, channels: new Map(), active: null, peer: null });
     const added = !f.channels.has(lower(channel));
@@ -765,7 +774,30 @@ export class FreeqBridge {
     else this.describe(f);
     if (added) this.changed();
     if (f.peer && account && account.startsWith('did:') && !f.peer.did) this.office.identifyRemote(f.peer, account);
+    // NAMES and a restored snapshot carry no account: ask freeq who the nick is.
+    else if (f.peer && !f.peer.did && !account) this.lookup(f.nick);
     return f.peer;
+  }
+
+  // freeq's /api/v1/users/{nick} names the DID behind a nick. Once known,
+  // someone who's in the office in person loses their freeq avatar; anyone
+  // else gets their character.
+  lookup(nick) {
+    const key = lower(nick);
+    const hit = this.dids.get(key);
+    if (hit && Date.now() - hit.at < 30 * 60 * 1000) return;
+    this.dids.set(key, { did: null, at: Date.now() });
+    this.fetch(`${this.api}/api/v1/users/${encodeURIComponent(nick)}`, { headers: { accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        const did = typeof u?.did === 'string' && u.did.startsWith('did:') ? u.did : null;
+        this.dids.set(key, { did, at: Date.now() });
+        const f = this.people.get(key);
+        if (!did || !f?.peer || f.peer.did) return;
+        if (this.inOffice(did)) this.forget(f.nick);
+        else this.office.identifyRemote(f.peer, did);
+      })
+      .catch(() => {});
   }
 
   // Put (or move) someone in a channel's area; falls back to their other

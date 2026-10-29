@@ -472,6 +472,35 @@ test('you in another freeq client: one avatar (the office one), and what you typ
   bridge.stop();
 });
 
+test('a freeq nick with no account in sight is still matched to the person in the office', async () => {
+  const server = fakeFreeq({ verify: async () => true });
+  const office = new Office({}, { loadActor: null });
+  let jwk = null;
+  const bridge = new FreeqBridge({
+    office, log: () => {},
+    openSocket: async () => server.open().socket,
+    keyStore: { get: async () => jwk, set: async (j) => { jwk = j; } },
+    fetch: async (url) => new Response(JSON.stringify(
+      /\/users\/carol-app$/.test(url) ? { nick: 'carol-app', did: 'did:plc:carol', online: true }
+        : /\/users\//.test(url) ? { online: true }
+          : [{ name: '#general', members: 3 }])),
+  });
+  server.outsider('bob', 'did:plc:bob').join('#general');
+  const me = office.open({ readyState: 1, send() {} }, { did: 'did:plc:alice' });
+  await office.handle(me, { t: 'hello', name: 'Alice' });
+  me.handle = 'alice.example';
+  const carol = office.open({ readyState: 1, send() {} }, { did: 'did:plc:carol' });
+  await office.handle(carol, { t: 'hello', name: 'Carol' });
+  await bridge.start();
+  await tick();
+  // NAMES gives bare nicks: one is Alice's handle, one only freeq's user lookup can place.
+  bridge.onListenerLine(parseLine(`:irc.freeq.at 353 agentoffice = #general :alice.example carol-app dave`));
+  for (let i = 0; i < 10; i++) await tick();
+  const names = [...office.peers.values()].filter((p) => p.kind === 'freeq').map((p) => p.name).sort();
+  assert.deepEqual(names, ['bob', 'dave']);
+  bridge.stop();
+});
+
 test('fixed area mapping and nick cleanup', () => {
   assert.deepEqual([...parseRooms('lounge=#general, open=dev, nowhere=#x')], [['lounge', '#general'], ['open', '#dev']]);
   assert.equal(ircNick('alice.bsky.social'), 'alice');
