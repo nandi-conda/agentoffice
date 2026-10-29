@@ -2091,14 +2091,19 @@ function zoneChanged(z, freeqOnly = false) {
   const fq = z && freeqRooms[z.id];
   $('.zone-name').textContent = z ? z.name : 'Hallway';
   // A channel room says who may walk in (its door's policy), not "private".
-  const access = z?.channel && (wing.find((r) => r.id === z.id)?.access || { icon: '🚪', text: 'open', open: true });
-  kind.textContent = fq ? fq.channel : access ? (access.open ? 'open' : access.text) : z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
+  const wr = z?.channel && wing.find((r) => r.id === z.id);
+  const access = z?.channel && (wr?.access || { icon: '🚪', text: 'open', open: true });
+  // A room named after its freeq channel needn't say the name twice.
+  const sameName = fq && fq.channel.toLowerCase() === z.name.toLowerCase();
+  const topicEl = $('.zone-topic'), topic = fq?.topic || wr?.topic || '';
+  topicEl.textContent = topic; topicEl.title = topic; topicEl.hidden = !topic;
+  kind.textContent = fq ? (sameName ? 'freeq' : fq.channel) : access ? (access.open ? 'open' : access.text) : z ? { open: 'open', room: 'private', quiet: 'quiet' }[z.kind] : 'open';
   kind.className = `zone-kind ${fq ? 'freeq' : access ? (access.open ? 'open' : 'gated') : z?.kind || 'open'}`;
   scope.textContent = fq ? fq.channel : z && z.kind !== 'open' ? z.name : 'nearby';
   scope.className = `scope ${fq ? 'freeq' : z?.kind || 'open'}`;
   if (replyTo) showReply();
   if (freeqOnly) return;
-  if (fq) toast(`💬 ${esc(z.name)} is attached to <b>${esc(fq.channel)}</b> on freeq${fq.topic ? ` (${esc(fq.topic)})` : ''}. ${me.did ? 'What you say here goes there as you.' : 'Sign in to talk there as yourself; for now you can listen.'}`, [], 6000);
+  if (fq) toast(`💬 ${sameName ? `<b>${esc(z.name)}</b> is bridged to freeq` : `${esc(z.name)} is attached to <b>${esc(fq.channel)}</b> on freeq`}${fq.topic ? ` (${esc(fq.topic)})` : ''}. ${me.did ? 'What you say here goes there as you.' : 'Sign in to talk there as yourself; for now you can listen.'}`, [], 6000);
   // Meeting rooms put you in a meeting; channel rooms are just somewhere to talk.
   const meeting = z?.kind === 'room' && !z.channel;
   if (meeting && me.status === 'available') { autoStatus = 'meeting'; setStatus('meeting'); }

@@ -89,6 +89,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .hud-tl { flex: none; display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: #57534e; border-radius: 999px; padding: 2px 8px; }
 .zone-kind.room { background: #7c3aed; }
+.pill.zone { max-width: 100%; min-width: 0; }
+.zone-topic { color: #78716c; font-size: 12px; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .zone-kind.quiet { background: #dc2626; }
 .zone-kind.open { background: #16a34a; }
 .zone-kind.gated { background: #b45309; }

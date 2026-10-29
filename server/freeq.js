@@ -657,7 +657,7 @@ export class FreeqBridge {
       // (Re)joining is a no-op when already in it; after a restart it's how
       // restored areas get their NAMES.
       this.listener?.join(c.channel);
-      if (cur) { cur.members = c.members; cur.topic = c.topic; continue; }
+      if (cur) { cur.members = c.members; cur.topic = c.topic || cur.topic; continue; }
       this.bindings.set(zoneId, { ...c });
       this.log(`freeq: ${c.channel} → ${zoneById(zoneId).name}`);
     }
@@ -880,6 +880,11 @@ export class FreeqBridge {
         return;
       }
       case 'TAGMSG': return this.onCallState(m);
+      case '332': { // RPL_TOPIC on JOIN: "me #chan :topic"
+        const b = this.bindings.get(this.zoneFor(m.params[1]));
+        if (b && b.topic !== (m.params[2] || null)) { b.topic = m.params[2] || null; this.announce(); }
+        return;
+      }
       case 'TOPIC': {
         const b = this.bindings.get(this.zoneFor(m.params[0]));
         if (b) { b.topic = m.params[1] || null; this.announce(); }

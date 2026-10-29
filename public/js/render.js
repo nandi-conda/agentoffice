@@ -995,8 +995,17 @@ export function createRenderer(canvas) {
     // Only the visible part of the area counts, so its name stays in view while you're in it.
     const x0 = Math.max(a.x, 8), y0 = Math.max(a.y, 8), x1 = Math.min(b.x, vw - 8), y1 = Math.min(b.y, vh - 8);
     if (x1 - x0 < 40 || y1 - y0 < 20) return;
-    const maxW = x1 - x0;
+    let maxW = x1 - x0;
     const pills = [];
+    const fq = st.freeq?.[z.id];
+    // A channel room's name is on the sign by its door (and in the HUD once
+    // you're in), so inside it the label says what the channel is about.
+    if (z.gen) {
+      const topic = fq?.topic || st.wing?.find((r) => r.id === z.id)?.topic;
+      if (!topic) return;
+      pills.push({ text: `💬 ${topic}`, bg: fq ? PILL.freeq : PILL.dark });
+      maxW = Math.min(maxW, 360 * lsc);
+    }
     const room = z.bookable && ROOMS.find((r) => r.id === z.id);
     const small = z.x1 - z.x0 < 4;
     let dot = ZONE_DOT[z.kind] || ZONE_DOT.open;
@@ -1008,10 +1017,9 @@ export function createRenderer(canvas) {
         pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, caps: true });
         pills.push({ text: state === 'busy' ? `🔒 ${current.title} · until ${fmtTime(current.end)}` : state === 'soon' ? `free until ${fmtTime(next.start)}` : room.av ? 'free · A/V' : 'free', bg: PILL.dark, dot });
       }
-    } else pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, dot, caps: true });
-    const fq = st.freeq?.[z.id];
+    } else if (!z.gen) pills.push({ text: z.name.toUpperCase(), bg: PILL.dark, dot, caps: true });
     // The count is who's drawn here, so it always matches the avatars.
-    if (fq) { const n = fq.here ?? fq.members; pills.push({ text: `${fq.channel}${n ? ` · ${n}` : ''}`, bg: PILL.freeq }); }
+    if (fq && !z.gen) { const n = fq.here ?? fq.members; pills.push({ text: `${fq.channel}${n ? ` · ${n}` : ''}`, bg: PILL.freeq }); }
     // Free floor or wall only: scan the area from its top-left, row by row, for
     // a spot clear of furniture, people and other labels. No room, no label.
     const step = Math.max(12, view.T / 2);

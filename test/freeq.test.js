@@ -23,6 +23,7 @@ function fakeFreeq({ verify }) {
   const members = new Map(); // channel -> Set(conn)
   const history = new Map(); // channel -> [{ id, sender, text, timestamp, msgid, tags }]
   const sessions = new Map(); // id -> { id, channel, participants: Map(instance -> { nick, did, instance_id }) }
+  const topics = new Map(); // channel -> topic
   let n = 0;
   const server = {
     conns, members, history, sessions, sent: [],
@@ -73,6 +74,7 @@ function fakeFreeq({ verify }) {
           if (!members.has(ch)) members.set(ch, new Set());
           members.get(ch).add(c);
           for (const o of members.get(ch)) o.out(`:${c.nick}!u@h JOIN ${ch} ${c.account || '*'} :x`);
+          if (topics.has(ch)) out(`:irc.freeq.at 332 ${c.nick} ${ch} :${topics.get(ch)}`);
           out(`:irc.freeq.at 353 ${c.nick} = ${ch} :${[...members.get(ch)].map((o) => o.nick).join(' ')}`);
           return out(`:irc.freeq.at 366 ${c.nick} ${ch} :End of /NAMES list`);
         }
@@ -140,6 +142,7 @@ function fakeFreeq({ verify }) {
       if (h) return new Response(JSON.stringify([...(history.get(decodeURIComponent(h[1])) || [])].reverse()));
       return new Response(JSON.stringify(list));
     },
+    topics,
     // Someone on freeq (not the office) talks.
     outsider(nick, did) {
       const c = server.open();
@@ -231,6 +234,7 @@ test('populated channels get their own rooms off the hallway, and talk flows bot
       { name: '#provisio', members: 9 }, { name: '#general', members: 3 }, { name: '#quiet', members: 1 },
     ])),
   });
+  server.topics.set('#general', 'Anything goes');
   const bob = server.outsider('bob', 'did:plc:bob');
   bob.join('#general');
 
@@ -244,6 +248,9 @@ test('populated channels get their own rooms off the hallway, and talk flows bot
   assert.equal(bridge.bindings.get('ch-provisio')?.channel, '#provisio');
   assert.ok(![...bridge.bindings.values()].some((b) => b.channel === '#quiet'));
   assert.ok(said.some((m) => m.t === 'freeq' && m.rooms['ch-general'].channel === '#general'));
+  // The topic comes with the JOIN (RPL_TOPIC) and is shown in the room.
+  assert.equal(bridge.bindings.get('ch-general').topic, 'Anything goes');
+  assert.equal(said.filter((m) => m.t === 'freeq').pop().rooms['ch-general'].topic, 'Anything goes');
   // The rooms are part of everyone's map, the busiest one biggest.
   const wing = said.filter((m) => m.t === 'wing').pop().rooms;
   assert.deepEqual(wing.map((r) => r.channel).sort(), ['#general', '#provisio']);
