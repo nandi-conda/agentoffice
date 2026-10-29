@@ -51,6 +51,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .login input { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; font-weight: 400; }
 .signed-in { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .linkish { font: inherit; border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+/* A place in text (a desk, room or channel): click to walk there. */
+.place { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.place:hover { color: var(--accent); text-decoration-style: solid; }
 .auth-error { color: #b91c1c; margin: 0; }
 .login input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .preview { display: flex; gap: 14px; align-items: center; background: #f5f2ec; border-radius: 12px; padding: 10px; }

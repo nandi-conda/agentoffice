@@ -569,7 +569,50 @@ $('.chat-grip').addEventListener('pointerdown', (e) => {
   grip.addEventListener('pointermove', move);
   grip.addEventListener('pointerup', up, { once: true });
 });
-const linkify = (s) => s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const linkify = (s) => s.split(/(https?:\/\/[^\s<]+)/g)
+  .map((part, i) => (i % 2 ? `<a href="${part}" target="_blank" rel="noopener">${part}</a>` : placeify(part))).join('');
+
+// ---- places: desks, rooms and channels you can click to walk to ------------
+const placeLink = (kind, id, html) => `<button type="button" class="place" data-place="${kind}:${esc(id)}" title="Walk there">${html}</button>`;
+// Turns desk ids, area names and attached #channels in (escaped) text into place links.
+function placeify(html) {
+  const names = ZONES.filter((z) => z.name.length >= 4 && z.id !== 'booths').map((z) => [z.name.toLowerCase(), z.id]);
+  const chans = Object.entries(freeqRooms).map(([id, c]) => [String(c.channel || '').toLowerCase(), id]).filter(([c]) => c.startsWith('#'));
+  const byName = new Map([...names, ...chans]);
+  const alts = [...byName.keys()].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`\\b(desk-\\d+)\\b${alts.length ? `|(?<![\\w#])(${alts.join('|')})(?![\\w-])` : ''}`, 'gi');
+  return html.replace(re, (m, desk, name) => {
+    if (desk) return DESKS.some((d) => d.id === desk.toLowerCase()) ? placeLink('desk', desk.toLowerCase(), m) : m;
+    const id = byName.get(name.toLowerCase());
+    return id ? placeLink('zone', id, m) : m;
+  });
+}
+function walkToPlace(kind, id) {
+  if (kind === 'desk') {
+    const d = DESKS.find((x) => x.id === id);
+    if (d) walkNear(d.seat.x, d.seat.y, id);
+  } else if (kind === 'zone') walkToZone(ZONES.find((z) => z.id === id));
+}
+// Walks to the open tile nearest (x, y) that has a way there.
+function walkNear(x, y, what) {
+  if (!me) return;
+  const spots = [];
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    const tx = Math.floor(x) + dx, ty = Math.floor(y) + dy;
+    if (!isBlocked(tx, ty)) spots.push({ x: tx + 0.5, y: ty + 0.5, d: Math.hypot(tx + 0.5 - x, ty + 0.5 - y) });
+  }
+  spots.sort((a, b) => a.d - b.d);
+  for (const s2 of spots) if (findPath(me.x, me.y, s2.x, s2.y)) return walkTo(s2.x, s2.y);
+  toast(`Couldn't find a way to ${esc(what)}.`, [], 3000);
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.place');
+  if (!b) return;
+  e.preventDefault();
+  const [kind, ...rest] = b.dataset.place.split(':');
+  if (modal.isOpen) modal.close();
+  walkToPlace(kind, rest.join(':'));
+});
 
 const chatIn = $('.chat-input');
 $('.chat-form').addEventListener('submit', (e) => {
@@ -1038,7 +1081,7 @@ function openProfile(p) {
         <h2>${esc(p.name)} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : ''}</h2>
         ${p.handle ? `<p class="small"><a href="https://rpg.actor/${encodeURIComponent(p.handle)}" target="_blank" rel="noopener">@${esc(p.handle)}</a> on rpg.actor</p>` : '<p class="small muted">Guest, no rpg.actor character linked</p>'}
         <p><span style="color:${statusColor(p.status)}">●</span> ${esc(STATUS[p.status]?.label || p.status)}${p.note ? ` · ${esc(p.note)}` : ''}</p>
-        ${desk ? `<p class="small">🪑 Desk: ${esc(desk[0])}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
+        ${desk ? `<p class="small">🪑 Desk: ${placeLink('desk', desk[0], esc(desk[0]))}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
         ${p.actor?.description ? `<p class="bio small muted${isTextArt(p.actor.description) ? ' art' : ''}">${esc(p.actor.description)}</p>` : ''}
         ${systems ? `<p class="small"><b>Character sheets:</b> ${systems}</p><div class="stats">${stats.join('')}</div>` : ''}
         ${p === me ? `<div class="row">
@@ -1266,7 +1309,7 @@ function openSchedule(opts = {}) {
           style="left:${pct(b.start)}%;width:${pct(b.end) - pct(b.start)}%"
           title="${esc(`${b.title} · ${fmtRange(b)} · ${b.name}${b.invitees?.length ? ` · with ${b.invitees.join(', ')}` : ''}`)}">${esc(b.title)}</div>`).join('');
       const nowLine = now > from && now < to ? `<div class="tl-now" style="left:${pct(now)}%"></div>` : '';
-      return `<div class="tl-name">${esc(r.name)}<small>${statusDot(st.state)}${r.av ? '<span class="badge av">A/V</span>' : 'voice'} · ${r.seats} seat${r.seats > 1 ? 's' : ''}</small></div>
+      return `<div class="tl-name">${placeLink('zone', r.id, esc(r.name))}<small>${statusDot(st.state)}${r.av ? '<span class="badge av">A/V</span>' : 'voice'} · ${r.seats} seat${r.seats > 1 ? 's' : ''}</small></div>
         <div class="tl-track" data-room="${r.id}" style="--hours:${h1 - h0}">${blocks}${nowLine}</div>`;
     }).join('');
     const mine = bookings.filter((b) => b.end > now && (b.owner === keyOf(me) || isHolder(b, me))).sort((a, b) => a.start - b.start);
@@ -1336,7 +1379,7 @@ function bookingRow(b, now) {
   const live = b.start <= now && now < b.end;
   const own = b.owner === keyOf(me);
   return `<li data-id="${b.id}">${statusDot(live ? 'busy' : 'soon')}
-    <span class="grow"><b>${esc(b.title)}</b>${b.lock ? ' 🔒' : ''}<br><span class="small muted">${esc(roomById(b.room).name)} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
+    <span class="grow"><b>${esc(b.title)}</b>${b.lock ? ' 🔒' : ''}<br><span class="small muted">${placeLink('zone', b.room, esc(roomById(b.room).name))} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
     ${zoneAt(me.x, me.y)?.id !== b.room ? '<button data-act="go">Walk there</button>' : ''}
     ${own && live ? '<button data-act="extend">+15 min</button><button data-act="end">End now</button>' : ''}
     ${own && !live ? '<button data-act="cancel">Cancel</button>' : ''}</li>`;
