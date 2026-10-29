@@ -4,7 +4,7 @@
 export const BINDINGS = {
   world: 'OFFICE', actor: 'ACTOR', room: 'ROOM', topic: 'TOPIC',
   desk: 'ITEM', whiteboard: 'ITEM', noticeboard: 'ITEM', arcade: 'ITEM', coffee: 'ITEM', pomodoro: 'ITEM',
-  plugin: 'ITEM', gallery: 'ITEM', uobj: 'ITEM', floor: 'ITEM', wing: 'ITEM', chan: 'ROOM',
+  plugin: 'ITEM', gallery: 'ITEM', uobj: 'ITEM', floor: 'ITEM', wing: 'ITEM', chan: 'ROOM', roles: 'ITEM',
   // Per identity, like actors: a workstation is someone's own computer.
   workstation: 'ACTOR',
 };

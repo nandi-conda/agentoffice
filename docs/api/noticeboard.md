@@ -26,9 +26,9 @@ Pin a note.
 
 ## `remove(who, id)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`noticeboard_remove`**
+`mutates` · `caller filled in by the World` · `moderators may for anyone (notes.remove)` · MCP tool **`noticeboard_remove`**
 
-Take down one of your notes.
+Take down one of your notes (moderators can take down anyone's).
 
 | Param | Type | |
 | --- | --- | --- |

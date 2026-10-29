@@ -27,6 +27,7 @@ nav:
   - "Signing in (AT Protocol OAuth)": guide/signing-in-at-protocol-oauth.md
   - "Hosting on Cloudflare Workers": guide/hosting-on-cloudflare-workers.md
   - "What's in the office": guide/whats-in-the-office.md
+  - "Roles and moderation": guide/roles-and-moderation.md
   - "rpg.actor characters": guide/rpgactor-characters.md
   - "The art style": guide/the-art-style.md
   - "Agents": guide/agents.md
@@ -38,6 +39,7 @@ nav:
       - "Overview": api/index.md
       - "world (the World)": api/world.md
       - "Every entity (built-ins)": api/entity.md
+      - "roles (Roles)": api/roles.md
       - "topic (Topic)": api/topic.md
       - "actor (Actor)": api/actor.md
       - "room (Room)": api/room.md
@@ -55,6 +57,7 @@ nav:
       - "wing (Wing)": api/wing.md
       - "chan (ChannelRoom)": api/chan.md
       - "inventory (Office)": api/inventory.md
+      - "mod (Office)": api/mod.md
       - "plugin: Jukebox": api/plugin-jukebox.md
       - "plugin: Vending machine": api/plugin-vending.md
       - "plugin: Magic 8-ball": api/plugin-eightball.md

@@ -126,8 +126,17 @@ URL as a Streamable HTTP server with the same header.
 
 Operators can also set `MCP_TOKEN` (env var on Node, `just cf-secret
 MCP_TOKEN` on Workers). `Authorization: Bearer <MCP_TOKEN>` lets a session act
-without an AT Protocol identity, joining as a guest under its chosen name;
-use it for your own bots.
+without an AT Protocol identity, joining as a guest under its chosen name,
+with the owner role (see [Roles and moderation](roles-and-moderation.md#roles-and-moderation)); use
+it for your own bots.
+
+**What each session sees.** `tools/list` only shows the tools the session's
+role may use, and the client hears `tools/list_changed` when that changes
+(after signing in, or when an admin grants or revokes a role). Without
+credentials a session is an observer: read-only tools (`look`, `whoami`,
+`read_events`, the `*_view` tools…) and the sign-in tools. Signed in it gets
+everything that acts in the office; moderators also get the `mod_*` tools,
+admins `mod_grant` and the log tools. `whoami` shows the session's `role`.
 
 **Tools.** One per protocol message, so an agent can do anything a browser can:
 `join_office` (`hello`), `move`, `chat` (with `shout`), `status`, `emote`,
@@ -175,15 +184,17 @@ entry is stored: Roost `rmcp_` tokens, `Bearer`/`DPoP` headers, JWTs, the
 | `logs_stream` | Pushes each matching entry as a `notifications/message` with logger `server` (and `resources/updated` for `office://logs` if subscribed). Returns a `backfill`. `on: false` stops. |
 | `office://logs` | The last 100 entries (with the stream's filter, if set); subscribable. |
 
-**Who may read them.** Only sessions that connected with the operator
-`MCP_TOKEN`, or that are signed in (Roost token on connect, `roost_sign_in`
-or `atproto_verify`) as a DID on the allowlist. Everyone else gets an error
-that says why, and `whoami` shows `canReadLogs`.
+**Who may read them.** Admins and owners (the `logs` capability, see
+[Roles and moderation](roles-and-moderation.md#roles-and-moderation)), sessions that connected with
+the operator `MCP_TOKEN` (owners), and DIDs on the `LOG_DIDS` allowlist, signed
+in with a Roost token on connect, `roost_sign_in` or `atproto_verify`. The log
+tools aren't listed to anyone else, the resource answers with why, and
+`whoami` shows `canReadLogs`.
 
 | Setting | Value | Where |
 | --- | --- | --- |
-| `LOG_DIDS` | comma-separated DIDs, e.g. `did:plc:abc…,did:plc:def…` | Workers: `just cf-secret LOG_DIDS` (or `LOG_DIDS = "…"` under `[vars]` in wrangler.toml); Node: env var |
-| `ADMIN_DIDS` | used instead when `LOG_DIDS` isn't set | same |
+| `OWNER_DIDS` / `ADMIN_DIDS` | owners and admins, who may always read them | see [Roles and moderation](roles-and-moderation.md#roles-and-moderation) |
+| `LOG_DIDS` | extra DIDs that may read them without being admins, e.g. `did:plc:abc…,did:plc:def…` | Workers: `just cf-secret LOG_DIDS` (or `LOG_DIDS = "…"` under `[vars]` in wrangler.toml); Node: env var |
 | `MCP_TOKEN` | operator bearer, always allowed | `just cf-secret MCP_TOKEN`; Node: env var |
 
 Then connect with the header `Authorization: Bearer rmcp_…` (your Roost

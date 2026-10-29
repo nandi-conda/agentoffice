@@ -6,6 +6,7 @@ import { W, H, ZONES, FURNITURE, grid, zoneAt } from './map.js';
 import { CORE_W, CORE_H } from './wing.js';
 import { ROOMS, roomStatus, fmtTime } from './rooms.js';
 import { WALL_H, daylight, markedName, statusColor, colorFor, roundRect, wrapText } from './style.js';
+import { roleBadge } from './roles.js';
 import { WALK } from './sprites.js';
 
 const FLOORS = {
@@ -941,8 +942,10 @@ export function createRenderer(canvas) {
     const named = isMe || talking || !far;
     let r = null;
     if (alpha > 0.05 && named) {
-      const name = markedName(p.name, p.kind);
-      const extra = `${p.video ? ' 📹' : ''}${p.screen ? ' 🖥️' : ''}${p.audio ? (p.speaking ? ' 🔊' : ' 🎙️') : ''}`;
+      // Owners, admins and moderators wear their role's badge (public/js/roles.js).
+      const badge = roleBadge(p.role);
+      const name = `${badge ? `${badge} ` : ''}${markedName(p.name, p.kind)}`;
+      const extra = `${p.video ? ' 📹' : ''}${p.screen ? ' 🖥️' : ''}${p.audio ? (p.speaking ? ' 🔊' : ' 🎙️') : ''}${p.muted > st.serverNow() ? ' 🔇' : ''}`;
       r = placeRow([{ text: name + extra, bg: isMe ? PILL.me : PILL[p.kind] || PILL.dark, dot: statusColor(p.status) }], s.x, top - 2, { force: isMe || talking, alpha });
     }
     // Crowded or far away: a status dot still says someone's there.

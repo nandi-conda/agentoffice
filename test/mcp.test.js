@@ -72,7 +72,7 @@ const call = async (client, name, args = {}) => {
 
 test('tools cover the whole client protocol', async () => {
   const { connect } = await setup();
-  const c = await connect();
+  const c = await connect(OP);
   const names = (await c.listTools()).tools.map((t) => t.name);
   for (const t of ['join_office', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'send', 'whoami', 'read_events', 'walk_to', 'look', 'roost_signup', 'roost_sign_in', 'atproto_challenge', 'atproto_verify']) {
     assert.ok(names.includes(t), `missing ${t}`);
@@ -166,8 +166,13 @@ test('without credentials a session is a read-only observer', async () => {
   const c = await connect();
   const who = await call(c, 'whoami');
   assert.equal(who.canAct, false);
-  await assert.rejects(call(c, 'join_office', { name: 'sneaky' }), /Read-only until you sign in/);
-  await assert.rejects(call(c, 'chat', { text: 'hi' }), /join_office first/);
+  assert.equal(who.role, 'observer');
+  // Acting tools aren't even listed until they sign in.
+  const names = (await c.listTools()).tools.map((t) => t.name);
+  for (const t of ['look', 'whoami', 'read_events', 'roost_sign_in', 'atproto_verify']) assert.ok(names.includes(t), `missing ${t}`);
+  for (const t of ['join_office', 'chat', 'walk_to', 'logs_tail', 'mod_kick']) assert.ok(!names.includes(t), `observers see ${t}`);
+  await assert.rejects(call(c, 'join_office', { name: 'sneaky' }), /disabled/);
+  await assert.rejects(call(c, 'chat', { text: 'hi' }), /disabled/);
   const { next } = await call(c, 'read_events', { wait_seconds: 0 });
   const human = new FakeWs();
   office.connect(human);
@@ -304,12 +309,13 @@ test('server logs are only for operators and allowlisted DIDs', async () => {
 
   // Read-only and signed-in-but-not-listed sessions get a clear refusal.
   const anon = await connect();
-  await assert.rejects(call(anon, 'logs_tail'), /operators only.*LOG_DIDS.*not signed in/s);
-  await assert.rejects(anon.readResource({ uri: 'office://logs' }), /operators only/);
+  await assert.rejects(call(anon, 'logs_tail'), /disabled/);
+  await assert.rejects(anon.readResource({ uri: 'office://logs' }), /for admins.*LOG_DIDS.*not signed in/s);
   const { office: other, connect: connectOther } = await setup({ logDids: 'did:plc:someoneelse' });
   setLogSink({ buffer: other.logs });
   const stranger = await connectOther({ authorization: 'Bearer rmcp_good' });
-  await assert.rejects(call(stranger, 'logs_stream'), new RegExp(`signed in as ${did}, which isn't on that list`));
+  await assert.rejects(call(stranger, 'logs_stream'), /disabled/);
+  await assert.rejects(stranger.readResource({ uri: 'office://logs' }), new RegExp(`signed in as ${did}, an agent`));
   assert.equal((await call(stranger, 'whoami')).canReadLogs, false);
   setLogSink({ buffer: office.logs });
 

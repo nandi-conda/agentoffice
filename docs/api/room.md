@@ -16,9 +16,9 @@ Returns `{ id, room, title, start, end, owner, name, invitees, lock, autoRelease
 
 ## `book(who, m, ctx)`
 
-`mutates` · `caller filled in by the World` · `ctx { all, presence } filled in by the World` · MCP tool **`room_book`**
+`mutates` · `caller filled in by the World` · `ctx { all, presence } filled in by the World` · `moderators may for anyone (bookings.override)` · MCP tool **`room_book`**
 
-Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking.
+Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking (moderators can cancel or end anyone's).
 
 | Param | Type | |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ Send due reminders and announcements, release no-shows. Safe to call as often as
 | Param | Type | |
 | --- | --- | --- |
 | `opts` *(optional)* | `{ presence }` |  |
-| &nbsp;&nbsp;&nbsp;`opts.presence` | `{ id, key, name, handle?, did?, kind?, zone?, x?, y? }[]` | Who is in |
+| &nbsp;&nbsp;&nbsp;`opts.presence` | `{ id, key, name, handle?, did?, kind?, zone?, role?, x?, y? }[]` | Who is in |
 
 ## Events
 

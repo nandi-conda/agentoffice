@@ -43,21 +43,21 @@ Returns `{ room?, error? }`
 
 ## `close(who, name)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`wing_close`**
+`mutates` · `caller filled in by the World` · `moderators may for anyone (rooms.close)` · MCP tool **`wing_close`**
 
-Let go of a room you opened. It goes once it is empty, unless another source (freeq) still has the channel.
+Let go of a room you opened. It goes once it is empty, unless another source (freeq) still has the channel. Moderators can close any room, freeq ones included: it is archived once empty and stays closed until a moderator opens it again.
 
 | Param | Type | |
 | --- | --- | --- |
 | `name` | `string ≤ 33` | Channel name |
 
-Returns `{ ok?, error? }`
+Returns `{ ok?, closed?, error? }`
 
 ## `setAccess(who, name, access, rules?)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`wing_setAccess`**
+`mutates` · `caller filled in by the World` · `moderators may for anyone (rooms.policy)` · MCP tool **`wing_setAccess`**
 
-Change who may walk into a room you opened: open, rules (accept `rules` at the door) or invite. Rooms from another source (freeq) keep that source's policy.
+Change who may walk into a room you opened (moderators: any room opened in the office): open, rules (accept `rules` at the door) or invite. Rooms from another source (freeq) keep that source's policy.
 
 | Param | Type | |
 | --- | --- | --- |

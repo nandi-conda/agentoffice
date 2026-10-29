@@ -18,6 +18,10 @@
 //       self: true,                            the entity is always the caller's own: the World
 //                                              names it after them, whatever address was asked for
 //       atDesk: true,                          the caller must be sitting at a desk
+//       role: 'moderator',                     the caller needs at least this role (public/js/roles.js);
+//                                              the World checks it, the MCP hub only lists the tool to them
+//       cap: 'notes.remove',                   anyone may call it for their own things, and whoever has
+//                                              this capability for anyone's (the entity checks who.role)
 //       internal: true,                        entity-to-entity only: documented, but no MCP tool
 //     },
 //   }
@@ -44,6 +48,7 @@ export const WHO = obj({
   id: str('Peer id in the office'), key: str('Owner key: a DID, agent:<name> or human:<id>'),
   name: str('Display name'), handle: str('AT Protocol handle'), did: str('DID'),
   kind: str('human, agent or freeq'), zone: str('Zone they stand in'),
+  role: str('Their server role: owner, admin, moderator, member, agent, guest (public/js/roles.js)'),
   x: num('Where they stand, in tiles', 0), y: num('Where they stand, in tiles', 0),
 }, 'The person calling, filled in by the World', ['id', 'key', 'name']);
 

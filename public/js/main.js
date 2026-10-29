@@ -16,6 +16,8 @@ import { openInventory, nearestFloorItem } from './inventory.js';
 import { label as itemLabel, placeTiles } from './items.js';
 import { ROOMS, MIN, RULES, roomById, roomStatus, activeBooking, isHolder, lockedOut, forRoom, keyOf, fmtTime, fmtRange } from './rooms.js';
 import { fmtHour, fmtClock, localize } from './time.js';
+import { can, rank, roleBadge, ROLES } from './roles.js';
+import { openAdmin, roleTag } from './admin.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -272,7 +274,7 @@ async function enter() {
 const voice = createVoice({ send: (m) => net.send(m), myId: () => me?.id || '', onMedia: (ended) => mediaChanged(ended), prefs: store.get('mic', {}) });
 
 function start(hello) {
-  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ replaced }) => sys(replaced ? 'You opened the office in another tab or device, so this one left. Reload to come back here.' : 'Connection lost, reconnecting…'));
+  net = connect(onMessage, () => net.send({ t: 'hello', ...hello, status: me?.status }), ({ replaced, kicked }) => sys(replaced ? 'You opened the office in another tab or device, so this one left. Reload to come back here.' : kicked ? 'You\'re out of the office.' : 'Connection lost, reconnecting…'));
   requestAnimationFrame(loop);
 }
 
@@ -310,6 +312,7 @@ function onMessage(m) {
       board.set(m.strokes);
       for (const s of m.shouts || []) logChat(s);
       setStatusUI();
+      roleChanged();
       refreshPeople();
       if (!welcomeShown) { welcomeShown = true; sys(coarse ? `Welcome in, ${me.name}. Tap the floor to walk, or drag anywhere to steer. Pinch to zoom, tap ? for help.` : `Welcome in, ${me.name}. Walk with WASD or click the floor. Press ? for help.`); }
       break;
@@ -330,8 +333,10 @@ function onMessage(m) {
     case 'peer': {
       const p = peers.get(m.id);
       if (!p) break;
-      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'pc', 'cup', 'seat']) if (key in m) p[key] = m[key];
+      for (const key of ['status', 'note', 'emote', 'audio', 'video', 'screen', 'pc', 'cup', 'seat', 'role', 'muted']) if (key in m) p[key] = m[key];
       if (p === me && 'seat' in m) me.seat = m.seat;
+      if (p === me && ('role' in m || 'muted' in m)) roleChanged();
+      if ('role' in m || 'muted' in m) modal.admin?.refresh();
       refreshPeople();
       break;
     }
@@ -461,7 +466,8 @@ function onMessage(m) {
       if (performance.now() - (onMessage.bounced || 0) > 4000) {
         onMessage.bounced = performance.now();
         // A channel room's door: the sign says how to get in.
-        if (m.door) toast(esc(localize(m.text)), [['Read the sign', () => openSign(m.room)]], 8000);
+        if (m.moved) toast(`🛡️ ${esc(localize(m.text))}`);
+        else if (m.door) toast(esc(localize(m.text)), [['Read the sign', () => openSign(m.room)]], 8000);
         else toast(esc(localize(m.text)), [['Knock', () => knock(m.room)]], 8000);
       }
       break;
@@ -479,6 +485,13 @@ function onMessage(m) {
     case 'fq-call': fqCall.onMessage(m); break;
     case 'error': toast(`⚠️ ${esc(localize(m.message))}`); break;
     case 'replaced': toast(esc(m.text)); break;
+    case 'kicked': {
+      toast(`🚪 ${esc(localize(m.text))}`, [], 20000); sys(m.text);
+      // Out: the office empties around you.
+      peers.clear(); peers.set(me.id, me); refreshPeople();
+      break;
+    }
+    case 'modres': modWait.get(m.ref)?.(m.result || {}); modWait.delete(m.ref); break;
   }
 }
 let welcomeShown = false;
@@ -728,6 +741,7 @@ function setStatusUI() {
 const micBtn = $('.mic');
 micBtn.addEventListener('click', toggleMic);
 async function toggleMic() {
+  if (me?.muted > serverNow() && (!voice.on || voice.listening)) return toast(`🔇 A moderator muted you until ${esc(fmtTime(me.muted))}`);
   if (!voice.on || voice.listening) {
     const ok = await voice.enable();
     if (!ok) return toast('🎙️ Microphone permission was blocked. Allow it in your browser to talk.');
@@ -919,12 +933,15 @@ function openHelp() {
       <kbd>U</kbd><span>Uploaded objects: plugins people placed in the office, and uploading your own</span>
       <kbd>I</kbd><span>Your things: eat, drink, give them to someone nearby, or place them on a spot near you. E picks up what's at your feet</span>
       <kbd>C</kbd><span>Camera on/off (in A/V rooms)</span>
+      ${can(me?.role, 'roles.view') ? '<kbd>G</kbd><span>Moderation: who\'s in and their roles, mute, move and kick people, grant roles</span>' : ''}
       <kbd>+ −</kbd><span>Zoom (or scroll over the map, toward the cursor). <kbd>0</kbd> shows the whole office</span>
     </div>${coarse ? '</details>' : ''}
     <h3 style="margin-top:16px">Who hears you</h3>
     <p class="small">In open areas, anyone within a few steps. In the <b>Boardroom</b>, <b>Huddle Room</b> and <b>Phone Booths</b>, only people in the same room. The <b>Deep Work Den</b> is text-only and runs a shared pomodoro. Start a message with <code>/shout</code> to reach the whole office, or <code>@name</code> to tap someone anywhere.</p>
     <h3>Meeting rooms</h3>
     <p class="small">Book the Boardroom, Huddle Room or a phone booth from the 📅 button or the panel by each door. The Boardroom and Huddle Room are <b>A/V rooms</b>: inside, turn on your camera or share your screen with everyone in the room. While a booking runs only the booker and invitees can walk in (others knock to be let in); bookings nobody turns up to are released after 10 minutes.</p>
+    <h3>Roles</h3>
+    <p class="small">Signed-in people are members and agents; everyone else is a guest. Moderators (🔨) can mute, move and kick people, tidy the floor, notices and uploads, close channel rooms and cancel bookings; admins (🛡️) also hand out roles; owners (👑) run the office. Their badge shows on their name.</p>
     <h3>Agents</h3>
     <p class="small">AI agents can work here too. They connect over the same WebSocket protocol, claim desks and answer @mentions. See <code>scripts/agent.mjs</code>.</p>
     <p class="small" style="margin-top:12px">People without their own sprite wear stock <a href="https://rpg.actor/generator" target="_blank" rel="noopener">rpg.actor</a> characters. Generator art by <a href="https://bsky.app/profile/isilme.reverie.house" target="_blank" rel="noopener">isilme</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.</p>`);
@@ -954,7 +971,7 @@ function refreshPeople() {
     $('.people-list').innerHTML = list.map((p) => {
       const z = zoneAt(p.x, p.y);
       const sub = [p.note, z?.name].filter(Boolean).join(' · ');
-      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(markedName(p.name, p.kind))}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
+      return `<li data-id="${p.id}"><span class="dot" style="background:${statusColor(p.status)}"></span><span class="who"><b>${esc(markedName(p.name, p.kind))}${p === me ? ' (you)' : ''} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}${roleTag(p.role)}</b><span>${esc(sub)}</span></span>${p.audio ? '🎙️' : ''}</li>`;
     }).join('');
     $('.people-list').querySelectorAll('li').forEach((li) => li.addEventListener('click', () => openProfile(peers.get(li.dataset.id))));
   }, 120);
@@ -1045,7 +1062,8 @@ function openSign(roomId) {
     const r = wing.find((x) => x.id === roomId);
     if (!r) return modal.close();
     const p = r.policy, a = r.access || accessOf(p);
-    const mine = r.sources?.includes('office') && r.by === me.name && me.did;
+    const mine = r.sources?.includes('office') && ((r.by === me.name && me.did) || can(me.role, 'rooms.policy'));
+    const closable = can(me.role, 'rooms.close');
     const inside = zoneAt(me.x, me.y)?.id === roomId;
     const needs = check?.needs || [];
     const from = r.sources?.includes('freeq') ? `<a href="https://freeq.at" target="_blank" rel="noopener">freeq</a>` : r.by ? `opened by ${esc(r.by)}` : 'the office';
@@ -1063,12 +1081,13 @@ function openSign(roomId) {
       ${check && !check.ok && needs.length ? `<ul class="needs">${needs.map(needRow).join('')}</ul>` : ''}
       ${p?.rules ? `<h3>Rules</h3><div class="rules">${esc(p.rules)}</div>` : ''}
       ${roles ? `<h3>Roles</h3><ul class="small">${roles}</ul>` : ''}
-      <div class="row">${check?.ok && !inside ? '<button class="btn primary go">Walk in</button>' : ''}</div>
+      <div class="row">${check?.ok && !inside ? '<button class="btn primary go">Walk in</button>' : ''}${closable ? '<button class="btn ghost danger close-room" title="As a moderator: archived once empty, and stays closed">🛡️ Close room</button>' : ''}</div>
       ${mine ? `<form class="access-form"><h3>Who can walk in (you opened it)</h3>${accessFields(p?.require?.type === 'INVITE' ? 'invite' : p?.rules ? 'rules' : 'open', p?.rules)}<div class="row"><button class="btn">Save</button></div></form>` : ''}`, 'sign-modal');
     const body = modal.body;
     body.querySelector('.accept')?.addEventListener('click', (e) => net.send({ t: 'chan', op: 'accept', room: roomId, hash: e.target.dataset.hash }));
     body.querySelector('.knock')?.addEventListener('click', () => net.send({ t: 'chan', op: 'knock', room: roomId }));
     body.querySelector('.go')?.addEventListener('click', () => { modal.close(); walkToZone(ZONES.find((z) => z.id === roomId)); });
+    body.querySelector('.close-room')?.addEventListener('click', () => { if (confirm(`Close ${r.channel} for everyone? It stays closed until a moderator opens it again.`)) { net.send({ t: 'chan', op: 'close', name: r.channel }); modal.close(); } });
     const form = body.querySelector('.access-form');
     if (form) {
       wireAccess(form);
@@ -1142,7 +1161,8 @@ function openProfile(p) {
     <div class="profile">
       <canvas width="112" height="112"></canvas>
       <div>
-        <h2>${esc(markedName(p.name, p.kind))} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}</h2>
+        <h2>${esc(markedName(p.name, p.kind))} ${p.kind === 'agent' ? '<span class="badge">AGENT</span>' : p.kind === 'freeq' ? '<span class="badge freeq">FREEQ</span>' : ''}${roleTag(p.role)}</h2>
+        ${p.role && p.kind !== 'freeq' ? `<p class="small muted" title="${esc(ROLES[p.role]?.doc || '')}">${roleBadge(p.role)} ${esc(ROLES[p.role]?.label || p.role)}${p.muted > serverNow() ? ` · 🔇 muted until ${esc(fmtTime(p.muted))}` : ''}</p>` : ''}
         ${p.handle ? `<p class="small"><a href="https://rpg.actor/${encodeURIComponent(p.handle)}" target="_blank" rel="noopener">@${esc(p.handle)}</a> on rpg.actor</p>` : '<p class="small muted">Guest, no rpg.actor character linked</p>'}
         <p><span style="color:${statusColor(p.status)}">●</span> ${esc(STATUS[p.status]?.label || p.status)}${p.note ? ` · ${esc(p.note)}` : ''}</p>
         ${desk ? `<p class="small">🪑 Desk: ${placeLink('desk', desk[0], esc(desk[0]))}${desk[1].goal ? ` · “${esc(desk[1].goal)}”` : ''}</p>` : ''}
@@ -1158,6 +1178,11 @@ function openProfile(p) {
           <button class="btn ghost act-follow">${follow === p.id ? 'Stop following' : 'Follow'}</button>
           <button class="btn ghost act-mention">@ Mention</button>
         </div>` : ''}
+        ${p !== me && p.kind !== 'freeq' && can(me.role, 'people.kick') && (me.role === 'owner' || rank(p.role) < rank(me.role)) ? `<div class="row mod-row">
+          <button class="btn ghost act-mute">${p.muted > serverNow() ? '🔊 Unmute' : '🔇 Mute 10 min'}</button>
+          <button class="btn ghost act-lobby">🛡️ To lobby</button>
+          <button class="btn ghost danger act-kick">🚪 Kick</button>
+        </div>` : ''}
       </div>
     </div>`);
   const cv = modal.body.querySelector('canvas');
@@ -1171,6 +1196,10 @@ function openProfile(p) {
   modal.body.querySelector('.act-signout')?.addEventListener('click', signOut);
   modal.body.querySelector('.act-walk')?.addEventListener('click', () => { walkTo(p.x, p.y); modal.close(); });
   modal.body.querySelector('.act-follow')?.addEventListener('click', () => { follow = follow === p.id ? null : p.id; modal.close(); });
+  const modAct = async (op, extra = {}) => { const r = await modRequest(op, { to: p.id, ...extra }); if (r.error) toast(`⚠️ ${esc(r.error)}`); else modal.close(); };
+  modal.body.querySelector('.act-mute')?.addEventListener('click', () => (p.muted > serverNow() ? modAct('unmute') : modAct('mute', { minutes: 10 })));
+  modal.body.querySelector('.act-lobby')?.addEventListener('click', () => modAct('move', { place: 'lobby' }));
+  modal.body.querySelector('.act-kick')?.addEventListener('click', () => { if (confirm(`Send ${p.name} out of the office?`)) modAct('kick', { reason: prompt(`Why? ${p.name} sees this (optional)`) || undefined }); });
   modal.body.querySelector('.act-mention')?.addEventListener('click', () => {
     modal.close();
     chatIn.value = `@${(p.handle || p.name).replace(/\s+/g, '')} `;
@@ -1284,7 +1313,7 @@ function openNotes() {
     <h2>Notice board</h2>
     <p class="small muted">Leave a note for the office: wins, asks, lunch plans. Notes stay up between visits.</p>
     <div class="row"><input class="note-text" maxlength="200" placeholder="Pin a note…"><button class="btn primary pin">Pin</button></div>
-    <div class="notes">${notes.map((n) => `<div class="note" style="background:${n.color}">${esc(n.text)}<small>${esc(n.by)} · ${new Date(n.ts).toLocaleDateString()}</small>${n.owner === ownerKey() ? `<button data-id="${n.id}" title="Remove">✕</button>` : ''}</div>`).join('') || '<p class="muted">Nothing pinned yet.</p>'}</div>`);
+    <div class="notes">${notes.map((n) => `<div class="note" style="background:${n.color}">${esc(n.text)}<small>${esc(n.by)} · ${new Date(n.ts).toLocaleDateString()}</small>${n.owner === ownerKey() || can(me.role, 'notes.remove') ? `<button data-id="${n.id}" title="Remove">✕</button>` : ''}</div>`).join('') || '<p class="muted">Nothing pinned yet.</p>'}</div>`);
   modal.notesOpen = true;
   modal.onclose = () => (modal.notesOpen = false);
   const input = modal.body.querySelector('.note-text');
@@ -1439,11 +1468,14 @@ function openSchedule(opts = {}) {
 function bookingRow(b, now) {
   const live = b.start <= now && now < b.end;
   const own = b.owner === keyOf(me);
+  // Moderators can cancel or end anyone's booking.
+  const mod = !own && can(me.role, 'bookings.override');
   return `<li data-id="${b.id}">${statusDot(live ? 'busy' : 'soon')}
     <span class="grow"><b>${esc(b.title)}</b><br><span class="small muted">${placeLink('zone', b.room, esc(roomById(b.room).name))} · ${dayWord(b.start)} ${fmtRange(b)}${own ? '' : ` · from ${esc(b.name)}`}</span></span>
     ${zoneAt(me.x, me.y)?.id !== b.room ? '<button data-act="go">Walk there</button>' : ''}
     ${own && live ? '<button data-act="extend">+15 min</button><button data-act="end">End now</button>' : ''}
-    ${own && !live ? '<button data-act="cancel">Cancel</button>' : ''}</li>`;
+    ${own && !live ? '<button data-act="cancel">Cancel</button>' : ''}
+    ${mod ? `<button data-act="${live ? 'end' : 'cancel'}" title="As a moderator">🛡️ ${live ? 'End' : 'Cancel'}</button>` : ''}</li>`;
 }
 
 function wireBookingRows(body) {
@@ -1496,6 +1528,35 @@ function openRoom(id) {
 $('.rooms-btn').addEventListener('click', () => openSchedule());
 $('.gallery-btn').addEventListener('click', () => showGallery());
 
+// ---- server roles: badges, the 🛡️ moderation panel (admin.js) ---------------------
+const modBtn = $('.mod-btn');
+const modWait = new Map();
+let modRef = 0;
+modBtn.addEventListener('click', () => showAdmin());
+function modRequest(op, fields) {
+  const ref = `m${++modRef}`;
+  return new Promise((resolve) => {
+    modWait.set(ref, resolve);
+    net.send({ t: 'mod', op, ref, ...fields });
+    setTimeout(() => { if (modWait.delete(ref)) resolve({ error: 'The office didn\'t answer. Try again?' }); }, 15000);
+  });
+}
+function showAdmin() {
+  if (!me || !can(me.role, 'roles.view')) return;
+  openAdmin(modal, { me, request: modRequest, toast, fmtTime, zoneName: (id) => ZONES.find((z) => z.id === id)?.name || '' });
+}
+// My role or mute changed: the panel button, and a muted mic goes off.
+function roleChanged() {
+  modBtn.hidden = !can(me.role, 'roles.view');
+  if (me.muted > serverNow() && voice.on && !voice.listening) {
+    voice.disable();
+    net.send({ t: 'audio', on: false });
+    me.audio = false;
+    micBtn.className = 'tb mic';
+    micPopSync();
+  }
+}
+
 // Uploaded objects: list, remove, upload (gallery.js). Requests go over the
 // socket and come back as { t: 'galleryres', rid, result }.
 function galleryRequest(op, req) {
@@ -1508,7 +1569,7 @@ function galleryRequest(op, req) {
 }
 function showGallery() {
   if (!me) return;
-  openGallery(modal, { me, items: gallery, request: galleryRequest, toast, walkTo });
+  openGallery(modal, { me, items: gallery, request: galleryRequest, toast, walkTo, moderator: can(me.role, 'uploads.remove') });
 }
 
 // ---- A/V rooms: camera, screen share and the video stage -----------------------------
@@ -1702,6 +1763,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
   else if (key === 'u') showGallery();
+  else if (key === 'g' && can(me.role, 'roles.view')) showAdmin();
   else if (key === 'c' && zoneAt(me.x, me.y)?.av) toggleCam();
   else if (key === '+' || key === '=') zoom(1);
   else if (key === '-') zoom(-1);

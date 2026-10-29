@@ -72,10 +72,12 @@ entrypoint = "Kiosk"
 # [[worker_loaders]]
 # binding = "LOADER"
 
-# Who can remove any uploaded object, besides its uploader (comma-separated DIDs).
-# Also who may read the server logs over MCP, unless LOG_DIDS is set
-# (logs_tail, logs_stream, office://logs; MCP_TOKEN operators always may).
-# Either can be a secret instead: `just cf-secret LOG_DIDS`.
+# Server roles to start with (comma-separated DIDs): owners run the office,
+# admins grant roles and moderate (README "Roles and moderation"). Without
+# OWNER_DIDS the first ADMIN_DIDS entry is the owner. LOG_DIDS: extra DIDs
+# that may read the server logs over MCP without being admins.
+# Any of them can be a secret instead: `just cf-secret OWNER_DIDS`.
 # [vars]
+# OWNER_DIDS = "did:plc:..."
 # ADMIN_DIDS = "did:plc:..."
 # LOG_DIDS = "did:plc:..."

@@ -19,6 +19,7 @@ import { LocalRuntime } from './entities/runtime.js';
 import { PluginHost } from './plugins.js';
 import { NodeSandbox } from './sandbox-node.js';
 import { KINDS } from './entities/kinds.js';
+import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(root, 'public');
@@ -92,7 +93,7 @@ async function fileStore(name, ttlMs) {
 let entityData = {};
 try { entityData = JSON.parse(await readFile(ENTITIES_FILE, 'utf8')); } catch { /* first run */ }
 const actorLoader = process.env.OFFLINE ? null : loadActor;
-const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), admins: (process.env.ADMIN_DIDS || '').split(',').map((d) => d.trim()).filter(Boolean) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
+const runtime = new LocalRuntime({ kinds: KINDS, data: entityData, services: { loadActor: actorLoader, plugins: new PluginHost({ sandbox: new NodeSandbox() }), roles: bootstrapRoles(process.env) }, onWrite: saver(ENTITIES_FILE, () => entityData) });
 
 // Each person's OAuth session is kept by their actor entity, so a restart
 // (or `just dev` reloading) doesn't lose it while their cookie still says

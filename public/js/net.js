@@ -1,7 +1,8 @@
 // WebSocket client with automatic reconnect.
 // Close code 4001: the office replaced this connection with a newer one for
-// the same identity (another tab or device), so it stays closed.
-const REPLACED = 4001;
+// the same identity (another tab or device), so it stays closed. 4003: a
+// moderator sent us out (or we're banned), so it stays closed too.
+const REPLACED = 4001, KICKED = 4003;
 const PING = JSON.stringify({ t: 'ping' }); // answered without waking the server; keeps us from looking like a ghost
 
 export function connect(onMessage, onOpen, onClose) {
@@ -14,9 +15,9 @@ export function connect(onMessage, onOpen, onClose) {
     ws.onopen = () => { retry = 500; onOpen(); while (queue.length) ws.send(queue.shift()); };
     ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error(err); } };
     ws.onclose = (e) => {
-      const replaced = e.code === REPLACED;
-      if (replaced) { closed = true; clearInterval(pinger); }
-      onClose({ replaced });
+      const replaced = e.code === REPLACED, kicked = e.code === KICKED;
+      if (replaced || kicked) { closed = true; clearInterval(pinger); }
+      onClose({ replaced, kicked });
       if (!closed) setTimeout(open, (retry = Math.min(retry * 2, 8000)));
     };
   }

@@ -10,6 +10,7 @@ import { loadActor } from '../server/atproto.js';
 import { PluginHost } from '../server/plugins.js';
 import { DynamicSandbox } from '../server/sandbox.js';
 import { captureConsole, setLogSink, forwarder } from '../server/logs.js';
+import { bootstrap as bootstrapRoles } from '../public/js/roles.js';
 
 import { BINDINGS } from '../server/entities/bindings.js';
 
@@ -25,7 +26,8 @@ export class DORuntime {
     this.services = {
       loadActor: env.OFFLINE ? null : loadActor,
       plugins: new PluginHost({ env, sandbox: env.LOADER ? new DynamicSandbox(env.LOADER) : null }),
-      admins: String(env.ADMIN_DIDS || '').split(',').map((d) => d.trim()).filter(Boolean),
+      // Owners and admins to start with (OWNER_DIDS, ADMIN_DIDS): public/js/roles.js.
+      roles: bootstrapRoles(env),
     };
   }
 

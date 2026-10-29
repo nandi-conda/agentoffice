@@ -29,6 +29,7 @@ import { ROOST_URL, PROOF_COLLECTION } from './agentauth.js';
 import { ROOMS, roomStatus } from '../public/js/rooms.js';
 import { isoize } from '../public/js/time.js';
 import { describeApi, generatedTools } from './apidoc.js';
+import { atLeast, can } from '../public/js/roles.js';
 import { LEVELS, LogBuffer, log } from './logs.js';
 
 const CLIENT_TYPES = ['hello', 'move', 'chat', 'status', 'emote', 'sit', 'desk', 'pomo', 'wb', 'note', 'coffee', 'score', 'wave', 'audio', 'rtc', 'book', 'av', 'use', 'inv', 'ping'];
@@ -110,14 +111,28 @@ class AgentSession {
 
   // Acting in the office needs a proven identity (Roost / AT Protocol) or
   // the operator token; without either, a session is a read-only observer.
-  get canAct() { return !!this.identity?.did || this.operator; }
+  // So are the banned.
+  get canAct() { return (!!this.identity?.did || this.operator) && this.role !== 'banned'; }
+
+  // The session's server role (public/js/roles.js): observer until it signs
+  // in, then whatever its DID has (agent by default); the operator token is an owner.
+  get role() { return this.hub.office.roleFor({ did: this.identity?.did || null, operator: this.operator }); }
+
+  // Only list the tools this session may use; the client hears
+  // tools/list_changed when that changes (sign-in, a role granted or revoked).
+  refreshTools() {
+    for (const [reg, show] of this.tools || []) {
+      const on = !!show(this);
+      if (on !== reg.enabled) on ? reg.enable() : reg.disable();
+    }
+  }
 
   async join({ name, note = '', status }) {
     if (!this.canAct) throw new Error(SIGN_IN_HELP);
     if (this.client) this.client.close();
     const { server, client } = socketPair();
     // Same rule as browsers: the DID comes only from a completed sign-in.
-    this.hub.office.connect(server, { did: this.identity?.did || null });
+    this.hub.office.connect(server, { did: this.identity?.did || null, operator: this.operator });
     const bot = new AgentClient({ name, note, socket: () => client });
     bot.lastNames = new Map();
     this.client = bot;
@@ -170,12 +185,13 @@ export class McpHub {
   // what set() was given, or nothing once IDLE_MS has passed. With one,
   // sessions outlive a restart of the process or Durable Object: the agent's
   // next request picks its session up again and puts it back in the office.
-  // logDids: who may read the server logs (comma-separated DIDs, or a list);
-  // LOG_DIDS, else ADMIN_DIDS. Operators with MCP_TOKEN always may.
+  // logDids: DIDs that may read the server logs without the admin role
+  // (LOG_DIDS, comma-separated, or a list). Admins and owners always may
+  // (public/js/roles.js), and so do operators with MCP_TOKEN, who are owners.
   // oauth (optional): the office's OAuth server for MCP clients (mcpauth.js).
   // With it, /mcp needs credentials (a 401 starts the client's OAuth flow)
   // and read-only observers connect to /mcp/public instead.
-  constructor({ office, auth, oauth = null, token = globalThis.process?.env?.MCP_TOKEN || '', store = null, logDids = globalThis.process?.env?.LOG_DIDS ?? globalThis.process?.env?.ADMIN_DIDS ?? '' }) {
+  constructor({ office, auth, oauth = null, token = globalThis.process?.env?.MCP_TOKEN || '', store = null, logDids = globalThis.process?.env?.LOG_DIDS ?? '' }) {
     Object.assign(this, { office, auth, oauth, token, store });
     this.logDids = new Set((Array.isArray(logDids) ? logDids : String(logDids).split(',')).map((d) => d.trim()).filter(Boolean));
     this.sessions = new Map(); // mcp session id -> { transport, agent }
@@ -190,12 +206,16 @@ export class McpHub {
     };
     const leave = office.leave.bind(office);
     office.leave = (p) => { (this.lastNames ||= new Map()).set(p.id, p.name); if (this.lastNames.size > 500) this.lastNames.clear(); leave(p); };
+    // Someone's role changed: every session lists what it may use now.
+    office.onRoles?.(() => { for (const { agent } of this.sessions.values()) agent.refreshTools(); });
   }
 
-  // The one access check for gated capabilities. 'logs': the server logs
-  // (logs_tail, logs_stream, office://logs).
+  // The one access check for gated capabilities, by the session's server
+  // role (public/js/roles.js CAPS). 'logs': the server logs (logs_tail,
+  // logs_stream, office://logs), also for DIDs in LOG_DIDS.
   can(agent, capability) {
-    if (capability === 'logs') return agent.operator || (!!agent.identity?.did && this.logDids.has(agent.identity.did));
+    if (can(agent.role, capability)) return true;
+    if (capability === 'logs') return !!agent.identity?.did && agent.role !== 'banned' && this.logDids.has(agent.identity.did);
     return false;
   }
 
@@ -346,10 +366,23 @@ export class McpHub {
     );
     const office = this.office, auth = this.auth;
     const taken = new Set();
-    const tool = (name, description, schema, fn, annotations) => taken.add(name) && mcp.registerTool(name, { description, inputSchema: schema, ...(annotations ? { annotations } : {}) }, async (args, extra) => {
-      agent.touch();
-      try { return await fn(args, extra); } catch (e) { return fail(e.message); }
-    });
+    // Each tool is listed only to sessions that may use it: by role (the
+    // least one, public/js/roles.js), or by a check of its own. Read-only
+    // tools are for everyone (observers too), the rest need a session that
+    // can act, generated ones say their role, and logs ask can().
+    agent.tools = [];
+    const roleOf = (name, annotations) => (annotations?.readOnlyHint || OPEN_TOOLS.has(name) ? 'observer' : 'guest');
+    const tool = (name, description, schema, fn, annotations, show = null) => {
+      taken.add(name);
+      const role = roleOf(name, annotations);
+      const reg = mcp.registerTool(name, { description, inputSchema: schema, ...(annotations ? { annotations } : {}) }, async (args, extra) => {
+        agent.touch();
+        try { return await fn(args, extra); } catch (e) { return fail(e.message); }
+      });
+      agent.tools.push([reg, show || ((a) => (role === 'observer' || a.canAct) && atLeast(a.role === 'banned' ? 'observer' : a.role, role))]);
+      return reg;
+    };
+    const signedIn = () => { agent.refreshTools(); this.persist(agent); };
     const progress = (extra) => (done, total) => {
       const token = extra?._meta?.progressToken;
       if (token !== undefined) extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: done, total } }).catch(() => {});
@@ -398,9 +431,9 @@ export class McpHub {
         });
       }, READ_ONLY);
 
-    tool('whoami', 'Your sign-in state: observer (read-only) or signed in as an AT Protocol identity, and how to sign in.', {},
+    tool('whoami', 'Your sign-in state and server role: observer (read-only) or signed in as an AT Protocol identity (agent, or a role an admin gave you), and how to sign in. Tools you may not use are not listed; signing in or getting a role lists more.', {},
       async () => json({
-        identity: agent.identity, operator: agent.operator, canAct: agent.canAct, inOffice: agent.joined, canReadLogs: this.can(agent, 'logs'),
+        identity: agent.identity, operator: agent.operator, role: agent.role, canAct: agent.canAct, inOffice: agent.joined, canReadLogs: this.can(agent, 'logs'),
         ...(agent.canAct ? {} : { howToSignIn: SIGN_IN_HELP }),
       }), READ_ONLY);
 
@@ -638,6 +671,7 @@ export class McpHub {
         const v = await auth.verify(handle, nonce);
         auth.redeem(v.grant); // MCP agents don't need the WebSocket grant
         agent.identity = v;
+        signedIn();
         return json({ did: v.did, handle: v.handle, next: agent.joined ? 'call join_office again to rejoin verified' : 'call join_office' });
       });
 
@@ -661,6 +695,7 @@ export class McpHub {
         const v = await auth.roostSignIn({ token, pds });
         auth.redeem(v.grant);
         agent.identity = v;
+        signedIn();
         office.freeq?.rememberAgentToken(v.did, token, v.pds);
         return json({ did: v.did, handle: v.handle, next: agent.joined ? 'call join_office again to rejoin verified' : 'call join_office' });
       });
@@ -680,10 +715,10 @@ export class McpHub {
         const r = await office.call(peer, t.address(args, zone), t.method, t.args(args));
         if (r && typeof r === 'object' && typeof r.error === 'string') return fail(r.error);
         return json(r === undefined ? { ok: true } : r);
-      }, t.readOnly ? READ_ONLY : undefined);
+      }, t.readOnly ? READ_ONLY : undefined, (a) => (t.role === 'observer' || a.canAct) && atLeast(a.role, t.role));
     }
 
-    // ---- server logs (operators only: see can()) -----------------------------
+    // ---- server logs (admins only: see can()) --------------------------------
 
     const logs = office.logs;
     const gate = () => { if (!this.can(agent, 'logs')) throw new Error(logsDenied(agent)); };
@@ -695,7 +730,7 @@ export class McpHub {
     const known = () => [...new Set(logs.entries.map((e) => e.source.split(':')[0]))].sort();
 
     tool('logs_tail',
-      'Recent server logs (operators only: MCP_TOKEN, or a DID in LOG_DIDS / ADMIN_DIDS). Entries are { seq, ts, level, source, msg, data? }, secrets redacted; sources are world, mcp, freeq, auth, storage, console, plugin:<name>, upload:<id> and entity addresses (room:board, actor:…). Waits up to wait_seconds for new entries, so loop on it with `next` as `since` to follow along, or use logs_stream for push notifications.',
+      'Recent server logs (admins only: the admin or owner role, MCP_TOKEN, or a DID in LOG_DIDS). Entries are { seq, ts, level, source, msg, data? }, secrets redacted; sources are world, mcp, freeq, auth, storage, console, plugin:<name>, upload:<id> and entity addresses (room:board, actor:…). Waits up to wait_seconds for new entries, so loop on it with `next` as `since` to follow along, or use logs_stream for push notifications.',
       {
         since: z.number().int().min(0).optional().describe('Last seq you saw; default the most recent entries'),
         limit: z.number().int().min(1).max(500).optional().describe('At most this many (default 100), the newest'),
@@ -714,10 +749,10 @@ export class McpHub {
           });
         }
         return json({ entries: logs.since(from, filter, limit), next: logs.seq, sources: known() });
-      }, READ_ONLY);
+      }, READ_ONLY, (a) => this.can(a, 'logs'));
 
     tool('logs_stream',
-      'Stream server logs to this session as they happen (operators only, like logs_tail): each entry arrives as a notifications/message log notification with logger "server" (the entry is its data), and office://logs gets resources/updated if you subscribed to it. Returns the last `backfill` entries that match. on=false stops. Calling it again replaces the filter.',
+      'Stream server logs to this session as they happen (admins only, like logs_tail): each entry arrives as a notifications/message log notification with logger "server" (the entry is its data), and office://logs gets resources/updated if you subscribed to it. Returns the last `backfill` entries that match. on=false stops. Calling it again replaces the filter.',
       {
         on: z.boolean().optional().describe('Default true; false stops streaming'),
         backfill: z.number().int().min(0).max(500).optional().describe('How many recent matching entries to return now (default 20)'),
@@ -737,9 +772,11 @@ export class McpHub {
         });
         agent.logStream = { filter, off };
         return json({ streaming: true, filter, backfill: backfill ? logs.since(0, filter, backfill) : [], next: logs.seq, sources: known() });
-      }, READ_ONLY);
+      }, READ_ONLY, (a) => this.can(a, 'logs'));
 
     // ---- resources ----------------------------------------------------------
+
+    agent.refreshTools();
 
     mcp.registerResource('map', 'office://map', { title: 'Office map', description: 'Zones, named places and seats', mimeType: 'application/json' },
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ zones: ZONES.map(({ id, name, kind, x0, y0, x1, y1 }) => ({ id, name, kind, x0, y0, x1, y1 })), places: PLACES, seats: SEATS.map((s) => s.id), spawn: SPAWN }) }] }));
@@ -747,7 +784,7 @@ export class McpHub {
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(office.summary()) }] }));
     mcp.registerResource('events', 'office://events', { title: 'Office events', description: 'Your last events; subscribe for updates', mimeType: 'application/json' },
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ events: agent.events.filter((e) => e.type !== 'move').slice(-50), next: agent.seq }) }] }));
-    mcp.registerResource('logs', 'office://logs', { title: 'Server logs', description: 'Recent server logs, secrets redacted (operators only: MCP_TOKEN, or a DID in LOG_DIDS / ADMIN_DIDS). Uses the logs_stream filter if one is set; subscribe for updates while streaming.', mimeType: 'application/json' },
+    mcp.registerResource('logs', 'office://logs', { title: 'Server logs', description: 'Recent server logs, secrets redacted (admins only: the admin or owner role, MCP_TOKEN, or a DID in LOG_DIDS). Uses the logs_stream filter if one is set; subscribe for updates while streaming.', mimeType: 'application/json' },
       async (uri) => {
         gate();
         const filter = agent.logStream?.filter || {};
@@ -769,6 +806,9 @@ export class McpHub {
 }
 
 const GENERATED = generatedTools(describeApi());
+
+// Sign-in tools: for observers, who can't act yet.
+const OPEN_TOOLS = new Set(['atproto_challenge', 'atproto_verify', 'roost_terms', 'roost_signup', 'roost_sign_in']);
 
 const rpcError = (status, code, message) => Response.json({ jsonrpc: '2.0', error: { code, message }, id: null }, { status });
 
@@ -803,7 +843,7 @@ export function resolvePlace(place, c) {
 
 const SIGN_IN_HELP = `Read-only until you sign in with an AT Protocol identity. Easiest for a person: connect your MCP client to /mcp (not /mcp/public) and sign in with your handle when it opens the browser (OAuth). For an agent: connect with the header "Authorization: Bearer <Roost token>" (get one from roost_signup or https://roost.latha.org). Or, in this session: roost_sign_in { token }, or atproto_challenge + putRecord + atproto_verify. Then call join_office.`;
 
-const logsDenied = (agent) => `The server logs are for operators only. Connect with "Authorization: Bearer <MCP_TOKEN>", or sign in with an AT Protocol identity whose DID is in the office's LOG_DIDS (or ADMIN_DIDS when LOG_DIDS is unset). This session is ${agent.identity?.did ? `signed in as ${agent.identity.did}, which isn't on that list` : 'not signed in'}.`;
+const logsDenied = (agent) => `The server logs are for admins: the admin or owner role (ask an owner, or set OWNER_DIDS / ADMIN_DIDS), the operator token ("Authorization: Bearer <MCP_TOKEN>"), or a DID in the office's LOG_DIDS. This session is ${agent.identity?.did ? `signed in as ${agent.identity.did}, a${/^[aeiou]/.test(agent.role) ? 'n' : ''} ${agent.role}` : 'not signed in'}.`;
 
 const INSTRUCTIONS = `You are an agent in Agent Office, a 2D virtual coworking office shared with people.
 Without sign-in you are a read-only observer: look, rooms, read_events, whoami and the office:// resources work.

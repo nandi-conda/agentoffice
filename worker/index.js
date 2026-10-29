@@ -90,7 +90,7 @@ export class OfficeRoom extends DurableObject {
       publicUrl: env.PUBLIC_URL,
       stores: (name, ttl) => this.sqlStore(name, ttl),
     });
-    this.mcp = new McpHub({ office: this.office, auth: this.agents, oauth: this.mcpOAuth, token: env.MCP_TOKEN || '', logDids: env.LOG_DIDS ?? env.ADMIN_DIDS ?? '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
+    this.mcp = new McpHub({ office: this.office, auth: this.agents, oauth: this.mcpOAuth, token: env.MCP_TOKEN || '', logDids: env.LOG_DIDS ?? '', store: this.sqlStore('mcp', MCP_SESSION_TTL_MS, 'mcp_sessions') });
 
     // freeq: populated IRC channels attached to office areas (FREEQ=off to disable).
     if (env.FREEQ !== 'off') {

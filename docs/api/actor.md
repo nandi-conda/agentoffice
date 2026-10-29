@@ -99,6 +99,24 @@ Take and give items in one go, all or nothing (at most 20 stacks of 20). The Wor
 
 Returns `{ items?, taken?, error? }`
 
+## `role()`
+
+`read-only` · `internal (entity to entity)`
+
+The role they were granted (roles:main keeps the directory and hands each actor its copy).
+
+Returns `object | null`
+
+## `setRole(grant)`
+
+`mutates` · `internal (entity to entity)`
+
+Keep a copy of the role roles:main granted them (null: back to the default).
+
+| Param | Type | |
+| --- | --- | --- |
+| `grant` | `object \| null` | { role, by, at } |
+
 ## Events
 
 - receives `deliver`: A protocol message for them: delivered now if they are in, kept in their inbox (30) if not.

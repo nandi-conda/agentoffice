@@ -19,6 +19,7 @@ import { Entity } from './runtime.js';
 import { str, int, arr, obj, opt, bool } from './schema.js';
 import { MAX_ROOMS, tierFor, slugOf, channelKey, TIERS } from '../../public/js/wing.js';
 import { cleanPolicy, officePolicy, evaluate, summary, describe } from '../../public/js/policy.js';
+import { can } from '../../public/js/roles.js';
 
 const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const KEEP_MS = 30 * MIN; // a room nobody offers any more stays this long
@@ -52,12 +53,12 @@ export class Wing extends Entity {
       returns: obj({ room: opt(ROOM), error: opt(str('Why not')) }),
     },
     close: {
-      doc: 'Let go of a room you opened. It goes once it is empty, unless another source (freeq) still has the channel.', who: true, mutates: true,
+      doc: 'Let go of a room you opened. It goes once it is empty, unless another source (freeq) still has the channel. Moderators can close any room, freeq ones included: it is archived once empty and stays closed until a moderator opens it again.', who: true, mutates: true, cap: 'rooms.close',
       params: { name: str('Channel name', 33) },
-      returns: obj({ ok: opt(bool('Let go')), error: opt(str('Why not')) }),
+      returns: obj({ ok: opt(bool('Let go')), closed: opt(bool('Closed by a moderator for every source')), error: opt(str('Why not')) }),
     },
     setAccess: {
-      doc: 'Change who may walk into a room you opened: open, rules (accept `rules` at the door) or invite. Rooms from another source (freeq) keep that source\'s policy.', who: true, mutates: true,
+      doc: 'Change who may walk into a room you opened (moderators: any room opened in the office): open, rules (accept `rules` at the door) or invite. Rooms from another source (freeq) keep that source\'s policy.', who: true, mutates: true, cap: 'rooms.policy',
       params: { name: str('Channel name', 33), access: str('open, rules or invite', 8, { enum: ['open', 'rules', 'invite'] }), rules: opt(str('Rules text for access=rules', 2000)) },
       returns: obj({ room: opt(ROOM), error: opt(str('Why not')) }),
     },
@@ -67,6 +68,8 @@ export class Wing extends Entity {
 
   get rooms() { return (this.state.rooms ||= {}); }
   get archive() { return (this.state.archive ||= {}); }
+  // Channels a moderator closed: no source gets a room for them until one opens it again.
+  get closed() { return (this.state.closed ||= {}); }
 
   view() {
     return Object.values(this.rooms).sort((a, b) => a.slot - b.slot).map((r) => {
@@ -151,7 +154,7 @@ export class Wing extends Entity {
     for (const c of channels.slice(0, MAX_ROOMS)) {
       if (!c?.name || !validName(String(c.name).trim())) continue;
       const key = channelKey(c.name);
-      if (seen.has(key)) continue;
+      if (seen.has(key) || this.closed[key]) continue;
       seen.add(key);
       const r = this.make(c.name);
       if (!r) continue;
@@ -179,6 +182,10 @@ export class Wing extends Entity {
     if (!who?.did && who?.kind !== 'agent') return { error: 'sign in to open a room' };
     name = clip(name, 33);
     if (!validName(name)) return { error: 'use a channel name like #design (letters, numbers, - _ .)' };
+    if (this.closed[channelKey(name)]) {
+      if (!can(who.role, 'rooms.close')) return { error: 'a moderator closed that room' };
+      delete this.closed[channelKey(name)];
+    }
     const r = this.make(name);
     if (!r) return { error: `the wing is full (${MAX_ROOMS} rooms)` };
     if (!r.src.office) {
@@ -194,7 +201,7 @@ export class Wing extends Entity {
     this.fresh = [];
     const r = this.rooms[channelKey(name)];
     if (!r?.src.office) return { error: 'no room you opened has that name' };
-    if (r.src.office.owner && r.src.office.owner !== who.key) return { error: `only ${r.by || 'whoever opened it'} can change who gets in` };
+    if (r.src.office.owner && r.src.office.owner !== who.key && !can(who.role, 'rooms.policy')) return { error: `only ${r.by || 'whoever opened it'} can change who gets in` };
     if (access === 'rules' && !clip(rules, 2000)) return { error: 'write the rules people accept at the door' };
     r.src.office.policy = officePolicy(access, clip(rules, 2000));
     await this.changed();
@@ -204,7 +211,16 @@ export class Wing extends Entity {
 
   async close(who, name) {
     this.fresh = [];
-    const r = this.rooms[channelKey(name)];
+    const key = channelKey(name), r = this.rooms[key];
+    if (r && can(who.role, 'rooms.close')) {
+      // Closed for every source, and archived as soon as it's empty.
+      r.src = {};
+      r.left = this.now() - KEEP_MS;
+      this.closed[key] = { by: who.name, at: this.now() };
+      this.sweep(await this.occupied());
+      await this.changed();
+      return { ok: true, closed: true };
+    }
     if (!r?.src.office) return { error: 'no room you opened has that name' };
     if (r.src.office.owner && r.src.office.owner !== who.key) return { error: `only ${r.by || 'whoever opened it'} can let it go` };
     delete r.src.office;

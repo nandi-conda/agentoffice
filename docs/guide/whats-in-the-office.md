@@ -31,7 +31,7 @@ module speaking a small JSON ABI, or on Cloudflare a JS module. It follows the
 same contract as the plugin Workers. Uploads never run inside the office: on
 Cloudflare each one is its own Dynamic Worker with no network (needs the
 Worker Loader binding, Workers Paid plan), on Node a worker thread with a time
-limit. Only the uploader (or an admin in `ADMIN_DIDS`) can remove one. How it
+limit. Only the uploader (or a moderator) can remove one. How it
 works and how to write one: [docs/uploads.md](../uploads.md).
 
 ## Things you carry

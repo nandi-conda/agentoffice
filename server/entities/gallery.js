@@ -9,13 +9,14 @@
 //                  plugin runs in the sandbox (server/sandbox.js), with the
 //                  same contract as the plugin Workers.
 //
-// The uploader (or an admin, ADMIN_DIDS) can remove an object again.
+// The uploader (or a moderator, see public/js/roles.js) can remove an object again.
 
 import { Entity } from './runtime.js';
 import { str, num, obj, opt, arr, WHO } from './schema.js';
 import { FURNITURE, isBlocked, zoneAt } from '../../public/js/map.js';
 import { PluginObject } from './plugin.js';
 import { checkUpload, fromBase64, MAX_WASM, LANGS } from '../sandbox.js';
+import { can } from '../../public/js/roles.js';
 
 export const MAX_PER_OWNER = 3;
 export const MAX_OBJECTS = 40;
@@ -75,8 +76,8 @@ export class Gallery extends Entity {
       returns: { type: 'object', description: '{ ok, object } with the placed object, or { error }' },
     },
     remove: {
-      doc: 'Take an uploaded object off the map and delete its code and memory. Only its uploader (or an office admin) can.',
-      who: true,
+      doc: 'Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can.',
+      who: true, cap: 'uploads.remove',
       mutates: true,
       params: { req: obj({ id: str('Object id (u-…)', 20) }, 'Which object') },
       returns: { type: 'object', description: '{ ok } or { error }' },
@@ -127,8 +128,8 @@ export class Gallery extends Entity {
   async remove(who, { id } = {}) {
     const item = this.items.find((i) => i.id === id);
     if (!item) return { error: `no uploaded object ${id}` };
-    const admin = (this.services.admins || []).includes(who?.did);
-    if (!who?.did || (item.owner.did !== who.did && !admin)) return { error: `only ${item.owner.handle ? `@${item.owner.handle}` : item.owner.name} can remove ${item.name}` };
+    const mod = can(who?.role, 'uploads.remove');
+    if ((!who?.did || item.owner.did !== who.did) && !mod) return { error: `only ${item.owner.handle ? `@${item.owner.handle}` : item.owner.name} can remove ${item.name}` };
     await this.ref(`uobj:${id}`).uninstall();
     this.state.items = this.items.filter((i) => i.id !== id);
     await this.save();

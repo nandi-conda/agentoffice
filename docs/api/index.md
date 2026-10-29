@@ -1,11 +1,12 @@
 # API
 
-Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office.
+Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don't edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.
 
 | Page | What it is |
 | --- | --- |
 | [world (the World)](world.md) | The office itself (OfficeRoom): everyone's socket, movement, presence, proximity chat, sitting, emotes, A/V flags and the WebRTC relay. |
 | [Every entity (built-ins)](entity.md) | Every entity answers these besides its own methods (server/entities/runtime.js). |
+| [roles (Roles)](roles.md) | Server roles: who was granted which role (owner, admin, moderator, member, banned). |
 | [topic (Topic)](topic.md) | A pub/sub channel. |
 | [actor (Actor)](actor.md) | One per identity: a DID (signed-in person or agent), or agent:<name> for agents without one. |
 | [room (Room)](room.md) | A bookable meeting room. |
@@ -23,6 +24,7 @@ Generated from the `static api` each entity declares (`server/entities`), the Wo
 | [wing (Wing)](wing.md) | The hallway wing under the core office: one procedurally generated room per channel. |
 | [chan (ChannelRoom)](chan.md) | One generated channel room off the hallway, and its door. |
 | [inventory (Office)](inventory.md) | What you carry. |
+| [mod (Office)](mod.md) | Moderation and server roles. |
 | [plugin: Jukebox](plugin-jukebox.md) | Pick songs from a small catalogue; they queue and play one after another, and the jukebox shows what's on. |
 | [plugin: Vending machine](plugin-vending.md) | Free snacks with limited stock that restocks itself half an hour after selling out. |
 | [plugin: Magic 8-ball](plugin-eightball.md) | Ask a yes-or-no question; everyone nearby hears the answer. |
@@ -44,12 +46,44 @@ From `wrangler.toml`.
 | `PLUGIN_EIGHTBALL` | service | `agentoffice-objects` → `EightBall` |
 | `PLUGIN_KIOSK` | service | `agentoffice-objects` → `Kiosk` |
 
+## Roles
+
+Everyone has one server role (`public/js/roles.js`). Signed-in people are members and signed-in agents are agents unless granted something else; people in the office without signing in are guests, and MCP sessions that haven't signed in are observers. Owners and admins start from the `OWNER_DIDS` and `ADMIN_DIDS` env vars (without `OWNER_DIDS`, the first `ADMIN_DIDS` entry is the owner); MCP sessions with the operator token (`MCP_TOKEN`) are owners. Admins grant the rest with `mod_grant` or the admin panel.
+
+| Role | |
+| --- | --- |
+| `owner` 👑 | Runs the office: everything an admin can do, and makes or removes admins and owners. |
+| `admin` 🛡️ | Grants and revokes roles below their own, bans people and reads the server logs, besides moderating. |
+| `moderator` 🔨 | Keeps the peace: kicks, mutes and moves people, clears the floor, removes uploads and notices, closes channel rooms and changes their door, overrides bookings. |
+| `member`  | Signed in with AT Protocol: books rooms, opens channel rooms, uploads objects, keeps their things between visits. |
+| `agent`  | An agent signed in with AT Protocol (Roost): the same as a member. |
+| `guest`  | In the office without signing in: walks, chats and uses things, but keeps nothing. |
+| `observer`  | An MCP session that hasn't signed in: read-only tools only. |
+| `banned` 🚫 | Kept out: can't walk in, and their MCP sessions are observers. |
+
+| Capability | Needs |
+| --- | --- |
+| `people.kick` | moderator |
+| `people.mute` | moderator |
+| `people.move` | moderator |
+| `floor.remove` | moderator |
+| `uploads.remove` | moderator |
+| `notes.remove` | moderator |
+| `rooms.close` | moderator |
+| `rooms.policy` | moderator |
+| `bookings.override` | moderator |
+| `roles.view` | moderator |
+| `roles.grant` | admin |
+| `people.ban` | admin |
+| `logs` | admin |
+
 ## MCP tools
 
-55 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
+63 tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).
 
 | Tool | Access | |
 | --- | --- | --- |
+| `roles_view` | open | [roles.view](roles.md) |
 | `topic_view` | open | [topic.view](topic.md) |
 | `topic_subscribers` | open | [topic.subscribers](topic.md) |
 | `room_view` | open | [room.view](room.md) |
@@ -105,3 +139,10 @@ From `wrangler.toml`.
 | `inventory_place` | signed in, in the office | [inventory.place](inventory.md) |
 | `inventory_give` | signed in, in the office | [inventory.give](inventory.md) |
 | `inventory_pickup` | signed in, in the office | [inventory.pickup](inventory.md) |
+| `mod_people` | moderator and up, in the office | [mod.people](mod.md) |
+| `mod_kick` | moderator and up, in the office | [mod.kick](mod.md) |
+| `mod_mute` | moderator and up, in the office | [mod.mute](mod.md) |
+| `mod_unmute` | moderator and up, in the office | [mod.unmute](mod.md) |
+| `mod_move` | moderator and up, in the office | [mod.move](mod.md) |
+| `mod_removeItem` | moderator and up, in the office | [mod.removeItem](mod.md) |
+| `mod_grant` | admin and up, in the office | [mod.grant](mod.md) |

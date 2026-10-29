@@ -12,6 +12,7 @@ import { Workstation } from './workstation.js';
 import { MIN, RULES, roomById, checkSlot, toTime, parseInvitees, isHolder, keyOf } from '../../public/js/rooms.js';
 import { stamp, stampRange } from '../../public/js/time.js';
 import { Wing, ChannelRoom } from './channels.js';
+import { ROLES, GRANTABLE, effectiveRole, grantError, can } from '../../public/js/roles.js';
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
@@ -95,6 +96,8 @@ export class Actor extends Entity {
     sessionDel: { doc: 'Forget the OAuth session.', mutates: true, internal: true },
     inventory: { doc: 'What they carry.', returns: arr(ITEM, 'Item stacks'), internal: true },
     invApply: { doc: 'Take and give items in one go, all or nothing (at most 20 stacks of 20). The World calls it for picking up, dropping, giving and using; plugins reach it through the World.', params: { change: CHANGE }, returns: obj({ items: opt(arr(ITEM, 'What they carry now')), taken: opt(arr(ITEM, 'What was taken')), error: opt(str('Why not')) }), mutates: true, internal: true },
+    role: { doc: 'The role they were granted (roles:main keeps the directory and hands each actor its copy).', returns: { type: ['object', 'null'], description: '{ role, by, at } or null' }, internal: true },
+    setRole: { doc: 'Keep a copy of the role roles:main granted them (null: back to the default).', params: { grant: { type: ['object', 'null'], description: '{ role, by, at }' } }, mutates: true, internal: true },
   };
   // Internal all the way: any DID names an actor, so open reads would let
   // anyone create Durable Objects at will. Look people up with look or /api/actor.
@@ -171,6 +174,13 @@ export class Actor extends Entity {
     this.state.items = r.items;
     await this.save();
     return r;
+  }
+
+  role() { return this.state.role || null; }
+  async setRole(grant) {
+    if (grant?.role) this.state.role = { role: grant.role, by: clip(grant.by, 64), at: grant.at || this.now() };
+    else delete this.state.role;
+    await this.save();
   }
 
   // The AT Protocol OAuth session (tokens + DPoP key), kept with the person.
@@ -302,7 +312,7 @@ export class NoticeBoard extends Entity {
   static api = {
     view: { doc: 'The notes.', returns: arr(obj({ id: str('Note id'), text: str('Text'), by: str('Author name'), owner: str('Author key'), ts: int('ms since epoch', 0), color: str('Paper colour') }), 'Notes, newest first (at most 40)') },
     add: { doc: 'Pin a note.', who: true, params: { text: str('Note text', 200) }, mutates: true },
-    remove: { doc: 'Take down one of your notes.', who: true, params: { id: str('Note id', 16) }, mutates: true },
+    remove: { doc: 'Take down one of your notes (moderators can take down anyone\'s).', who: true, params: { id: str('Note id', 16) }, mutates: true, cap: 'notes.remove' },
   };
   view() { return this.state.notes || []; }
   seed(notes) { if (Array.isArray(notes) && !this.state.notes) { this.state.notes = notes; return this.save(); } }
@@ -319,7 +329,7 @@ export class NoticeBoard extends Entity {
 
   async remove(who, id) {
     const n = (this.state.notes || []).find((x) => x.id === id);
-    if (!n || n.owner !== who.key) return;
+    if (!n || (n.owner !== who.key && !can(who.role, 'notes.remove'))) return;
     this.state.notes = this.state.notes.filter((x) => x !== n);
     await this.save();
     await this.mirror(this.state.notes);
@@ -441,7 +451,7 @@ export class Room extends Entity {
   static api = {
     view: { doc: 'Its bookings (a day of history included).', returns: arr(obj({ id: str('Booking id'), room: str('Room id'), title: str('Title'), start: int('ms since epoch', 0), end: int('ms since epoch', 0), owner: str('Owner key'), name: str('Owner name'), invitees: arr(str('Handle, DID or agent name'), 'Invitees'), lock: bool('Locked'), autoRelease: bool('Freed if nobody turns up') }), 'Bookings') },
     book: {
-      doc: 'Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking.', who: true, ctx: true, mutates: true,
+      doc: 'Create, cancel, extend, end, update a booking, or admit someone knocking. 15 min to 4 h, up to 14 days ahead, no overlaps; only the owner may change a booking (moderators can cancel or end anyone\'s).', who: true, ctx: true, mutates: true, cap: 'bookings.override',
       params: { m: obj({
         op: str('create, cancel, extend, end, update or admit', 8, { enum: ['create', 'cancel', 'extend', 'end', 'update', 'admit'] }),
         id: opt(str('Booking id (all ops but create)', 16)),
@@ -532,7 +542,10 @@ export class Room extends Entity {
       effects.push(this.note(q, b, 'admit', `🔓 ${who.name} let you into ${room.name}`));
       return done(b);
     }
-    if (b.owner !== key) return { error: 'only the person who booked it can change it' };
+    // Moderators can cancel or end anyone's booking, not take it over.
+    const override = b.owner !== key && can(who.role, 'bookings.override') && (m.op === 'cancel' || m.op === 'end');
+    if (b.owner !== key && !override) return { error: 'only the person who booked it can change it' };
+    if (override) await this.noteOwner(b, 'override', `📅 ${who.name} ${m.op === 'cancel' || b.start > now ? 'cancelled' : 'ended'} “${b.title}” in ${room.name}`);
     if (m.op === 'cancel' || (m.op === 'end' && b.start > now)) {
       this.bookings = this.bookings.filter((x) => x !== b);
       for (const q of presence) {
@@ -681,7 +694,56 @@ export class Floor extends Entity {
   }
 }
 
+// ---- roles ----------------------------------------------------------------------------
+// Who was granted which role (public/js/roles.js has the roles and what each
+// may do). The World mirrors the directory, so every check it makes is
+// instant, and each actor keeps a copy of its own grant. Owners and admins
+// from the env (OWNER_DIDS, ADMIN_DIDS, in services.roles) are on top of
+// it: they show in the directory but can't be changed here.
+const GRANT = obj({ role: str('Role'), name: opt(str('Their name when it was granted', 32)), handle: opt({ type: ['string', 'null'], description: 'Their handle' }), by: str('Who granted it', 64), at: int('When, ms since epoch', 0), env: opt(bool('From OWNER_DIDS / ADMIN_DIDS: change the env to change it')) });
+export class Roles extends Entity {
+  static doc = `Server roles: who was granted which role (owner, admin, moderator, member, banned). Signed-in people are members and signed-in agents are agents unless granted something else; guests and MCP sessions that haven't signed in are guests and observers. Owners and admins start from the OWNER_DIDS and ADMIN_DIDS env vars and can't be changed here. ${Object.entries(ROLES).map(([r, v]) => `${v.label}: ${v.doc}`).join(' ')}`;
+  static api = {
+    view: { doc: 'Everyone with a role that isn\'t the default, by DID (env owners and admins included).', returns: { type: 'object', additionalProperties: GRANT, description: 'DID -> grant' } },
+    grant: {
+      doc: `Give someone a role (${GRANTABLE.join(', ')}; member puts them back to the default). Admins grant up to moderator to people below them; owners grant anything. Use mod_grant, which finds people by name or handle.`,
+      who: true, mutates: true, role: 'admin', internal: true,
+      params: { did: str('Their DID', 253, { pattern: '^did:' }), role: { type: 'string', enum: GRANTABLE, description: 'The role' }, info: opt(obj({ name: opt(str('Their name', 32)), handle: opt({ type: ['string', 'null'], description: 'Their handle' }) }, 'Who they are, for the directory')) },
+      returns: obj({ did: opt(str('DID')), role: opt(str('Their role now')), error: opt(str('Why not')) }),
+    },
+  };
+
+  get env() { return this.services.roles || {}; }
+  get people() { return (this.state.people ||= {}); }
+
+  view() {
+    const out = {};
+    for (const [did, g] of Object.entries(this.people)) out[did] = g;
+    for (const did of this.env.admins || []) out[did] = { ...out[did], role: effectiveRole({ did }, this.people, this.env), by: 'ADMIN_DIDS', at: 0, env: true };
+    for (const did of this.env.owners || []) out[did] = { ...out[did], role: 'owner', by: 'OWNER_DIDS', at: 0, env: true };
+    return out;
+  }
+
+  async grant(who, did, role, info = {}) {
+    did = clip(did, 253);
+    if (!/^did:[a-z]+:\S+$/.test(did)) return { error: 'roles go to signed-in people: give a DID' };
+    const by = who?.role || 'guest';
+    const from = effectiveRole({ did }, this.people, this.env);
+    const err = grantError(by, from, role);
+    if (err) return { error: err };
+    if (this.env.owners?.includes(did) || (this.env.admins?.includes(did) && role !== 'owner')) return { error: 'their role comes from OWNER_DIDS / ADMIN_DIDS: change the env to change it' };
+    if (did === who.did && role !== 'owner' && by !== 'owner') return { error: 'you can\'t change your own role' };
+    const grant = role === 'member' ? null : { role, name: clip(info?.name ?? this.people[did]?.name, 32) || undefined, handle: info?.handle ?? this.people[did]?.handle ?? null, by: clip(who.handle ? `@${who.handle}` : who.name, 64), at: this.now() };
+    if (grant) this.people[did] = grant; else delete this.people[did];
+    await this.save();
+    await this.ref(`actor:${did}`).setRole(grant && { role: grant.role, by: grant.by, at: grant.at });
+    await this.mirror(this.view());
+    return { did, role: effectiveRole({ did }, this.people, this.env) };
+  }
+}
+
 export const KINDS = {
+  roles: Roles,
   topic: Topic, actor: Actor, room: Room, desk: Desk,
   whiteboard: Whiteboard, noticeboard: NoticeBoard, arcade: Arcade, coffee: CoffeeMachine, pomodoro: Pomodoro,
   plugin: PluginObject, gallery: Gallery, uobj: UploadedObject, floor: Floor, workstation: Workstation,
@@ -693,7 +755,7 @@ export const MIRRORED = [
   ...DESKS.map((d) => `desk:${d.id}`),
   ...ZONES.filter((z) => z.bookable).map((z) => `room:${z.id}`),
   ...POMO_ZONES.map((z) => `pomodoro:${z}`),
-  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main', 'wing:main',
+  'whiteboard:main', 'noticeboard:main', 'arcade:main', 'coffee:main', 'floor:main', 'wing:main', 'roles:main',
   ...PLUGIN_OBJECTS.map((f) => `plugin:${f.id}`), 'gallery:main',
   ...ZONES.map((z) => `topic:zone:${z.id}`), 'topic:office', 'topic:desks',
 ];

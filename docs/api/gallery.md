@@ -36,9 +36,9 @@ Returns `object`
 
 ## `remove(who, req)`
 
-`mutates` · `caller filled in by the World` · MCP tool **`gallery_remove`**
+`mutates` · `caller filled in by the World` · `moderators may for anyone (uploads.remove)` · MCP tool **`gallery_remove`**
 
-Take an uploaded object off the map and delete its code and memory. Only its uploader (or an office admin) can.
+Take an uploaded object off the map and delete its code and memory. Only its uploader (or a moderator) can.
 
 | Param | Type | |
 | --- | --- | --- |

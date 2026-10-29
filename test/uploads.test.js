@@ -99,7 +99,7 @@ async function join(o, name, did = null) {
   return ws;
 }
 const office = (admins = []) => {
-  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins: new PluginHost({ sandbox: new NodeSandbox() }), admins } });
+  const rt = new LocalRuntime({ kinds: KINDS, services: { plugins: new PluginHost({ sandbox: new NodeSandbox() }), roles: { owners: [], admins } } });
   return { o: new Office({}, { runtime: rt }), rt };
 };
 const upload = { name: 'Guestbook', lang: 'wasm', code: b64, prompt: 'Sign the guestbook', emoji: '📖' };
@@ -144,7 +144,7 @@ test('a signed-in person uploads an object, everyone sees it, and anyone nearby 
   rt.stop();
 });
 
-test('uploads are checked, capped per person, and admins can remove any', async () => {
+test('uploads are checked, capped per person, and admins (moderators and up) can remove any', async () => {
   const { o, rt } = office(['did:plc:mod']);
   await o.ready;
   const ada = await join(o, 'ada', 'did:plc:ada');

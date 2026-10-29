@@ -63,10 +63,12 @@ test('MCP: observers read through generated tools but cannot act', async () => {
   const { connect } = await setup();
   const c = await connect();
   const names = (await c.listTools()).tools.map((t) => t.name);
-  for (const n of ['desk_claim', 'noticeboard_add', 'room_book', 'pomodoro_start', 'whiteboard_view']) assert.ok(names.includes(n), `missing ${n}`);
+  for (const n of ['whiteboard_view', 'noticeboard_view', 'desk_view', 'roles_view']) assert.ok(names.includes(n), `missing ${n}`);
+  // Tools they can't use aren't listed (and can't be called).
+  for (const n of ['desk_claim', 'noticeboard_add', 'room_book', 'pomodoro_start', 'mod_kick']) assert.ok(!names.includes(n), `observers see ${n}`);
   assert.deepEqual(await call(c, 'noticeboard_view'), []);
   assert.equal(await call(c, 'desk_view', { name: 'desk-1' }), null);
-  await assert.rejects(call(c, 'noticeboard_add', { text: 'hi' }), /sign in|Roost/i);
+  await assert.rejects(call(c, 'noticeboard_add', { text: 'hi' }), /disabled/i);
   await assert.rejects(call(c, 'desk_view', { name: 'desk-999' }));
   await c.close();
 });

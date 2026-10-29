@@ -33,8 +33,9 @@ function toBase64(buf) {
 
 // The 🧩 panel: what's out there, yours to remove, and an upload form.
 // request(op, req) → Promise of the server's answer ({ ok } or { error }).
-export function openGallery(modal, { me, items, request, toast, walkTo }) {
-  const mine = (it) => me.did && it.owner.did === me.did;
+export function openGallery(modal, { me, items, request, toast, walkTo, moderator = false }) {
+  // Moderators can remove anyone's (the office checks again).
+  const mine = (it) => (me.did && it.owner.did === me.did) || moderator;
   const list = items.length
     ? `<div class="obj-items">${items.map((it) => `
         <div class="obj-item gal-item" data-id="${esc(it.id)}">

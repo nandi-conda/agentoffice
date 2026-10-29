@@ -15,11 +15,12 @@ import { ROOMS, roomById, lockedOut, activeBooking } from '../public/js/rooms.js
 import { stamp } from '../public/js/time.js';
 import { LocalRuntime, EntityHost, MemoryStorage, parse } from './entities/runtime.js';
 import { KINDS, MIRRORED, POMO_ZONES, ITEM, nextRoomEvent } from './entities/kinds.js';
-import { str, int, num as numS, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
+import { str, int, num as numS, bool, arr, obj, opt, WHO, describeKind, paramList } from './entities/schema.js';
 import { GUEST_SLOTS, PICKUP_RANGE, GIVE_RANGE, ITEMS, applyChange, cleanItem, label, useLine, placeError, nearestPlace } from '../public/js/items.js';
 import { mayEnter } from './entities/channels.js';
 import { summary as accessSummary } from '../public/js/policy.js';
 import { LogBuffer, log } from './logs.js';
+import { ROLES, GRANTABLE, atLeast, rank, effectiveRole, roleLabel } from '../public/js/roles.js';
 
 // What entities may call on the World ('world:main'), in the same shape as
 // an entity's `static api` (see entities/schema.js), for the API docs.
@@ -60,11 +61,42 @@ export const INVENTORY = {
   },
 };
 
+// Moderation and roles, served by the World because only it holds the
+// sockets and knows where everyone stands. Described like an entity
+// (address mod:main) so the docs and the MCP tools (mod_kick, mod_grant…)
+// come from it; each method's `role` is checked in Office.call and the MCP
+// hub only lists the tools to people who have it. Nobody can act on
+// someone whose role is as high as theirs, except owners.
+const PERSON = str('Their peer id, name or handle', 253);
+export const MOD = {
+  doc: `Moderation and server roles. Moderators kick, mute and move people, clear the floor, remove uploads and notices, close channel rooms or change their door, and cancel anyone's booking (those last ones through the usual tools); admins also grant roles and ban; owners make admins. Owners and admins start from the OWNER_DIDS and ADMIN_DIDS env vars; MCP sessions with the operator token (MCP_TOKEN) are owners. Served by the World. Roles: ${Object.entries(ROLES).map(([r, v]) => `${r} (${v.doc})`).join('; ')}`,
+  api: {
+    people: {
+      doc: 'Everyone in the office with their role (and whether they are muted), and everyone granted a role.', who: true, role: 'moderator',
+      returns: obj({ online: arr(obj({ id: str('Peer id'), name: str('Name'), handle: { type: ['string', 'null'] }, did: { type: ['string', 'null'] }, kind: str('human, agent or freeq'), role: str('Role'), muted: opt(int('Muted until, ms since epoch', 0)), zone: { type: ['string', 'null'] } }), 'In the office'), granted: { type: 'object', description: 'DID -> { role, name, handle, by, at, env? } (roles:main)' } }),
+    },
+    kick: { doc: 'Send someone out of the office. They can come back (ban them to keep them out).', who: true, mutates: true, role: 'moderator', params: { to: PERSON, reason: opt(str('Why, shown to them', 200)) }, returns: obj({ ok: opt(bool('Kicked')), error: opt(str('Why not')) }) },
+    mute: { doc: 'Stop someone chatting and talking (their mic goes off) for a while, even if they come back in.', who: true, mutates: true, role: 'moderator', params: { to: PERSON, minutes: opt(int('How long (default 10)', 1, 1440)), reason: opt(str('Why, shown to them', 200)) }, returns: obj({ until: opt(int('Muted until, ms since epoch', 0)), error: opt(str('Why not')) }) },
+    unmute: { doc: 'Let someone talk again.', who: true, mutates: true, role: 'moderator', params: { to: PERSON }, returns: obj({ ok: opt(bool('Unmuted')), error: opt(str('Why not')) }) },
+    move: { doc: 'Move someone to another area (default the lobby), e.g. out of a room they should not be in.', who: true, mutates: true, role: 'moderator', params: { to: PERSON, place: opt(str('Zone id or name (default lobby)', 64)) }, returns: obj({ ok: opt(bool('Moved')), zone: opt(str('Where to')), error: opt(str('Why not')) }) },
+    removeItem: { doc: 'Clear something off the floor (floor_view lists it), wherever you stand.', who: true, mutates: true, role: 'moderator', params: { id: str('Floor id', 16) }, returns: obj({ ok: opt(bool('Cleared')), error: opt(str('Why not')) }) },
+    grant: {
+      doc: `Give someone a role: ${GRANTABLE.join(', ')} (member puts them back to the default; banned keeps them out and kicks them now). Only signed-in people (DIDs) get roles. Admins grant up to moderator to people below them; owners grant anything. Env owners and admins can't be changed here.`,
+      who: true, mutates: true, role: 'admin',
+      params: { to: str('Their DID, or the peer id, name or handle of someone in the office', 253), role: { type: 'string', enum: GRANTABLE, description: 'The role' } },
+      returns: obj({ did: opt(str('DID')), role: opt(str('Their role now')), error: opt(str('Why not')) }),
+    },
+  },
+};
+
 const STATUSES = new Set(['available', 'focus', 'meeting', 'away', 'coffee']);
 const IDLE_POMO = { phase: 'idle', endsAt: 0, round: 0, focusMin: 25, breakMin: 5 };
 // Close code for a connection replaced by a newer one for the same identity
 // (public/js/net.js doesn't reconnect after it).
 export const REPLACED = 4001;
+// Close code for someone a moderator sent out (or who is banned): their
+// client doesn't reconnect either.
+export const KICKED = 4003;
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
 // How far someone stands from a piece of furniture (its nearest edge).
@@ -75,12 +107,18 @@ export class Office {
   // default; the Worker passes one backed by Durable Objects).
   // mirror/onMirror: a saved copy of the mirror, and a hook for keeping it,
   // so a Durable Object waking from hibernation doesn't ask every entity again.
-  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now(), runtime = null, mirror = null, onMirror = () => {} } = {}) {
+  // roles: the env bootstrap { owners, admins } (public/js/roles.js bootstrap());
+  // without it, the runtime's services.roles.
+  constructor(saved = {}, { onChange = () => {}, loadActor = null, now = () => Date.now(), runtime = null, mirror = null, onMirror = () => {}, roles = null } = {}) {
     this.peers = new Map();
     this.onChange = onChange;
     this.loadActor = loadActor;
     this.now = now;
-    this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor } });
+    this.runtime = runtime || new LocalRuntime({ kinds: KINDS, now, services: { loadActor, roles: roles || { owners: [], admins: [] } } });
+    this.roleEnv = roles || this.runtime.services?.roles || { owners: [], admins: [] };
+    // Owner key -> muted until (ms), so leaving and coming back doesn't lift it.
+    this.mutes = new Map((saved.mutes || []).filter(([, t]) => t > now()));
+    this.roleListeners = new Set();
     this.runtime.setWorld?.(this.worldApi());
     // Recent server logs, for operators over MCP (server/logs.js); the entry
     // points make it this process's log sink.
@@ -179,7 +217,8 @@ export class Office {
   }
 
   persisted() {
-    return { migrated: true, counters: { waves: this.waves } };
+    for (const [k, t] of this.mutes) if (t <= this.now()) this.mutes.delete(k);
+    return { migrated: true, counters: { waves: this.waves }, ...(this.mutes.size ? { mutes: [...this.mutes] } : {}) };
   }
 
   // ---- what the entities show, from the mirror ---------------------------
@@ -213,9 +252,11 @@ export class Office {
   // address said; `atDesk` needs the caller sitting at a desk.
   async call(p, address, method, args = [], { internal = false } = {}) {
     let { kind, name } = parse(address);
-    const spec = kind === 'inventory' ? INVENTORY.api[method] : KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
+    const spec = kind === 'inventory' ? INVENTORY.api[method] : kind === 'mod' ? MOD.api[method] : KINDS[kind] && describeKind(kind, KINDS[kind]).api[method];
     if (!spec || (spec.internal && !internal)) throw new Error(`${address} has no public method ${method}`);
     if ((spec.who || spec.mutates || spec.inZone || spec.near || spec.self) && !p?.ready) throw new Error('join the office first');
+    // Server roles (public/js/roles.js): one check for every method that needs one.
+    if (spec.role && !atLeast(this.roleOf(p), spec.role)) throw new Error(`that needs the ${spec.role} role (you're ${p ? `a${/^[aeiou]/.test(this.roleOf(p)) ? 'n' : ''} ${this.roleOf(p)}` : 'an observer'})`);
     let target = null;
     if (spec.self) {
       const key = this.actorKey(p);
@@ -231,6 +272,7 @@ export class Office {
       if (Math.hypot(cx - p.x, cy - p.y) > spec.near) throw new Error(`you're too far from the ${f.name || name}: walk_to ${name} first (within ${spec.near} tiles)`);
     }
     if (kind === 'inventory') return this.inventoryCall(p, method, args);
+    if (kind === 'mod') return this.modCall(p, method, args);
     if (method === 'view' && this.mirror.has(address)) return this.mirror.get(address);
     const params = paramList(spec).map((_, i) => args[i]);
     while (params.length && params.at(-1) === undefined) params.pop();
@@ -298,7 +340,7 @@ export class Office {
   }
 
   who(p) {
-    return { id: p.id, key: this.ownerKey(p), name: p.name, handle: p.handle, did: p.did, kind: p.kind, zone: zoneAt(p.x, p.y)?.id || null, x: p.x, y: p.y };
+    return { id: p.id, key: this.ownerKey(p), name: p.name, handle: p.handle, did: p.did, kind: p.kind, zone: zoneAt(p.x, p.y)?.id || null, x: p.x, y: p.y, role: this.roleOf(p) };
   }
 
   // A message for an actor: to each of their open connections. Returns how
@@ -349,6 +391,7 @@ export class Office {
       case 'floor': return this.broadcast({ t: 'floor', items: this.floor });
       case 'pomodoro': return this.broadcastPomo();
       case 'wing': return this.layout(value);
+      case 'roles': return this.rolesChanged();
     }
   }
 
@@ -380,6 +423,7 @@ export class Office {
       actor: p.actor, x: p.x, y: p.y, dir: p.dir, moving: p.moving,
       status: p.status, note: p.note, seat: p.seat, emote: p.emote, audio: p.audio,
       video: p.video, screen: p.screen, pc: p.pc, cup: p.cup, joinedAt: p.joinedAt,
+      role: this.roleOf(p), ...(this.mutedUntil(p) ? { muted: this.mutedUntil(p) } : {}),
     };
   }
 
@@ -387,9 +431,10 @@ export class Office {
   // message() and close(). connect() wires them to a Node `ws` socket; the
   // Cloudflare Durable Object calls them from its hibernation handlers.
   // `did` is only ever a DID the visitor proved via OAuth (see auth.js).
-  open(ws, { did = null, restored = null } = {}) {
+  // `operator`: an MCP session with the operator token (MCP_TOKEN), an owner.
+  open(ws, { did = null, restored = null, operator = false } = {}) {
     const p = {
-      id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did,
+      id: crypto.randomUUID().slice(0, 8), ready: false, name: 'guest', handle: null, did: null, authDid: did, operator: !!operator,
       kind: 'human', actor: null, x: SPAWN.x, y: SPAWN.y, dir: 0, moving: false,
       status: 'available', note: '', seat: null, emote: null, audio: false, video: false, screen: false, cup: false,
       chatTimes: [], joinedAt: this.now(),
@@ -412,8 +457,8 @@ export class Office {
     return rest;
   }
 
-  connect(ws, { did = null } = {}) {
-    const p = this.open(ws, { did });
+  connect(ws, { did = null, operator = false } = {}) {
+    const p = this.open(ws, { did, operator });
     ws.on('message', (raw) => this.message(p, raw));
     ws.on('close', () => this.leave(p));
     ws.on('error', () => this.leave(p));
@@ -560,7 +605,8 @@ export class Office {
       case 'inv': return this.inv(p, m);
       case 'ws': return this.workstation(p, m);
       case 'wave': return this.wave(p, m);
-      case 'audio': p.audio = !!m.on; return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
+      case 'audio': p.audio = !!m.on && !this.mutedUntil(p); return this.broadcast({ t: 'peer', id: p.id, audio: p.audio });
+      case 'mod': return this.modOp(p, m);
       case 'av': return this.av(p, m);
       case 'book': return this.book(p, m);
       case 'chan': return this.chan(p, m);
@@ -584,6 +630,10 @@ export class Office {
     } else if (m.handle) {
       this.sendTo(p, { t: 'error', message: `sign in to use @${clip(m.handle, 253)}; walking in as a guest` });
     }
+    if (this.roleOf(p) === 'banned') {
+      p.greeting = false;
+      return this.sendOff(p, 'You were banned from this office.');
+    }
     // Their actor entity has their character, last status and notes kept for them.
     const key = this.actorKey(p);
     if (key) arrival = await this.ref(`actor:${key}`).arrive().catch((e) => ({ error: e.message }));
@@ -606,6 +656,7 @@ export class Office {
       p.x = at.x; p.y = at.y;
     }
     p.ready = true;
+    p.shownRole = this.roleOf(p);
     this.replaceOlder(p);
     this.sendTo(p, {
       t: 'welcome', id: p.id, now: this.now(), you: this.publicPeer(p),
@@ -672,6 +723,8 @@ export class Office {
   chat(p, m) {
     const text = clip(m.text, 500);
     if (!text) return;
+    const muted = this.mutedUntil(p);
+    if (muted) return this.sendTo(p, { t: 'error', message: `a moderator muted you until ${stamp(muted)}` });
     const t = this.now();
     p.chatTimes = p.chatTimes.filter((ts) => t - ts < 5000);
     if (p.chatTimes.length >= 6) return this.sendTo(p, { t: 'error', message: 'slow down a little' });
@@ -1034,6 +1087,132 @@ export class Office {
   }
 
   nextRoomEvent() { return nextRoomEvent(this.bookings, this.now()); }
+
+  // ---- server roles and moderation (public/js/roles.js, MOD) ---------------
+  // Someone's role, from who they proved they are: the roles:main directory
+  // as mirrored, on top of the env owners and admins. Null p: an observer.
+  roleOf(p) {
+    if (!p) return 'observer';
+    return effectiveRole({ did: p.did || p.authDid, kind: p.kind, operator: p.operator }, this.mirror.get('roles:main') || {}, this.roleEnv);
+  }
+
+  // The same for an MCP session that may not have joined: { did, operator }.
+  roleFor({ did = null, operator = false } = {}) {
+    return effectiveRole({ did, kind: 'agent', operator, mcp: true }, this.mirror.get('roles:main') || {}, this.roleEnv);
+  }
+
+  // Whom roles changed for listen here (the MCP hub re-lists its tools).
+  onRoles(fn) { this.roleListeners.add(fn); return () => this.roleListeners.delete(fn); }
+
+  // The directory changed: everyone sees the new badges, the banned leave.
+  rolesChanged() {
+    for (const q of [...this.peers.values()]) {
+      if (!q.ready || q.kind === 'freeq') continue;
+      const role = this.roleOf(q);
+      if (role === q.shownRole) continue;
+      q.shownRole = role;
+      if (role === 'banned') this.sendOff(q, 'You were banned from this office.');
+      else this.broadcast({ t: 'peer', id: q.id, role });
+    }
+    for (const fn of this.roleListeners) { try { fn(); } catch (e) { console.error('roles listener', e.message); } }
+  }
+
+  mutedUntil(p) {
+    const t = Math.max(p.mutedUntil || 0, this.mutes.get(this.ownerKey(p)) || 0);
+    return t > this.now() ? t : 0;
+  }
+
+  // Out of the office, and told why. Their client stays closed.
+  sendOff(q, text) {
+    this.sendTo(q, { t: 'kicked', text });
+    try { q.ws.close(KICKED, 'sent out'); } catch { /* already gone */ }
+    this.leave(q);
+  }
+
+  // Who a moderator means, and whether they may act on them.
+  target(p, to, verb) {
+    const q = this.findPeer(to);
+    if (!q) return { error: `nobody called ${clip(to, 40)} is here` };
+    if (q === p) return { error: `you can't ${verb} yourself` };
+    const mine = this.roleOf(p), theirs = this.roleOf(q);
+    if (mine !== 'owner' && rank(theirs) >= rank(mine)) return { error: `you can't ${verb} ${q.name}: they're a${/^[aeiou]/.test(theirs) ? 'n' : ''} ${roleLabel(theirs).toLowerCase()}` };
+    return { q };
+  }
+
+  // MOD.api, after Office.call checked the role.
+  async modCall(p, method, [a, b, c] = []) {
+    if (method === 'people') {
+      return {
+        online: [...this.peers.values()].filter((q) => q.ready).map((q) => ({ id: q.id, name: q.name, handle: q.handle || null, did: q.did || null, kind: q.kind, role: this.roleOf(q), ...(this.mutedUntil(q) ? { muted: this.mutedUntil(q) } : {}), zone: zoneAt(q.x, q.y)?.id || null })),
+        granted: this.mirror.get('roles:main') || {},
+      };
+    }
+    if (method === 'removeItem') {
+      const got = await this.ref('floor:main').remove(clip(a, 16));
+      return got ? { ok: true } : { error: 'that isn\'t on the floor any more' };
+    }
+    if (method === 'grant') {
+      let did = null, info = {};
+      if (/^did:/.test(String(a))) {
+        did = clip(a, 253);
+        const q = [...this.peers.values()].find((x) => x.did === did);
+        if (q) info = { name: q.name, handle: q.handle || null };
+      } else {
+        const q = this.findPeer(a);
+        if (!q) return { error: `nobody called ${clip(a, 40)} is here: give their DID` };
+        if (!q.did) return { error: `${q.name} isn't signed in, so they can't have a role` };
+        did = q.did; info = { name: q.name, handle: q.handle || null };
+      }
+      if (!GRANTABLE.includes(b)) return { error: `pick one of ${GRANTABLE.join(', ')}` };
+      return this.ref('roles:main').grant(this.who(p), did, b, info);
+    }
+    const verb = { kick: 'kick', mute: 'mute', unmute: 'unmute', move: 'move' }[method];
+    if (!verb) throw new Error(`mod has no method ${method}`);
+    const { q, error } = this.target(p, a, verb);
+    if (error) return { error };
+    if (method === 'kick') {
+      this.sendOff(q, `${p.name} sent you out of the office${b ? `: ${clip(b, 200)}` : '.'}`);
+      return { ok: true };
+    }
+    if (method === 'mute' || method === 'unmute') {
+      const until = method === 'mute' ? this.now() + num(b, 1, 1440, 10) * 60000 : 0;
+      if (until) this.mutes.set(this.ownerKey(q), until); else this.mutes.delete(this.ownerKey(q));
+      q.mutedUntil = until;
+      if (until) q.audio = false;
+      this.onChange();
+      this.broadcast({ t: 'peer', id: q.id, muted: until, ...(until ? { audio: false } : {}) });
+      this.sendTo(q, { t: 'toast', text: until ? `🔇 ${p.name} muted you until ${stamp(until)}${c ? `: ${clip(c, 200)}` : ''}` : `🔊 ${p.name} unmuted you` });
+      return until ? { until } : { ok: true };
+    }
+    // move
+    const want = String(b || 'lobby').trim().toLowerCase();
+    const zone = map.ZONES.find((z) => z.id === want || z.name.toLowerCase() === want || (z.channel && z.channel.toLowerCase() === `#${want.replace(/^#/, '')}`));
+    if (!zone) return { error: `no area called ${clip(b, 40)}` };
+    const from = zoneAt(q.x, q.y);
+    const at = openSpot((zone.x0 + zone.x1 + 1) / 2, (zone.y0 + zone.y1 + 1) / 2, [...this.peers.values()].filter((x) => x.ready && x !== q));
+    Object.assign(q, { x: at.x, y: at.y, seat: null, moving: false, video: false, screen: false });
+    this.sendTo(q, { t: 'bounce', x: q.x, y: q.y, room: zone.id, moved: true, text: `${p.name} moved you to ${zone.name}` });
+    this.broadcast({ t: 'move', id: q.id, x: q.x, y: q.y, dir: q.dir, moving: false, seat: null }, q);
+    this.broadcast({ t: 'peer', id: q.id, video: false, screen: false });
+    if (from !== zone) {
+      const who = this.who(q);
+      if (from) this.publish(`zone:${from.id}`, { type: 'exit', who });
+      this.publish(`zone:${zone.id}`, { type: 'enter', who });
+    }
+    return { ok: true, zone: zone.id };
+  }
+
+  // The admin panel: { t: 'mod', op, ref?, to?, reason?, minutes?, place?, id?, role? },
+  // answered with { t: 'modres', ref, op, result }.
+  async modOp(p, m) {
+    const args = {
+      people: [], kick: [m.to, m.reason], mute: [m.to, m.minutes, m.reason], unmute: [m.to],
+      move: [m.to, m.place], removeItem: [m.id], grant: [m.to, m.role],
+    }[m.op];
+    if (!args) return;
+    const result = await this.call(p, 'mod:main', m.op, args).catch((e) => ({ error: e.message }));
+    this.sendTo(p, { t: 'modres', ref: m.ref ?? null, op: m.op, result });
+  }
 
   showOut(q, room, text) {
     q.x = room.door.x; q.y = room.door.y; q.seat = null; q.moving = false;

@@ -587,3 +587,22 @@ input, select, textarea { font: inherit; color: inherit; }
 .ws-menu span { width: 22px; text-align: center; font-size: 17px; }
 .ws-menu hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 4px 0; }
 .ws.small .ws-start span { display: none; }
+
+/* Server roles: badges, and the moderation panel (admin.js) */
+.badge.role { margin-left: 4px; }
+.badge.role-owner { background: #fef3c7; color: #92400e; }
+.badge.role-admin { background: #dbeafe; color: #1d4ed8; }
+.badge.role-moderator { background: #dcfce7; color: #166534; }
+.badge.role-banned { background: #fee2e2; color: #b91c1c; }
+.people-list .who b .badge.role-owner { color: #92400e; }
+.people-list .who b .badge.role-admin { color: #1d4ed8; }
+.people-list .who b .badge.role-moderator { color: #166534; }
+.btn.danger { color: #b91c1c; }
+.admin-modal .adm-list { display: flex; flex-direction: column; gap: 6px; }
+.admin-modal .adm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.admin-modal .adm-row .grow { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.admin-modal .adm-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.admin-modal .adm-acts .btn { padding: 4px 8px; font-size: 12px; }
+.admin-modal .adm-grant { margin-top: 10px; flex-wrap: wrap; }
+.admin-modal .adm-grant input { flex: 1 1 200px; min-width: 0; }
+.mod-row { margin-top: 6px; }

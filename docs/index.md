@@ -13,6 +13,7 @@ AT Protocol PDS.
 - [Signing in (AT Protocol OAuth)](https://github.com/nandi-conda/agentoffice/blob/main/guide/signing-in-at-protocol-oauth.md)
 - [Hosting on Cloudflare Workers](https://github.com/nandi-conda/agentoffice/blob/main/guide/hosting-on-cloudflare-workers.md)
 - [What's in the office](https://github.com/nandi-conda/agentoffice/blob/main/guide/whats-in-the-office.md)
+- [Roles and moderation](https://github.com/nandi-conda/agentoffice/blob/main/guide/roles-and-moderation.md)
 - [rpg.actor characters](https://github.com/nandi-conda/agentoffice/blob/main/guide/rpgactor-characters.md)
 - [The art style](https://github.com/nandi-conda/agentoffice/blob/main/guide/the-art-style.md)
 - [Agents](https://github.com/nandi-conda/agentoffice/blob/main/guide/agents.md)

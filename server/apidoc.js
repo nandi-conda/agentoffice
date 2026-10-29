@@ -11,7 +11,8 @@
 import { KINDS, MIRRORED } from './entities/kinds.js';
 import { BUILTIN_API, describeKind, inputSchema, paramList } from './entities/schema.js';
 import { BINDINGS, CLASSES } from './entities/bindings.js';
-import { WORLD, INVENTORY } from './office.js';
+import { WORLD, INVENTORY, MOD } from './office.js';
+import { CAPS, ROLES } from '../public/js/roles.js';
 
 // Every address the office knows of, by kind ('desk' → ['desk-1', …]).
 function instancesOf(kind) {
@@ -46,6 +47,7 @@ export function describeApi({ kinds = KINDS, wrangler = null, plugins = [] } = {
   });
   // Not a Durable Object of its own: the World serves it, always for the caller.
   entities.push({ kind: 'inventory', doc: INVENTORY.doc, api: INVENTORY.api, events: {}, class: 'Office', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], instances: ['me'] });
+  entities.push({ kind: 'mod', doc: MOD.doc, api: MOD.api, events: {}, class: 'Office', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], instances: ['main'] });
   return {
     world: { kind: 'world', address: 'world:main', binding: BINDINGS.world, doClass: CLASSES[BINDINGS.world], ...WORLD },
     entities,
@@ -88,7 +90,10 @@ export function generatedTools(api) {
         kind: e.kind, method,
         description: `${spec.doc}${spec.inZone ? ' You must be standing in its zone.' : ''}${spec.atDesk ? ' You must be sitting at a desk: take_desk first.' : ''}${spec.near ? ` You must be within ${spec.near} tiles of it: walk_to it first.` : ''} (Entity ${e.kind}${e.instances?.length === 1 ? `:${e.instances[0]}` : ''}, method ${method}.)`,
         input,
-        readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near && !spec.self,
+        readOnly: !spec.mutates && !spec.who && !spec.inZone && !spec.near && !spec.self && !spec.role,
+        // The least role that may use it (public/js/roles.js): the MCP hub
+        // only lists a tool to callers who have it.
+        role: spec.role || (!spec.mutates && !spec.who && !spec.inZone && !spec.near && !spec.self ? 'observer' : 'guest'),
         needsZone: !!spec.inZone && many,
         address: (args, zone) => `${e.kind}:${spec.self ? 'self' : many ? (args.name || zone) : e.instances[0]}`,
         args: (args) => (flat ? [Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'name' || !many))] : params.map(([k]) => args[k])),
@@ -130,6 +135,8 @@ const flags = (spec) => [
   spec.near && `caller must be within ${spec.near} tiles`,
   spec.self && 'always the caller\'s own (the World picks the address)',
   spec.atDesk && 'caller must sit at a desk',
+  spec.role && `role ≥ ${spec.role}`,
+  spec.cap && `${CAPS[spec.cap] || 'moderator'}s may for anyone (${spec.cap})`,
   spec.internal && 'internal (entity to entity)',
 ].filter(Boolean);
 
@@ -181,7 +188,9 @@ function sections(api) {
   }))];
 }
 
-const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office.';
+const INTRO = 'Generated from the `static api` each entity declares (`server/entities`), the World, `wrangler.toml` and the plugin Workers, so don\'t edit these pages by hand: run `just docs`. The same description is served live as JSON at [`/api/schema`](/api/schema), and every method that is not internal is also an MCP tool at `/mcp`: read-only ones are open to everyone, the rest need you signed in and in the office, and some need a server role (see below). An MCP session only lists the tools its role may use.';
+
+const ACCESS = { observer: 'open', guest: 'signed in, in the office' };
 
 const cell = (s) => String(s).replace(/\|/g, '\\|');
 
@@ -211,8 +220,13 @@ export function renderPages(api) {
     index.push('');
   }
   const tools = generatedTools(api);
+  index.push('## Roles', '', 'Everyone has one server role (`public/js/roles.js`). Signed-in people are members and signed-in agents are agents unless granted something else; people in the office without signing in are guests, and MCP sessions that haven\'t signed in are observers. Owners and admins start from the `OWNER_DIDS` and `ADMIN_DIDS` env vars (without `OWNER_DIDS`, the first `ADMIN_DIDS` entry is the owner); MCP sessions with the operator token (`MCP_TOKEN`) are owners. Admins grant the rest with `mod_grant` or the admin panel.', '', '| Role | |', '| --- | --- |');
+  for (const [r, v] of Object.entries(ROLES)) index.push(`| \`${r}\` ${v.badge} | ${cell(v.doc)} |`);
+  index.push('', '| Capability | Needs |', '| --- | --- |');
+  for (const [c, r] of Object.entries(CAPS)) index.push(`| \`${c}\` | ${r} |`);
+  index.push('');
   index.push('## MCP tools', '', `${tools.length} tools are generated from these methods, next to the hand-written ones (join_office, look, walk_to…).`, '', '| Tool | Access | |', '| --- | --- | --- |');
-  for (const t of tools) index.push(`| \`${t.name}\` | ${t.readOnly ? 'open' : 'signed in, in the office'} | [${t.kind}.${t.method}](${t.kind}.md) |`);
+  for (const t of tools) index.push(`| \`${t.name}\` | ${ACCESS[t.role] || `${t.role} and up, in the office`} | [${t.kind}.${t.method}](${t.kind}.md) |`);
   pages['api/index.md'] = index;
   for (const s of secs) {
     const out = [`# ${s.title}`, '', s.doc, '', ...s.where.map((w) => `- ${w}`), ''];
