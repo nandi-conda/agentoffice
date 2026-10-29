@@ -8,10 +8,10 @@
   --accent-ink: #fff;
   --shadow: 0 10px 30px rgba(20, 16, 12, 0.22), 0 2px 6px rgba(20, 16, 12, 0.12);
   --radius: 14px;
-  --chat-w: 360px;
+  --side-w: 300px;
   /* Edge gaps that clear notches and home indicators, plus the on-screen keyboard (set from JS). */
   --kb: 0px;
-  --g: 14px;
+  --g: 10px;
   --gt: calc(var(--g) + env(safe-area-inset-top, 0px));
   --gr: calc(var(--g) + env(safe-area-inset-right, 0px));
   --gb: calc(var(--g) + env(safe-area-inset-bottom, 0px) + var(--kb));
@@ -21,7 +21,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font: 14px/1.4 Inter, system-ui, -apple-system, sans-serif; }
-canvas#world { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+canvas#world { grid-area: stage; width: 100%; height: 100%; min-width: 0; min-height: 0; display: block; border-radius: var(--radius); touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
 [hidden] { display: none !important; }
 .muted { color: var(--muted); }
@@ -57,19 +57,24 @@ input, select, textarea { font: inherit; color: inherit; }
 .preview canvas { width: 96px; height: 96px; background: repeating-conic-gradient(#ece7df 0 25%, #f7f4ef 0 50%) 0 0/16px 16px; border-radius: 10px; flex: none; }
 
 /* ---- HUD ---- */
-#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
-#hud > * { pointer-events: auto; }
-.hud-tl { position: absolute; top: var(--gt); left: var(--gl); display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none; }
-.hud-tl > * { pointer-events: auto; }
+/* The HUD is a grid: the map gets its own region, panels dock beside and below
+   it instead of floating over it. Overlays (prompt, toasts, video tiles) share
+   the map's cell and only appear when there's something to say. */
+#hud { position: fixed; inset: 0; z-index: 10; display: grid; gap: 10px; padding: var(--gt) var(--gr) var(--gb) var(--gl);
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "stage tl" "stage tr" "stage chat" "bar chat"; }
+#hud.side-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "stage" "stage" "bar"; }
+#hud.side-closed > .hud-tl, #hud.side-closed > .hud-tr, #hud.side-closed > .chat { display: none; }
+.hud-tl { grid-area: tl; display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: #57534e; border-radius: 999px; padding: 2px 8px; }
 .zone-kind.room { background: #7c3aed; }
 .zone-kind.quiet { background: #dc2626; }
 .zone-kind.open { background: #16a34a; }
 .pomo-hud { font-variant-numeric: tabular-nums; }
 
-.hud-tr { position: absolute; top: var(--gt); right: var(--gr); width: 220px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100dvh - 78px - var(--gt)); pointer-events: none; }
-.hud-tr > * { pointer-events: auto; }
-#minimap { width: 220px; height: auto; aspect-ratio: 3 / 2; border-radius: var(--radius); box-shadow: var(--shadow); background: var(--card); cursor: pointer; }
+.hud-tr { grid-area: tr; display: flex; flex-direction: column; gap: 10px; min-height: 0; max-height: 52dvh; }
+#minimap { width: min(100%, 42dvh); align-self: center; height: auto; aspect-ratio: 3 / 2; border-radius: var(--radius); box-shadow: var(--shadow); background: var(--card); cursor: pointer; }
 .people { padding: 4px 6px 6px; min-height: 0; overflow: auto; flex: 0 1 auto; }
 #minimap { flex: none; }
 .people-head { padding: 6px 8px; font-size: 13px; }
@@ -104,8 +109,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .channel-list .who .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #16a34a; margin-right: 4px; vertical-align: 1px; }
 .badge { font-size: 10px; font-weight: 700; background: #cffafe; color: #0e7490; border-radius: 5px; padding: 1px 5px; }
 
-.chat { position: absolute; left: var(--gl); bottom: var(--gb); width: var(--chat-w); display: flex; flex-direction: column; overflow: hidden; }
-.chat-grip { position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; touch-action: none; z-index: 1; }
+.chat { grid-area: chat; position: relative; display: flex; flex-direction: column; overflow: hidden; min-height: 0; align-self: stretch; }
+.chat.collapsed { align-self: end; }
+.chat-grip { display: none; position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; touch-action: none; z-index: 1; }
 .chat-grip::after { content: ''; position: absolute; top: 3px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: rgba(28, 25, 23, 0.16); }
 .chat-grip:hover::after { background: rgba(28, 25, 23, 0.32); }
 .chat.collapsed .chat-grip, .chat.collapsed .chat-log { display: none; }
@@ -115,7 +121,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .chat-head .unread { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; letter-spacing: 0; }
 .chev { margin-left: auto; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: 0.55; margin-right: 4px; }
 [aria-expanded="false"] > .chev { transform: rotate(-135deg); margin-top: 5px; }
-.chat-log { height: var(--chat-h, 190px); max-height: max(80px, calc(100dvh - 300px)); overflow: hidden auto; padding: 2px 12px 6px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; overscroll-behavior: contain; }
+.chat-log { flex: 1; min-height: 60px; overflow: hidden auto; padding: 2px 12px 6px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; overscroll-behavior: contain; }
 .chat-log > :first-child { margin-top: auto; }
 .chat-log .m { overflow-wrap: anywhere; flex: none; }
 .chat-log .m b { font-weight: 600; }
@@ -133,8 +139,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .chat-form .scope.quiet { background: #dc2626; }
 .chat-input { flex: 1; border: 0; background: transparent; padding: 6px; outline: none; min-width: 0; }
 
-/* The toolbar centres itself in the space to the right of the chat panel. */
-.toolbar { position: absolute; bottom: var(--gb); left: calc(var(--gl) + 14px + var(--chat-w)); right: var(--gr); margin-inline: auto; width: fit-content; max-width: calc(100vw - 14px - var(--gl) - var(--gr) - var(--chat-w)); display: flex; gap: 4px; padding: 6px; align-items: center; }
+.toolbar { grid-area: bar; justify-self: center; position: relative; max-width: 100%; display: flex; gap: 4px; padding: 6px; align-items: center; }
 .tb-group { display: flex; gap: 4px; align-items: center; }
 .tb-group + .tb-group { border-left: 1px solid var(--line); padding-left: 4px; }
 .tb { height: 34px; min-width: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: 600 14px Inter, system-ui; cursor: pointer; display: grid; place-items: center; padding: 0 8px; }
@@ -159,7 +164,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .emotes button:hover { background: rgba(28, 25, 23, 0.07); }
 .emotes kbd { position: absolute; right: 2px; bottom: 2px; font-size: 9px; padding: 0 3px; border-radius: 3px; background: rgba(28, 25, 23, 0.5); }
 
-.prompt { position: absolute; bottom: calc(var(--gb) + 64px); left: calc(var(--gl) + 14px + var(--chat-w)); right: var(--gr); margin-inline: auto; width: fit-content; max-width: calc(100vw - var(--gl) - var(--gr)); background: rgba(28, 25, 23, 0.86); color: #fff; padding: 8px 14px; border: 0; border-radius: 999px; display: flex; gap: 8px; align-items: center; font: 500 14px Inter, system-ui, sans-serif; cursor: pointer; }
+.prompt { grid-area: stage; align-self: end; justify-self: center; margin-bottom: 12px; z-index: 2; max-width: calc(100% - 24px); background: rgba(28, 25, 23, 0.86); color: #fff; padding: 8px 14px; border: 0; border-radius: 999px; display: flex; gap: 8px; align-items: center; font: 500 14px Inter, system-ui, sans-serif; cursor: pointer; }
 .prompt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Touch joystick: appears where a drag starts on the floor. */
@@ -167,7 +172,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .stick span { width: 48px; height: 48px; border-radius: 50%; background: rgba(255, 252, 247, 0.92); box-shadow: var(--shadow); }
 .prompt kbd { background: #fff; color: var(--ink); }
 
-.toasts { position: absolute; top: calc(var(--gt) + 50px); left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+.toasts { grid-area: stage; align-self: start; justify-self: center; margin-top: 12px; z-index: 3; max-width: calc(100% - 24px); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
 .toast { background: var(--card); box-shadow: var(--shadow); border-radius: 12px; padding: 10px 14px; display: flex; gap: 10px; align-items: center; pointer-events: auto; animation: pop 0.25s ease-out; max-width: min(460px, 90vw); }
 .toast button { font: 600 12px Inter; border: 0; background: var(--accent); color: #fff; border-radius: 8px; padding: 5px 10px; cursor: pointer; }
 @keyframes pop { from { transform: translateY(-6px); opacity: 0; } }
@@ -254,7 +259,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .room-now.busy { background: #fef2f2; } .room-now.soon { background: #fffbeb; } .room-now.free { background: #f0fdf4; }
 
 /* ---- A/V stage ---- */
-.av-stage { position: absolute; top: calc(var(--gt) + 48px); left: var(--gl); display: flex; flex-direction: column; gap: 8px; max-height: calc(62vh - 110px); overflow-y: auto; padding: 2px; }
+.av-stage { grid-area: stage; align-self: start; justify-self: start; margin: 10px; z-index: 2; display: flex; flex-direction: column; gap: 8px; max-height: calc(100% - 20px); overflow-y: auto; padding: 2px; }
 .tile { position: relative; width: 200px; flex: none; aspect-ratio: 16 / 9; background: #1c1917; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
 .tile.screen { width: min(360px, 40vw); }
 .tile.big { position: fixed; inset: 24px; width: auto; z-index: 30; aspect-ratio: auto; }
@@ -267,23 +272,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .tb.cam.on, .tb.share.on { background: #7c3aed; color: #fff; }
 
 /* Narrow screens: chat stacks above a full-width toolbar. */
-@media (max-width: 900px) {
-  :root { --chat-w: min(360px, calc(100vw - 28px)); }
-  .chat { bottom: calc(var(--gb) + 56px); }
-  .chat-log { max-height: max(70px, calc(100dvh - 380px)); }
-  .toolbar { left: var(--gl); max-width: calc(100vw - var(--gl) - var(--gr)); overflow-x: auto; overflow-y: visible; }
-  .toolbar:has(.pop:not([hidden])) { overflow: visible; }
-  .prompt { left: var(--gl); right: auto; margin: 0; bottom: auto; top: calc(var(--gt) + 48px); max-width: calc(100vw - var(--gl) - var(--gr) - 230px); }
-  .toasts { top: calc(var(--gt) + 90px); }
+@media (max-width: 1000px) {
+  :root { --side-w: 260px; }
+  .status-text { max-width: 110px; }
 }
 @media (max-width: 760px) {
   .tile { width: 120px; }
   .tile.screen { width: min(240px, 60vw); }
-  .hud-tr { width: 150px; }
-  .people-list, .channel-list { max-height: 24dvh; overflow-y: auto; }
   .channel-list .members { display: none; }
-  #minimap { width: 150px; }
-  .status-text { max-width: 84px; }
+  .status-text { display: none; }
   .tb.vec, .zoom-out, .zoom-in { display: none; }
   .profile { grid-template-columns: 1fr; }
 }
@@ -304,36 +301,33 @@ input, select, textarea { font: inherit; color: inherit; }
   .zoom-in, .zoom-out, .emotes kbd { display: none; }
 }
 
-/* ---- phones, portrait: full-width bottom bar, chat as a sheet above it ---- */
-@media (max-width: 600px) {
-  :root { --g: 8px; --chat-w: calc(100vw - var(--gl) - var(--gr)); }
-  .toolbar { left: var(--gl); right: var(--gr); width: auto; max-width: none; justify-content: space-between; padding: 4px; }
+/* ---- phones, portrait: the map on top, everything else docked below it.
+   The side panel (map, people, channels) opens as a sheet over the map. ---- */
+@media (max-width: 600px), (max-width: 760px) and (orientation: portrait) {
+  :root { --g: 6px; }
+  #hud, #hud.side-closed { gap: 6px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "tl" "stage" "chat" "bar"; }
+  #hud.side-closed > .hud-tl, #hud.side-closed > .chat { display: flex; }
+  .hud-tr { grid-area: stage; align-self: start; justify-self: end; z-index: 4; width: min(240px, 70vw); max-height: calc(100% - 12px); margin: 6px; overflow: auto; }
+  .chat { align-self: auto; }
+  .chat-grip { display: block; }
+  .chat.collapsed .chat-grip { display: none; }
+  .chat-log { flex: none; height: var(--chat-h, 26dvh); max-height: 45dvh; }
+  .toolbar { justify-self: stretch; justify-content: space-between; padding: 4px; }
   .tb-group + .tb-group { padding-left: 2px; }
-  .status-text { display: none; }
   .status-btn { padding: 0 12px; }
-  .chat { left: var(--gl); right: var(--gr); width: auto; bottom: calc(var(--gb) + 60px); border-radius: 16px; }
-  .chat-log { height: var(--chat-h, 30dvh); max-height: calc(100dvh - 330px - var(--gt) - var(--kb)); }
-  .hud-tr { width: 132px; gap: 8px; }
-  .people-head .long { display: none; }
-  .people-head .short { display: inline; }
+  .pill { padding: 6px 10px; }
+  .zone .zone-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .zone { max-width: 100%; }
+  .toast { max-width: 100%; }
   /* Collapsed, the chat is just its input row; the expand chevron rides on its right. */
   .chat.collapsed .chat-head { position: absolute; right: 0; top: 0; bottom: 0; width: auto; padding: 0 14px; z-index: 1; }
   .chat.collapsed .chat-head b { display: none; }
   .chat.collapsed .chat-form { padding: 8px 44px 8px 8px; }
-  #minimap { width: 132px; }
-  .people-head, .channels-head { padding: 6px; font-size: 12px; }
-  .people-list, .channel-list { max-height: 30dvh; }
-  .hud-tl { max-width: calc(100vw - 132px - 24px - var(--gl) - var(--gr)); }
-  .pill { padding: 6px 10px; }
-  .zone .zone-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .zone { max-width: 100%; }
-  .prompt { max-width: calc(100vw - 132px - 24px - var(--gl) - var(--gr)); }
-  .toasts { top: calc(var(--gt) + 150px); width: calc(100vw - 2 * var(--g)); }
-  .toast { max-width: 100%; }
-  .av-stage { top: calc(var(--gt) + 96px); max-height: 40dvh; }
 
   /* Popovers become sheets docked above the bottom bar. */
-  .pop { position: fixed; left: var(--gl); right: var(--gr); bottom: calc(var(--gb) + 62px); transform: none; width: auto; }
+  .pop-wrap { position: static; }
+  .pop { left: 0; right: 0; bottom: calc(100% + 8px); transform: none; width: auto; }
   .status-pop { width: auto; }
   .emotes { grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); }
   .emotes button { width: 100%; height: 52px; }
@@ -343,34 +337,22 @@ input, select, textarea { font: inherit; color: inherit; }
   #modal > .card { margin: auto 0 0; width: 100%; max-height: calc(100dvh - var(--gt) - 12px); border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); animation: sheet 0.2s ease-out; }
   .timeline { grid-template-columns: 96px 1fr; }
 
-  /* With the keyboard up, the chat sits right on top of it and the bar steps aside. */
-  .kb-open .toolbar, .kb-open .prompt { display: none; }
-  .kb-open .chat { bottom: calc(var(--g) + var(--kb)); }
-  .kb-open .chat-log { height: auto; max-height: calc(100dvh - var(--kb) - 150px); }
+  /* With the keyboard up, the bar steps aside and the chat sits on the keyboard. */
+  .kb-open .toolbar, .kb-open .prompt, .kb-open .hud-tl { display: none !important; }
+  .kb-open .chat-log { height: 22dvh; }
 }
 @keyframes sheet { from { transform: translateY(40px); opacity: 0; } }
 
-/* ---- phones, landscape: short screen, chat narrows and shortens ---- */
-@media (max-height: 500px) and (orientation: landscape) {
-  :root { --g: 8px; --chat-w: min(300px, 40vw); }
-  .chat { bottom: var(--gb); }
-  .chat-log { height: var(--chat-h, 110px); max-height: calc(100dvh - 120px - var(--gt) - var(--kb)); }
-  .toolbar { left: calc(var(--gl) + 8px + var(--chat-w)); max-width: calc(100vw - 8px - var(--gl) - var(--gr) - var(--chat-w)); padding: 4px; }
+/* ---- phones, landscape: a narrow side column, panels behind the toggle ---- */
+@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+  :root { --g: 6px; --side-w: min(280px, 38vw); }
+  #hud { gap: 6px; }
+  .hud-tr { max-height: 50dvh; overflow: auto; }
   .status-text { display: none; }
-  .hud-tr { width: 150px; gap: 6px; max-height: calc(100dvh - 70px - var(--gt)); }
-  #minimap { width: 150px; }
-  .people-list, .channel-list { max-height: 34dvh; }
-  .prompt { left: calc(var(--gl) + 8px + var(--chat-w)); right: calc(var(--gr) + 160px); top: auto; margin-inline: auto; bottom: calc(var(--gb) + 60px); max-width: none; }
-  .toasts { top: var(--gt); width: min(460px, calc(100vw - 340px)); }
-  .av-stage { top: calc(var(--gt) + 44px); max-height: calc(100dvh - 220px); }
-  .pop { bottom: calc(100% + 10px); }
+  .toolbar { padding: 4px; }
   #modal { padding: 8px; }
   #modal > .card { max-height: calc(100dvh - 16px); }
-  .kb-open .chat-log { height: auto; max-height: calc(100dvh - var(--kb) - 110px); }
   .kb-open .toolbar, .kb-open .hud-tl, .kb-open .hud-tr, .kb-open .chat-head, .kb-open .chat-grip { display: none; }
-  .kb-open .chat-log { padding-top: 8px; }
-  .people-head .long { display: none; }
-  .people-head .short { display: inline; }
 }
 
 /* plugin objects (jukebox, vending machine, 8-ball, kiosk) */

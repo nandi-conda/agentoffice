@@ -45,6 +45,8 @@ const canvas = $('#world');
 const R = createRenderer(canvas);
 R.resize();
 addEventListener('resize', () => { R.resize(); clampZoom(); });
+// The map's region changes size when panels dock, collapse or the keyboard opens.
+new ResizeObserver(() => { R.resize(); clampZoom(); }).observe(canvas);
 
 function clampZoom() {
   const levels = R.zoomLevels();
@@ -443,7 +445,27 @@ function pushLog(d, quiet = false) {
 
 // The chat panel collapses to its input row and resizes from its top edge.
 const chatEl = $('.chat'), chatHead = $('.chat-head'), unreadEl = $('.chat-head .unread');
-let chatCollapsed = store.get('chatCollapsed', phone()), unread = 0;
+
+// The side panel (zone, minimap, people, channels, chat) docks right of the map
+// on wide screens; on phones the minimap/people/channels open as a sheet over it.
+const hud = $('#hud'), sideBtn = $('.side-btn');
+const phoneLayout = matchMedia('(max-width: 600px), (max-width: 760px) and (orientation: portrait)');
+const sideKey = () => (phoneLayout.matches ? 'sideOpenPhone' : 'sideOpen');
+function setSide(open, save = true) {
+  hud.classList.toggle('side-closed', !open);
+  sideBtn.setAttribute('aria-pressed', String(open));
+  if (save) store.set(sideKey(), open);
+}
+const loadSide = () => setSide(store.get(sideKey(), !phoneLayout.matches), false);
+loadSide();
+phoneLayout.addEventListener('change', loadSide);
+sideBtn.addEventListener('click', () => setSide(hud.classList.contains('side-closed')));
+// Opens whatever the chat needs to be typed into, then focuses it.
+function focusChat() {
+  if (!phoneLayout.matches && hud.classList.contains('side-closed')) setSide(true);
+  chatIn.focus();
+}
+let chatCollapsed = store.get('chatCollapsed', coarse && phone()), unread = 0;
 function setUnread(n) { unread = n; unreadEl.textContent = n > 99 ? '99+' : n; unreadEl.hidden = !n; }
 function setChatCollapsed(c) {
   chatCollapsed = c; store.set('chatCollapsed', c);
@@ -461,7 +483,7 @@ $('.chat-grip').addEventListener('pointerdown', (e) => {
   const grip = e.currentTarget, startY = e.clientY, startH = log.getBoundingClientRect().height;
   grip.setPointerCapture(e.pointerId);
   const move = (ev) => {
-    const h = Math.max(80, Math.min(innerHeight - 220, startH + startY - ev.clientY));
+    const h = Math.max(80, Math.min(innerHeight * 0.45, startH + startY - ev.clientY));
     chatEl.style.setProperty('--chat-h', `${Math.round(h)}px`);
     stickToBottom();
   };
@@ -782,7 +804,7 @@ function openProfile(p) {
   modal.body.querySelector('.act-mention')?.addEventListener('click', () => {
     modal.close();
     chatIn.value = `@${(p.handle || p.name).replace(/\s+/g, '')} `;
-    chatIn.focus();
+    focusChat();
   });
 }
 
@@ -1175,7 +1197,8 @@ addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) { keys.add(key); e.preventDefault(); }
   else if (key === 'e' || key === ' ') { interact(nearestInteractable(me.x, me.y)); e.preventDefault(); }
-  else if (key === 'Enter') { chatIn.focus(); e.preventDefault(); }
+  else if (key === 'Enter') { focusChat(); e.preventDefault(); }
+  else if (key === '\\') setSide(hud.classList.contains('side-closed'));
   else if (key === 'm') toggleMic();
   else if (key === 'n') toggleMusic();
   else if (key === 'b') openSchedule();
@@ -1190,6 +1213,8 @@ addEventListener('keyup', (e) => keys.delete(e.key.length === 1 ? e.key.toLowerC
 addEventListener('blur', () => keys.clear());
 
 function tapAt(sx, sy, touch = false) {
+  const c = canvas.getBoundingClientRect();
+  sx -= c.left; sy -= c.top;
   const hit = R.hitPeer(sx, sy, [...peers.values()], touch ? 40 : 28);
   if (hit) return openProfile(hit);
   const w = R.toWorld(sx, sy);
