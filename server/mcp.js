@@ -481,6 +481,31 @@ export class McpHub {
         return json({ arrived: ok, at: { x: round(c.me.x), y: round(c.me.y) }, zone: zoneAt(c.me.x, c.me.y)?.name, target: target.label });
       });
 
+    // Your own avatar (the one your browser shows when it's signed in as the
+    // same identity), moved through your actor: no join_office needed, and
+    // it doesn't open a second presence.
+    tool('move_me', 'Walk the avatar of the identity you are signed in as, the one your browser shows: you watch it walk there on screen. No join_office needed. If you are not in the office, it is where you come back. `place` is a zone, #channel, seat or desk id, furniture id or a person; or give x/y in tiles. teleport=true appears there instead. Moderators may move someone else with `person` (people.move).',
+      {
+        place: z.string().max(253).optional(), x: z.number().optional(), y: z.number().optional(),
+        teleport: z.boolean().optional(), person: z.string().max(253).optional().describe('Someone else (moderators): peer id, name or handle'),
+      },
+      async ({ place, x, y, teleport, person }) => {
+        if (!agent.canAct) return fail(SIGN_IN_HELP);
+        let key = agent.identity?.did || null;
+        if (person) {
+          if (!can(agent.role, 'people.move')) return fail('moving other people needs the moderator role (people.move)');
+          const q = office.findPeer(person);
+          if (!q) return fail(`nobody called ${person} is here`);
+          key = office.ownerKey(q);
+        }
+        if (!key) return fail('sign in as an AT Protocol identity first: move_me moves the avatar that identity has');
+        if (place === undefined && (x === undefined || y === undefined)) return fail('give a place, or x and y');
+        const who = { key: agent.identity?.did || 'operator', role: agent.role, name: agent.identity?.handle || 'operator' };
+        const r = await office.ref(`actor:${key}`).moveTo(who, { place, x, y, teleport });
+        if (r.error) return fail(r.error);
+        return json({ ...r, zone: ZONES.find((z) => z.id === r.zone)?.name || r.zone, note: r.online ? (teleport ? 'there now' : 'walking there now') : 'not in the office: that is where they come back' });
+      });
+
     // Until the World has the agent at that desk, so the next call (a
     // workstation tool, say) finds them there. Gives up after a second.
     const atDesk = async (id) => {

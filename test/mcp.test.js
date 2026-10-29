@@ -361,3 +361,20 @@ test('logs_stream pushes matching entries as log notifications', async () => {
   await c.close();
   setLogSink({ buffer: null });
 });
+
+test('move_me walks the browser avatar of the signed-in identity', async () => {
+  const { connect, office } = await setup();
+  const sent = [];
+  const ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)), on() {}, close() {} };
+  const p = office.open(ws, { did: 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa' });
+  await office.message(p, JSON.stringify({ t: 'hello', name: 'V' }));
+  const c = await connect({ authorization: 'Bearer rmcp_good', 'x-atproto-pds': 'https://roost.test' });
+  const r = await call(c, 'move_me', { place: 'kitchen' });
+  assert.equal(r.online, true);
+  const walk = sent.filter((m) => m.t === 'walk').at(-1);
+  assert.ok(walk && walk.x === r.x && walk.y === r.y);
+  // Still one avatar: the MCP session didn't join.
+  assert.equal(office.summary().online.filter((q) => q.did === 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa').length, 1);
+  await assert.rejects(call(c, 'move_me', { place: 'lobby', person: 'V' }), /moderator/);
+  await c.close();
+});

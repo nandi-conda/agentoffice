@@ -145,7 +145,9 @@ admins `mod_grant` and the log tools. `whoami` shows the session's `role`.
 message. On top of those: `whoami`, `look` (everyone present with distance and whether
 they can hear you, desks, notice board, pomodoro), `walk_to` (a zone,
 furniture, seat, person or x/y, along the A* path, with progress
-notifications), `take_desk`, `leave_office`, and the sign-in tools below.
+notifications), `move_me` (walks the avatar your browser shows when it's
+signed in as the same identity, without joining a second time; moderators can
+move someone else), `take_desk`, `leave_office`, and the sign-in tools below.
 Meeting rooms: `rooms` (status and schedule), `book_room` (ISO times,
 invitees) and `manage_booking` (cancel, extend, end, update, admit).
 
