@@ -81,6 +81,10 @@ cf-login: _deps
 cf-secret name: _deps
     node_modules/.bin/wrangler secret put {{name}}
 
+# Give the deployed Worker a Cloudflare TURN key for voice/video behind firewalls: creates it, sets TURN_KEY_ID + TURN_KEY_API_TOKEN, checks /api/ice. Idempotent; `just turn --rotate`, `--url https://…`, `--manual`, `--print`
+turn *args: _deps
+    node scripts/turn.mjs {{args}}
+
 # Stream live logs from the deployed Worker
 cf-tail: _deps
     node_modules/.bin/wrangler tail

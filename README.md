@@ -165,17 +165,36 @@ Realtime TURN key fixes that: the office hands each browser short-lived TURN
 credentials from `GET /api/ice`, and calls that can't go direct are relayed
 through Cloudflare (UDP 3478, or TLS on 443). Media stays end-to-end encrypted.
 
-1. In the Cloudflare dashboard open **Realtime → TURN Server** and click
-   **Create** (any name). It shows a **Turn Token ID** and an **API Token**;
-   copy both (the token is shown once).
-2. Set them as secrets:
+Run this once after your first `just deploy`:
 
-   ```sh
-   just cf-secret TURN_KEY_ID          # paste the Turn Token ID
-   just cf-secret TURN_KEY_API_TOKEN   # paste the API Token
-   ```
+```sh
+export CLOUDFLARE_API_TOKEN=…   # a custom API token, see below
+just turn
+```
 
-   On Node, export `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` instead.
+It creates a TURN key named after the Worker through the Cloudflare API, pipes
+its id and secret into `wrangler secret put TURN_KEY_ID` / `TURN_KEY_API_TOKEN`,
+then polls `https://<your office>/api/ice` until it returns TURN servers and
+deletes older keys of the same name. Running it again does nothing while
+`/api/ice` says `"turn": true`; `just turn --rotate` makes a fresh key anyway.
+The office URL comes from `--url`, `PUBLIC_URL` (env or `[vars]`), or your
+`workers.dev` subdomain.
+
+`wrangler login` alone can't create the key, because its OAuth scopes don't
+include Realtime. Create a token at
+[dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+→ **Create Token** → **Edit Cloudflare Workers** template (wrangler needs it
+for the secrets), and add one more permission: **Account → Realtime → Edit**
+(listed as **Calls** on older accounts). It is sent as `Authorization: Bearer <token>`; a Global API
+Key works too, as `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL`. With several
+accounts, also set `CLOUDFLARE_ACCOUNT_ID`.
+
+Without such a token, `just turn` asks you to paste a key made by hand
+(`just turn --manual` skips straight to that): in the dashboard open
+**Realtime → TURN Server** and click **Create** (any name); it shows a
+**Turn Token ID** and an **API Token** (shown once). On Node,
+`just turn --print` prints `TURN_KEY_ID=…` and `TURN_KEY_API_TOKEN=…` to export
+instead of setting Worker secrets.
 
 The server mints one 24-hour credential and re-mints it 6 hours before it
 expires. Without the secrets, or if Cloudflare can't be reached, `/api/ice`
